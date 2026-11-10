@@ -62,6 +62,19 @@
       "evidenceRequired": ["process-inventory", "qmp-responses"]
     },
     {
+      "id": "GA-CORE-001",
+      "title": "认证 Guest Agent 的截图、输入与中文",
+      "category": "computer_use",
+      "level": "P0",
+      "preconditions": ["G2 桌面已登录", "Guest Agent 以非特权用户运行", "Host 持有短期 RPC 令牌"],
+      "steps": ["无令牌访问", "能力查询", "截图", "点击与 ASCII 输入", "中文输入", "错误令牌访问"],
+      "completion": {
+        "mode": "machine",
+        "checks": ["无令牌和错误令牌均返回 401", "截图是可解码 PNG 且尺寸正确", "Guest 文件内容的 UTF-8 SHA256 与输入逐字一致"]
+      },
+      "evidenceRequired": ["http-status", "screenshot-sha256", "guest-file-sha256"]
+    },
+    {
       "id": "CUA-SHOT-001",
       "title": "截图与显示元数据",
       "category": "computer_use",

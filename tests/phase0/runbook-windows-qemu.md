@@ -151,3 +151,66 @@ cloud-init/LightDM 注意事项：
 - 验证账号加入 `nopasswdlogin`，并在 runcmd 中 `passwd -d aib`；锁定密码时 LightDM 自动登录未完成。
 - 桌面安装完成后重启进入 graphical target；本次结果以 QMP 截图、xdotool 和 Guest 文件检查为准。
 
+## 8. 认证 Guest Agent 验证
+
+Go Guest Agent 已在 Linux X11 上实现：
+
+- `GET /v1/capabilities`、`GET /v1/desktop`
+- `GET /v1/screenshot`：Guest 内 X11 截图并编码为 PNG
+- `POST /v1/input`：点击、移动、滚动、拖拽、按键、ASCII/Unicode 输入、等待
+- 除 `/healthz`、`/readyz` 外，所有 `/v1/*` 必须携带 `Authorization: Bearer <token>`
+
+构建和部署：
+
+```bash
+GOOS=linux GOARCH=amd64 go build -o guest-agent-linux-amd64 ./services/guest-agent/cmd/guest-agent
+scp.exe -P 10023 -i <id_ed25519> guest-agent-linux-amd64 aib@127.0.0.1:/tmp/guest-agent
+```
+
+QEMU 需要额外转发 Guest RPC（仅宿主回环）：
+
+```text
+-netdev user,id=n0,hostfwd=tcp:127.0.0.1:10023-:22,hostfwd=tcp:127.0.0.1:17611-:7611
+```
+
+在 Guest 内以非特权 `aib` 用户启动：
+
+```bash
+DISPLAY=:0 nohup /tmp/guest-agent \
+  -addr 0.0.0.0:7611 \
+  -token-file /home/aib/.agent-in-box-token \
+  >/tmp/guest-agent.log 2>&1 </dev/null &
+```
+
+然后运行 `tests/phase0/scripts/phase0-guest-agent-test.ps1`。该脚本用 Unicode 码点构造中文，并用 SHA256 校验 Guest 文件；不要把中文直接写进无 BOM 的 `.ps1`，Windows PowerShell 5.1 会按 ANSI 读取；也不要用 SSH 控制台输出判断中文是否正确。
+
+X11 Unicode 输入实现注意：
+
+- 非 Latin-1 字符使用 `0x01000000 | codepoint` keysym，并临时映射到空闲 keycode。
+- 不能在每个字符后立即恢复映射，也不能无间隔复用同一 keycode；X 客户端是在处理事件时解析 keysym。当前实现为每个临时映射字符保留 75ms 处理窗口，整段结束后 100ms 再恢复原映射。
+- 该路径是经验证的 X11 方案；Wayland 的输入与截图仍需单独验证，不能据此宣称 Wayland 已支持。
+
+## 9. Go VmProvider 真实生命周期集成测试
+
+`internal/vmprovider/qemu_integration_test.go` 默认跳过，只在显式配置后操作真实 Hypervisor：
+
+```bash
+GOOS=windows GOARCH=amd64 go test -c -o vmprovider-integration.test.exe ./internal/vmprovider
+```
+
+在 Windows 上设置：
+
+```text
+AGENT_IN_BOX_QEMU_INTEGRATION=1
+AGENT_IN_BOX_QEMU_DIR=<msys64>\ucrt64\bin
+AGENT_IN_BOX_BASE_IMAGE=<images>\noble-server-cloudimg-amd64.img
+AGENT_IN_BOX_VM_STORAGE=<disposable-vm-root>
+AGENT_IN_BOX_SEED_IMAGE=<phase0-linux>\seed.iso
+```
+
+然后运行测试二进制的 `TestQemuProviderIntegration`，或使用 `scripts/run-provider-integration.cmd`。测试覆盖创建、启动、登录、Provider 重启对账、重复 Start/Stop、优雅关机、快照创建/恢复和删除；失败时保留 VM 目录和日志。
+
+2026-11-10 在 H1 实测 **31.83 秒通过**。测试中修复了一个真实问题：MSYS2 QEMU 的 VNC keymap 依赖数据目录，Provider 现在显式添加 `-L <qemu>\..\share\qemu` 并把工作目录设为 VM 目录，避免从 WSL UNC 路径启动时 `Could not open 'en-us'`。
+
+
+

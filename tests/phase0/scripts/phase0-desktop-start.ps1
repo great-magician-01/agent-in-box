@@ -25,7 +25,7 @@ $arguments = @(
   '-device', 'virtio-tablet-pci',
   '-drive', "file=$vmDir\disk.qcow2,if=virtio,format=qcow2",
   '-drive', "file=$vmDir\seed.iso,if=virtio,media=cdrom,format=raw,readonly=on",
-  '-netdev', 'user,id=n0,hostfwd=tcp:127.0.0.1:10023-:22',
+  '-netdev', 'user,id=n0,hostfwd=tcp:127.0.0.1:10023-:22,hostfwd=tcp:127.0.0.1:17611-:7611',
   '-device', 'virtio-net-pci,netdev=n0',
   '-display', 'none',
   '-vnc', '127.0.0.1:1',

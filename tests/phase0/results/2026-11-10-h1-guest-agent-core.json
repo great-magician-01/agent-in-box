@@ -1,0 +1,39 @@
+{
+  "runId": "2026-11-10-h1-guest-agent-core-01",
+  "taskId": "GA-CORE-001",
+  "attempt": 1,
+  "status": "success",
+  "hostProfile": "H1",
+  "guestProfile": "G2",
+  "resourceProfile": "R2",
+  "provider": "qemu-whpx",
+  "engine": "go-guest-agent-x11",
+  "engineVersion": "0.1.0",
+  "startedAt": "2026-11-10T08:05:44Z",
+  "finishedAt": "2026-11-10T08:05:52Z",
+  "durationSeconds": 7.8,
+  "completionEvidence": [
+    {
+      "type": "machine_check",
+      "description": "/healthz is public; /v1/capabilities without a token and /v1/input with a wrong token both returned HTTP 401."
+    },
+    {
+      "type": "machine_check",
+      "description": "Capabilities reported displayServer=x11 with screenshot, input and unicodeInput enabled; /v1/desktop returned 1280x800.",
+      "artifactPath": "%LOCALAPPDATA%\\AgentInBox\\vms\\phase0-desktop\\guest-agent-result.json"
+    },
+    {
+      "type": "machine_check",
+      "description": "Guest Agent /v1/screenshot returned a decodable PNG captured by the Go X11 driver.",
+      "artifactPath": "%LOCALAPPDATA%\\AgentInBox\\vms\\phase0-desktop\\guest-agent-desktop.png",
+      "sha256": "4b14264f359af1292dc90eeb4cfa9489f7d89a1fb6298578ca1a8b6cf23f5675"
+    },
+    {
+      "type": "machine_check",
+      "description": "After agent click, type_text and enter, the guest file containing the Chinese command output matched the expected UTF-8 SHA256 exactly.",
+      "artifactPath": "%LOCALAPPDATA%\\AgentInBox\\vms\\phase0-desktop\\guest-agent-after.png",
+      "sha256": "103bc831998a88ebae1fdf6aa86235e95fea7f2dcdc4cd4cb04b33ce4b57f6fd"
+    }
+  ],
+  "notes": "The agent ran as the unprivileged aib user. The token was copied into a 0600 guest file for this prototype; production must issue short-lived scoped tokens and enforce the Per-VM Lease before input."
+}

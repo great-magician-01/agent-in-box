@@ -292,7 +292,15 @@ func (p *QemuProvider) StartVm(ctx context.Context, vmID string) (VmState, error
 	}
 
 	arguments := buildQemuArgs(metadata, p.config.Accelerator, p.config.CPUModel)
+	// MSYS2 QEMU resolves VNC keymaps such as 'en-us' through its data
+	// directory. Pin it explicitly so startup does not depend on the caller's
+	// working directory (which may even be a UNC path under WSL).
+	dataDir := filepath.Clean(filepath.Join(filepath.Dir(p.config.SystemBinary), "..", "share", "qemu"))
+	if info, err := os.Stat(dataDir); err == nil && info.IsDir() {
+		arguments = append(arguments, "-L", dataDir)
+	}
 	command := exec.Command(p.config.SystemBinary, arguments...)
+	command.Dir = filepath.Dir(metadata.State.DiskPath)
 	configureDetachedProcess(command)
 	stderr, err := os.Create(filepath.Join(filepath.Dir(metadata.State.DiskPath), "qemu-stderr.log"))
 	if err != nil {

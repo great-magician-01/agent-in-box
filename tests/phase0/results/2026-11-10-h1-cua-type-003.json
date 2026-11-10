@@ -1,0 +1,31 @@
+{
+  "runId": "2026-11-10-h1-cua-type-003-01",
+  "taskId": "CUA-TYPE-003",
+  "attempt": 1,
+  "status": "success",
+  "hostProfile": "H1",
+  "guestProfile": "G2",
+  "resourceProfile": "R2",
+  "provider": "qemu-whpx",
+  "engine": "go-guest-agent-x11",
+  "engineVersion": "0.1.0",
+  "startedAt": "2026-11-10T08:05:44Z",
+  "finishedAt": "2026-11-10T08:05:52Z",
+  "completionEvidence": [
+    {
+      "type": "machine_check",
+      "description": "type_text entered an echo command containing ASCII, uppercase, redirection and the Chinese text 你好 into XFCE Terminal; enter executed it."
+    },
+    {
+      "type": "machine_check",
+      "description": "sha256sum of /tmp/aib-guest-agent-unicode.txt in the guest was d75b32114e95b2bc3178d6305d9b586f6c27dfdbd64fa191956164ac8fe82159, identical to the independently computed UTF-8 expectation."
+    },
+    {
+      "type": "machine_check",
+      "description": "Post-input screenshot shows the exact Chinese command in the terminal.",
+      "artifactPath": "%LOCALAPPDATA%\\AgentInBox\\vms\\phase0-desktop\\guest-agent-after.png",
+      "sha256": "103bc831998a88ebae1fdf6aa86235e95fea7f2dcdc4cd4cb04b33ce4b57f6fd"
+    }
+  ],
+  "notes": "Unicode uses temporary X11 keysym remapping. A processing delay is required between remapped runes so clients do not resolve multiple key events against the last mapping."
+}

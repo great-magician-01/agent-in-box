@@ -1,0 +1,30 @@
+{
+  "runId": "2026-11-10-h1-go-provider-life-01",
+  "taskId": "VM-LIFE-002",
+  "attempt": 1,
+  "status": "success",
+  "hostProfile": "H1",
+  "guestProfile": "G1",
+  "resourceProfile": "R1",
+  "provider": "go-qemu-whpx",
+  "engine": "internal/vmprovider",
+  "startedAt": "2026-11-10T08:20:00Z",
+  "finishedAt": "2026-11-10T08:20:32Z",
+  "durationSeconds": 31.83,
+  "completionEvidence": [
+    {
+      "type": "machine_check",
+      "description": "The Go integration test created a qcow2 overlay, started QEMU/WHPX, reached the guest login prompt and stopped through QMP system_powerdown."
+    },
+    {
+      "type": "machine_check",
+      "description": "A second StartVm returned the original PID instead of launching another QEMU process; a second StopVm returned stopped without error."
+    },
+    {
+      "type": "machine_check",
+      "description": "The same test also created and restored the go-integration qcow2 snapshot and deleted the VM.",
+      "artifactPath": "%LOCALAPPDATA%\\AgentInBox\\vms-go-test-output.txt"
+    }
+  ],
+  "notes": "PowerState and GuestHealth are separate fields in vm.json. The provider also needed an explicit QEMU -L data directory so VNC keymap loading does not depend on the caller working directory."
+}

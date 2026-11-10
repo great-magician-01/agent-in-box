@@ -10,9 +10,11 @@
 - **阶段 1.3 完成**：SQLite WAL、外键、内置 Migration Runner、在线备份；项目/VM/会话/任务/Worker/Lease/Outbox/事件去重仓储；幂等任务创建、事务化状态迁移、任务事件与 Outbox 同事务写入；Per-VM Lease 与过期替换。33 个 Vitest 测试和 Go 测试通过。
 - **阶段 0.1 完成**：`tests/phase0/` 已包含测试矩阵、15 项验收任务、结果 Schema、cloud-init 模板和 Windows QEMU/WHPX Runbook。
 - **阶段 0.2 核心链路通过**：H1（Windows 11 家庭版 26200）已用 MSYS2 QEMU 11.1.3 + WHPX 完成 Ubuntu 24.04 G1 的覆盖盘创建、启动（冷启动 14.1 秒）、cloud-init、SSH、QMP 优雅关机和 qcow2 快照恢复；G2 XFCE 桌面已完成 1280x800 截图、1024x768 分辨率切换、绝对鼠标和 ASCII 键盘输入验证。结果见 `tests/phase0/results/`。
-- **Go 原型已落地**：`internal/qmp` 提供受控 QMP 客户端；`internal/vmprovider` 提供 QEMU 覆盖盘/启动/停止/状态对账/快照原型和 Host Inspect。Windows amd64 `vm-supervisor.exe /api/v1/host` 已在本机返回 `ready=true`、`recommendedProvider=qemu-whpx`。
-- **阶段 0 尚未完成**：Hyper-V 备选路径、WHPX 性能与长稳、Supervisor 崩溃接管、认证 Guest Agent、中文输入、Pi Computer Use、Model Broker 和真实机器人长连接仍需验证。默认 Provider 尚未冻结；WHPX 下暂用 `-cpu qemu64`，`-cpu max` 的 SMP 启动卡住问题待查。
-- **下一步**：实现认证 Guest Agent 的截图/输入并接入 Per-VM Lease 前置校验，补 Supervisor 崩溃接管与 WHPX 性能验证，再验证 Pi Computer Use；不提前进入大规模 UI 开发。
+- **Go 原型已落地**：`internal/qmp` 提供受控 QMP 客户端；`internal/vmprovider` 提供 QEMU 覆盖盘/启动/停止/状态对账/快照原型和 Host Inspect；`internal/guestagent` 提供认证 X11 截图、鼠标、键盘和 Unicode 输入。Windows amd64 `vm-supervisor.exe /api/v1/host` 已在本机返回 `ready=true`、`recommendedProvider=qemu-whpx`。
+- **Guest Agent 核心验证通过**：无令牌和错误令牌返回 401；X11 PNG 截图；点击、ASCII 与中文输入的 Guest 文件 SHA256 完全一致。当前仍使用静态测试令牌，未接入短期令牌撤销和 Per-VM Lease。
+- **Go Provider 真实生命周期验证通过**：`TestQemuProviderIntegration` 在 Windows/WHPX 上 31.83 秒完成创建、启动、登录、Provider 重启对账、重复 Start/Stop、优雅关机、快照恢复和删除；对应 VM-LIFE-002 与 VM-RECOV-004 结果已入库。`internal/guestagent` 同时提供带认证错误映射的 Host 侧 Go RPC Client。
+- **阶段 0 尚未完成**：Hyper-V 备选路径、WHPX 性能与长稳、Wayland、Pi Computer Use、Model Broker 和真实机器人长连接仍需验证。默认 Provider 尚未冻结；WHPX 下暂用 `-cpu qemu64`，`-cpu max` 的 SMP 启动卡住问题待查。
+- **下一步**：验证 Pi Worker 的截图/点击工具循环、取消和会话恢复，并补 WHPX 性能与长稳；不提前进入大规模 UI 开发。
 
 1. 先验证 Hypervisor、镜像、Pi Computer Use 和模型代理等高风险链路，再大规模开发 UI。
 2. 每个阶段形成可运行、可测试的纵向能力，避免一次性生成大量空模块。

@@ -1,0 +1,32 @@
+{
+  "runId": "2026-11-10-h1-qemu-whpx-cua-qmp-01",
+  "taskId": "CUA-QMP-001",
+  "attempt": 1,
+  "status": "success",
+  "hostProfile": "H1",
+  "guestProfile": "G2",
+  "resourceProfile": "R2",
+  "provider": "qemu-whpx",
+  "engine": "qmp-input",
+  "startedAt": "2026-11-10T07:30:54Z",
+  "finishedAt": "2026-11-10T07:31:04Z",
+  "durationSeconds": 10.1,
+  "completionEvidence": [
+    {
+      "type": "machine_check",
+      "description": "QMP input-send-event absolute move to normalized (32767,32767) produced xdotool mouse location x:1279 y:799 on a 1280x800 display."
+    },
+    {
+      "type": "machine_check",
+      "description": "After a QMP left click, send-key typed 'touch /tmp/aib-qmp-input-ok' into the focused XFCE terminal; SSH verified the file exists.",
+      "artifactPath": "%LOCALAPPDATA%\\AgentInBox\\vms\\phase0-desktop\\input-result.json"
+    },
+    {
+      "type": "machine_check",
+      "description": "Post-input screendump visibly contains the executed command in the terminal.",
+      "artifactPath": "%LOCALAPPDATA%\\AgentInBox\\vms\\phase0-desktop\\input-after.png",
+      "sha256": "28c24eaac72f971b008b0c68b2954cf67080a963c9c7e06d062868b87a51f16f"
+    }
+  ],
+  "notes": "This validates the QEMU rescue/control channel. It does not replace the authenticated Guest Agent path, Unicode/Chinese input, or Per-VM Lease enforcement."
+}

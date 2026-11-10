@@ -1,0 +1,58 @@
+#cloud-config
+# Phase-0 desktop validation template. Replace __SSH_PUBLIC_KEY__ before use.
+hostname: aib-desktop
+users:
+  - name: aib
+    gecos: Agent-in-Box validation user
+    groups: [sudo, nopasswdlogin]
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    lock_passwd: true
+    ssh_authorized_keys:
+      - __SSH_PUBLIC_KEY__
+ssh_pwauth: false
+disable_root: true
+package_update: true
+package_upgrade: false
+apt:
+  primary:
+    - arches: [default]
+      uri: https://mirrors.tuna.tsinghua.edu.cn/ubuntu/
+  security:
+    - arches: [default]
+      uri: https://mirrors.tuna.tsinghua.edu.cn/ubuntu/
+packages:
+  - xorg
+  - xfce4
+  - xfce4-terminal
+  - lightdm
+  - lightdm-gtk-greeter
+  - mousepad
+  - dbus-x11
+  - xdotool
+  - scrot
+  - x11-utils
+  - x11-xserver-utils
+  - fonts-noto-cjk
+write_files:
+  # Do not write into /home/aib here: write_files runs before users-groups and
+  # would leave a root-owned home directory that prevents the XFCE session.
+  - path: /etc/lightdm/lightdm.conf.d/50-agent-in-box.conf
+    content: |
+      [Seat:*]
+      autologin-user=aib
+      autologin-user-timeout=0
+      user-session=xfce
+      greeter-hide-users=true
+  - path: /etc/agent-in-box/validation-marker
+    content: |
+      phase=0
+      purpose=windows-host-whpx-linux-desktop
+runcmd:
+  - [sh, -c, "printf 'xset s off\nxset -dpms\n' > /home/aib/.xsessionrc && chown aib:aib /home/aib/.xsessionrc"]
+  # LightDM autologin does not complete with a locked password field in this image.
+  # SSH password authentication remains disabled; this is a local validation VM only.
+  - [passwd, -d, aib]
+  - [sh, -c, "echo desktop-packages-ready $(date -Is) > /var/lib/agent-in-box-desktop-ready"]
+  - [systemctl, set-default, graphical.target]
+  - [sh, -c, "systemctl enable lightdm || true"]

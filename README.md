@@ -134,8 +134,13 @@ SQLite 数据库位于数据根目录下的 `agent-in-box.sqlite`，使用 WAL �
 - cloud-init NoCloud 创建验证用户，SSH 经 `127.0.0.1:10022` 读取启动标记成功
 - QMP `system_powerdown` 优雅关机成功
 - qcow2 快照创建、列出和恢复成功，恢复后快照后写入的标记文件消失
+- XFCE + LightDM 桌面在 WHPX 上自动登录，QMP 截图与 `xdotool` 分辨率一致（1280x800，切换 1024x768 后截图尺寸同步变化）
+- QMP 绝对鼠标归一化坐标和 `send-key` ASCII 输入通过验证：在终端输入命令后，Guest 内生成预期文件
+- Go `vm-supervisor.exe /api/v1/host` 在 Windows 上返回 `ready=true`、`recommendedProvider=qemu-whpx`
 
-测试矩阵、验收任务集和结果记录位于 [`tests/phase0/`](tests/phase0/README.md)。当前只完成 G1 Server 的 Hypervisor 核心链路；桌面显示、输入、性能、Supervisor 崩溃接管、Pi Computer Use、Model Broker 和机器人长连接仍未验证，默认 VmProvider 尚未冻结。
+验证中确认的必要配置：桌面 VM 使用 `-vga none -device virtio-gpu-pci -device virtio-tablet-pci`；当前 WHPX 环境暂用 `-cpu qemu64`，`-cpu max` 的启动卡住问题尚未解决。
+
+测试矩阵、验收任务集和结果记录位于 [`tests/phase0/`](tests/phase0/README.md)。当前已完成 G1 Server 生命周期核心链路和 G2 XFCE 桌面的 QMP 显示/输入验证；认证 Guest Agent、中文输入、性能与长稳、Supervisor 崩溃接管、Pi Computer Use、Model Broker 和机器人长连接仍未验证，默认 VmProvider 尚未冻结。
 
 Electron 二进制的失败与代码无关。在网络可用的机器上重试：
 
@@ -172,11 +177,15 @@ WSL 环境还需要可用的图形转发或 Windows 侧运行 Electron。桌面�
 - NestJS 健康检查、运行时信息和持久化模块
 - React 本地页面与 Electron 无特权入口
 - VM Supervisor / Guest Agent 的 Go 健康服务
+- Go QMP 客户端（状态、关机、截图、键盘、绝对鼠标事件）
+- QEMU VmProvider 原型：qcow2 覆盖盘、启动/停止幂等、进程与 QMP 状态对账、快照、控制台地址
+- Windows/Linux Host Inspect：WHPX/KVM、QEMU 加速器、内存和磁盘检查；Windows amd64 版本已在本机实际运行
 
 明确未实现：
 
-- 镜像下载、VM 创建和 Hypervisor 接入
-- Guest Agent 截图与输入
+- 生产级 Image Service（分块续传、下载去重和版本管理）
+- Supervisor 的完整 VM 生命周期 HTTP API 与 ACL；当前仅 Host Inspect 和 Go Provider 原型
+- Guest Agent 截图与输入服务（当前显示/输入验证使用 QEMU QMP/VNC 路径）
 - Pi Worker、模型代理和 Computer Use 执行
 - Router、HTTP 任务 API、Worker 注册表查询接口和任务看板
 - 飞书/QQ 适配器

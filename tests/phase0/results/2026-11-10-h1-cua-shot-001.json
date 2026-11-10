@@ -1,0 +1,28 @@
+{
+  "runId": "2026-11-10-h1-qemu-whpx-cua-shot-01",
+  "taskId": "CUA-SHOT-001",
+  "attempt": 1,
+  "status": "success",
+  "hostProfile": "H1",
+  "guestProfile": "G2",
+  "resourceProfile": "R2",
+  "provider": "qemu-whpx",
+  "engine": "qmp-screendump",
+  "startedAt": "2026-11-10T07:30:00Z",
+  "finishedAt": "2026-11-10T07:33:00Z",
+  "completionEvidence": [
+    {
+      "type": "machine_check",
+      "description": "QMP screendump captured the XFCE desktop at 1280x800; xdotool getdisplaygeometry returned 1280 800.",
+      "artifactPath": "%LOCALAPPDATA%\\AgentInBox\\vms\\phase0-desktop\\desktop.png",
+      "sha256": "3bffc5253bbf1f549ffffc70518888d5d4462c964b0703b37f842b192e43adc3"
+    },
+    {
+      "type": "machine_check",
+      "description": "After xrandr -s 1024x768, a new screendump header reported exactly 1024 768; the display was then restored to 1280x800.",
+      "artifactPath": "%LOCALAPPDATA%\\AgentInBox\\vms\\phase0-desktop\\desktop-1024.ppm",
+      "sha256": "cac1d847d44a2e927b2b3ebd132543105a5ee0c8bc629ab0677297d0f7aba5e5"
+    }
+  ],
+  "notes": "The MSYS2 QEMU build emits PPM for screendump even with a .png filename; the validation harness converts PPM to PNG. Guest Agent screenshot transport still needs its own implementation and authentication test."
+}

@@ -1,0 +1,44 @@
+{
+  "recordedAt": "2026-11-10T07:16:00Z",
+  "hostProfile": "H1",
+  "implementation": "agent-in-box/internal/vmprovider InspectHost (Windows amd64 build)",
+  "result": {
+    "platform": "windows",
+    "architecture": "amd64",
+    "totalMemoryBytes": 33816190976,
+    "freeDiskBytes": 216782774272,
+    "recommendedProvider": "qemu-whpx",
+    "ready": true,
+    "checks": [
+      {
+        "id": "hardware_acceleration",
+        "status": "ok",
+        "message": "WHPX hypervisor is present"
+      },
+      {
+        "id": "hyperv_optional_feature",
+        "status": "unknown",
+        "message": "Hyper-V feature state requires elevated inspection; QEMU/WHPX does not depend on it"
+      },
+      {
+        "id": "qemu_binary",
+        "status": "ok",
+        "message": "QEMU emulator version 11.1.3"
+      },
+      {
+        "id": "qemu_accelerator",
+        "status": "ok",
+        "message": "tcg whpx"
+      },
+      {
+        "id": "memory",
+        "status": "ok"
+      },
+      {
+        "id": "disk",
+        "status": "ok"
+      }
+    ]
+  },
+  "notes": "Produced by the actual Go vm-supervisor.exe /api/v1/host endpoint on the Windows host, not by a WSL simulation."
+}

@@ -75,6 +75,19 @@
       "evidenceRequired": ["screenshot-hash", "display-metadata"]
     },
     {
+      "id": "CUA-QMP-001",
+      "title": "QMP/VNC 救援通道截图与绝对坐标输入",
+      "category": "computer_use",
+      "level": "P0",
+      "preconditions": ["G2 桌面已登录", "QEMU 配置 virtio-gpu 与 virtio-tablet"],
+      "steps": ["QMP screendump", "绝对鼠标移动到右下角", "点击终端", "send-key 输入命令", "Guest 内验证文件"],
+      "completion": {
+        "mode": "machine",
+        "checks": ["截图尺寸与 xdotool 分辨率一致", "绝对指针归一化坐标映射正确", "输入命令在 Guest 内产生预期文件"]
+      },
+      "evidenceRequired": ["before-after-screenshots", "mouse-location", "guest-file-check"]
+    },
+    {
       "id": "CUA-CLICK-002",
       "title": "点击启动器并验证窗口",
       "category": "computer_use",

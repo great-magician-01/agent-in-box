@@ -114,3 +114,40 @@ powershell -NoProfile -File tests\phase0\scripts\phase0-snapshot-restore.ps1 -Sn
 ```
 
 脚本不使用 `-ExecutionPolicy Bypass`，不请求管理员权限。若本机策略禁止本地脚本，应先调整终端策略或由用户手动执行，而不是在自动化中绕过。
+
+## 7. Linux 桌面与显示/输入验证
+
+桌面验证使用 XFCE + LightDM + Xorg，先固定一条可自动化的 X11 路径；Wayland 支持另行验证。
+
+```bash
+# 需要 pycdlib；模板中的 __SSH_PUBLIC_KEY__ 会被替换
+python3 tests/phase0/scripts/build-seed-iso.py \
+  --template tests/phase0/cloud-init/desktop-user-data.yaml \
+  --ssh-public-key <id_ed25519.pub> \
+  --instance-id aib-phase0-desktop-001 \
+  --hostname aib-desktop \
+  --output <vm-dir>/seed.iso
+```
+
+```powershell
+powershell -NoProfile -File tests\phase0\scripts\phase0-desktop-provision.ps1
+powershell -NoProfile -File tests\phase0\scripts\phase0-input-run.ps1
+```
+
+2026-11-10 在 H1 上验证出的必要 QEMU 参数：
+
+| 参数 | 结论 |
+| --- | --- |
+| `-cpu qemu64` | 当前 WHPX + 该 CPU 上 `-cpu max` 在桌面装机后的启动中卡在 SMP 初始化；`qemu64` 可稳定到登录和桌面。后续需评估 `-cpu host` 与按 CPU 特性探测 |
+| `-vga none -device virtio-gpu-pci` | 必须去掉默认 std VGA，否则 Xorg 报 `Cannot run in framebuffer mode` |
+| `-device virtio-tablet-pci` | 提供绝对坐标鼠标；`usb-tablet` 在默认 q35 上因没有 usb-bus 直接失败 |
+| QMP `input-send-event` | 绝对坐标范围为 0..32767；`(32767,32767)` 实测映射到 `x:1279 y:799`（1280x800） |
+| QMP `screendump` | 当前 MSYS2 构建输出 PPM，即使文件名是 `.png`；Provider 需要按内容识别并转换 |
+| QMP `send-key` | 已验证 ASCII 命令输入与回车；中文输入不在 QMP QKeyCode 能力内，需 Guest Agent/输入法或受控剪贴板路径 |
+
+cloud-init/LightDM 注意事项：
+
+- `write_files` 早于 `users-groups`，不要在该阶段写 `/home/aib`，否则 home 会由 root 创建并导致 XFCE 会话退出。
+- 验证账号加入 `nopasswdlogin`，并在 runcmd 中 `passwd -d aib`；锁定密码时 LightDM 自动登录未完成。
+- 桌面安装完成后重启进入 graphical target；本次结果以 QMP 截图、xdotool 和 Guest 文件检查为准。
+

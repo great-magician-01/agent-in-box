@@ -694,7 +694,7 @@ Local Task Events → Outgoing Formatter → Platform REST API
 5. Model Broker 对 Pi 和目标模型的具体协议适配；
 6. QQ 目标机器人类型的实际权限矩阵。
 
-2026-11-10 验证记录：H1（Windows 11 家庭版 26200）上，MSYS2 QEMU 11.1.3 的 WHPX 加速器已实际启动 Ubuntu 24.04 Linux Guest，并通过 SSH、QMP 优雅关机和 qcow2 快照恢复验证；全程普通用户权限，无需 Hyper-V 管理器或系统服务。该结果支持将 QEMU/WHPX 作为 Windows Host 的优先候选 Provider，但在桌面显示、输入、性能、Supervisor 崩溃接管和其他 Windows 版本验证完成前，第 1 项仍不冻结。证据见 `tests/phase0/results/`。
+2026-11-10 验证记录：H1（Windows 11 家庭版 26200）上，MSYS2 QEMU 11.1.3 的 WHPX 加速器已实际启动 Ubuntu 24.04 Linux Guest，并通过 SSH、QMP 优雅关机和 qcow2 快照恢复验证；XFCE 桌面已通过 QMP 截图、分辨率切换、绝对鼠标和 ASCII 键盘输入验证。Go `vm-supervisor.exe` 的 Host Inspect 在该宿主机返回 `ready=true` 和 `recommendedProvider=qemu-whpx`。全程普通用户权限，无需 Hyper-V 管理器或系统服务。该结果支持将 QEMU/WHPX 作为 Windows Host 的优先候选 Provider，但在 WHPX 性能与长稳、认证 Guest Agent、中文输入、Supervisor 崩溃接管和其他 Windows 版本验证完成前，第 1 项仍不冻结。桌面 QEMU 基线固定为 `-vga none -device virtio-gpu-pci -device virtio-tablet-pci`，WHPX 暂用 `-cpu qemu64`。证据见 `tests/phase0/results/`。
 
 ### 18.2 Windows VM 阶段必须冻结
 

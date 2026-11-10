@@ -1,0 +1,36 @@
+{
+  "runId": "2026-11-10-h1-real-browser-scroll-drag-01",
+  "taskId": "CUA-SCROLL-005",
+  "attempt": 1,
+  "status": "failed",
+  "hostProfile": "H1",
+  "guestProfile": "G2",
+  "resourceProfile": "R2",
+  "provider": "qemu-whpx",
+  "engine": "pi-rpc",
+  "engineVersion": "pi 1.5.1 + real model pro",
+  "startedAt": "2026-11-10T10:58:14Z",
+  "finishedAt": "2026-11-10T11:02:16Z",
+  "durationSeconds": 242,
+  "completionEvidence": [
+    {
+      "type": "machine_check",
+      "description": "The real model scrolled the Epiphany test page to BOTTOM MARKER; the window title became bottom-reached."
+    },
+    {
+      "type": "machine_check",
+      "description": "The model then attempted repeated drags (38 tool executions total) but the page never reached bottom-and-drag-ok and the run exceeded the 240-second settle timeout.",
+      "artifactPath": "/home/aib/pi-real-validation/REAL-BROWSER-SCROLL-DRAG-events.jsonl"
+    },
+    {
+      "type": "machine_check",
+      "description": "A guest-side xdotool control test reproduced dragstart without dragenter/dragover on the drop target, so the failure is not attributed to model coordinate choice alone."
+    }
+  ],
+  "error": {
+    "code": "html5_drop_not_completed",
+    "message": "Epiphany 46.5 on the validated X11 stack starts HTML5 drag but does not deliver the drop with synthetic XTEST input; scrolling itself passed.",
+    "stage": "drag"
+  },
+  "notes": "This is a real negative result and a known browser limitation to address or document. Window-manager drag was separately verified with the guest agent."
+}

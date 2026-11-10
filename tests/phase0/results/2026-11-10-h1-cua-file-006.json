@@ -1,0 +1,32 @@
+{
+  "runId": "2026-11-10-h1-real-gui-edit-01",
+  "taskId": "CUA-FILE-006",
+  "attempt": 1,
+  "status": "success",
+  "hostProfile": "H1",
+  "guestProfile": "G2",
+  "resourceProfile": "R2",
+  "provider": "qemu-whpx",
+  "engine": "pi-rpc",
+  "engineVersion": "pi 1.5.1 + real model pro",
+  "startedAt": "2026-11-10T09:49:39Z",
+  "finishedAt": "2026-11-10T09:50:07Z",
+  "durationSeconds": 27.84,
+  "completionEvidence": [
+    {
+      "type": "machine_check",
+      "description": "The model used vm_screenshot, vm_click, ctrl+a, vm_type_text with multiline content and ctrl+s; it did not use bash/read/write/edit tools."
+    },
+    {
+      "type": "machine_check",
+      "description": "sha256sum of /home/aib/aib-edit-test.txt was 428f69f893de5c1e5878783c9883b47710daf3e10c673dacee622ab6e5741808, exactly matching alpha\\nnew-line\\nomega\\n."
+    },
+    {
+      "type": "machine_check",
+      "description": "The final screenshot shows Mousepad with exactly the three expected lines.",
+      "artifactPath": "%LOCALAPPDATA%\\AgentInBox\\vms\\phase0-desktop\\gui-edit-validation.png",
+      "sha256": "a17e044cfb1ca042db207bafe0dfa35e8de518a98ea38753ee10e9a9749f38e3"
+    }
+  ],
+  "notes": "This validates GUI file editing and save through the real model and guest agent, not a direct file write from the host."
+}

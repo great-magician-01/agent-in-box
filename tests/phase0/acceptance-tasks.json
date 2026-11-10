@@ -165,6 +165,19 @@
       "evidenceRequired": ["window-list", "action-trace"]
     },
     {
+      "id": "CUA-DRAG-001",
+      "title": "拖拽窗口标题栏并验证几何变化",
+      "category": "computer_use",
+      "level": "P0",
+      "preconditions": ["G2 桌面存在非最大化窗口"],
+      "steps": ["读取窗口位置", "拖拽标题栏", "再次读取窗口位置"],
+      "completion": {
+        "mode": "machine",
+        "checks": ["窗口位置按拖拽位移变化", "动作有 actionId 审计"]
+      },
+      "evidenceRequired": ["window-geometry-before-after", "action-result"]
+    },
+    {
       "id": "CUA-SCROLL-005",
       "title": "浏览器滚动与拖拽",
       "category": "computer_use",

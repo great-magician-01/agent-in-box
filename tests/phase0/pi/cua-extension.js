@@ -57,9 +57,10 @@ export default function registerComputerUse(pi) {
       x: Type.Number(),
       y: Type.Number(),
       button: Type.Optional(Type.String()),
+      count: Type.Optional(Type.Number()),
     }),
     async execute(_id, params, signal) {
-      return inputResult({ type: "click", point: { x: params.x, y: params.y }, button: params.button }, signal);
+      return inputResult({ type: "click", point: { x: params.x, y: params.y }, button: params.button, count: params.count }, signal);
     },
   });
 
@@ -84,8 +85,42 @@ export default function registerComputerUse(pi) {
   });
 
   pi.registerTool({
-    name: "vm_wait",
-    label: "VM Wait",
+    name: "vm_scroll",
+    label: "VM Scroll",
+    description: "Scroll the VM window at an optional absolute point.",
+    parameters: Type.Object({
+      deltaX: Type.Number(),
+      deltaY: Type.Number(),
+      x: Type.Optional(Type.Number()),
+      y: Type.Optional(Type.Number()),
+    }),
+    async execute(_id, params, signal) {
+      const point = params.x === undefined || params.y === undefined ? undefined : { x: params.x, y: params.y };
+      return inputResult({ type: "scroll", deltaX: params.deltaX, deltaY: params.deltaY, point }, signal);
+    },
+  });
+
+  pi.registerTool({
+    name: "vm_drag",
+    label: "VM Drag",
+    description: "Drag from one absolute desktop coordinate to another in the VM.",
+    parameters: Type.Object({
+      fromX: Type.Number(),
+      fromY: Type.Number(),
+      toX: Type.Number(),
+      toY: Type.Number(),
+    }),
+    async execute(_id, params, signal) {
+      return inputResult({
+        type: "drag",
+        from: { x: params.fromX, y: params.fromY },
+        to: { x: params.toX, y: params.toY },
+      }, signal);
+    },
+  });
+
+  pi.registerTool({
+    name: "vm_wait",    label: "VM Wait",
     description: "Wait before observing the VM again.",
     parameters: Type.Object({ milliseconds: Type.Number() }),
     async execute(_id, params, signal) {

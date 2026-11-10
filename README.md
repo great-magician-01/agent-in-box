@@ -141,6 +141,9 @@ SQLite 数据库位于数据根目录下的 `agent-in-box.sqlite`，使用 WAL �
 - Go Provider 真实集成测试在 Windows/WHPX 上 31.83 秒通过：创建、启动、登录、Provider 重启对账、重复 Start/Stop、优雅关机、快照恢复和删除
 - Pi 1.5.1 RPC + 脚本化模型 + 真实 Guest Agent 的工具循环通过：截图 PNG 回传、点击、中文输入、活跃工具 Abort、Session Resume
 - **真实模型 `pro` 经本地 Model Broker 完成首个 CUA 任务**：13.37 秒内完成截图、中文输入、回车和复核截图，Guest 文件 SHA256 一致；VM 内不含上游 API Key
+- 真实模型继续通过桌面 Home 双击打开 Thunar（25.14 秒）和 Mousepad 多行编辑保存（27.84 秒）
+- WHPX 在桌面 VM 并行运行时连续通过 3 轮 Go Provider 生命周期回归（33.18/31.73/31.27 秒）
+- Epiphany 页面滚动到底部成功，但 HTML5 drag-and-drop 未完成（已记录为失败）；窗口标题栏拖拽由 Guest Agent 独立验证通过
 
 注意：Pi 验证同时使用本地脚本化模型和真实 `pro` 模型。首个真实任务已通过，但单次任务不能代表 Computer Use 成功率基线。验证中出现过一次 Guest 内核 panic，已记录为 WHPX 长稳风险，需重复复测。
 
@@ -187,6 +190,7 @@ WSL 环境还需要可用的图形转发或 Windows 侧运行 Electron。桌面�
 - QEMU VmProvider 原型：qcow2 覆盖盘、启动/停止幂等、进程与 QMP 状态对账、快照、控制台地址
 - Windows/Linux Host Inspect：WHPX/KVM、QEMU 加速器、内存和磁盘检查；Windows amd64 版本已在本机实际运行
 - Linux X11 Guest Agent：Bearer 认证、能力/桌面信息、PNG 截图、鼠标/键盘/Unicode 输入和动作日志
+- `PiWorkerEngine`：Pi RPC 子进程、受控工具暴露、事件映射、Prompt/Steer/Follow-up/Abort、会话归档与原生恢复；包含假 Pi 单元测试和真实 Pi 集成测试
 
 明确未实现：
 
@@ -194,7 +198,7 @@ WSL 环境还需要可用的图形转发或 Windows 侧运行 Electron。桌面�
 - Supervisor 的完整 VM 生命周期 HTTP API 与 ACL；当前仅 Host Inspect 和 Go Provider 原型
 - Guest RPC 的生产级传输、短期令牌签发/撤销和 Per-VM Lease 强制接入；当前验证使用静态测试令牌
 - Wayland 与 Windows Guest 的截图/输入路径
-- Pi Worker、模型代理和 Computer Use 执行
+- Pi Worker 与 Task/Lease/Router 的控制平面接入、生产级 Model Broker 服务
 - Router、HTTP 任务 API、Worker 注册表查询接口和任务看板
 - 飞书/QQ 适配器
 

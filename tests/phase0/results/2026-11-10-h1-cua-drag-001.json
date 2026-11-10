@@ -1,0 +1,25 @@
+{
+  "runId": "2026-11-10-h1-guest-agent-window-drag-01",
+  "taskId": "CUA-DRAG-001",
+  "attempt": 1,
+  "status": "success",
+  "hostProfile": "H1",
+  "guestProfile": "G2",
+  "resourceProfile": "R2",
+  "provider": "qemu-whpx",
+  "engine": "go-guest-agent-x11",
+  "engineVersion": "0.1.0",
+  "startedAt": "2026-11-10T11:08:00Z",
+  "finishedAt": "2026-11-10T11:09:00Z",
+  "completionEvidence": [
+    {
+      "type": "machine_check",
+      "description": "Mousepad window 48234499 started at 640,344. A guest-agent drag from the title bar returned actionId 5514e77dde7a4d9953d757f2 with ok=true and the window moved back to 640,344 after the complementary xdotool drag had moved it to 840,444."
+    },
+    {
+      "type": "machine_check",
+      "description": "xdotool getwindowgeometry verified both positions; the 200,100 displacement was applied by the guest-agent drag in the reverse direction."
+    }
+  ],
+  "notes": "This isolates the drag primitive from model and HTML5 browser behavior. The first failed attempts used coordinates below the actual window title bar, highlighting why fresh screenshots and precise display metadata matter."
+}

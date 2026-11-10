@@ -1,0 +1,27 @@
+[
+  {
+    "id": "REAL-CLICK-HOME",
+    "taskId": "CUA-CLICK-002",
+    "setup": "DISPLAY=:0 xdotool key alt+F4 || true",
+    "prompt": "Operate the Linux VM using only vm_* tools. Take a screenshot, then double-click the Home icon on the desktop (use vm_click with count=2). Wait and take another screenshot to confirm a file manager opened. Do not use bash/read/write/edit tools.",
+    "verify": "DISPLAY=:0 xdotool search --class Thunar",
+    "verifyType": "nonempty"
+  },
+  {
+    "id": "REAL-GUI-EDIT",
+    "taskId": "CUA-FILE-006",
+    "setup": "printf 'alpha\\nold-line\\nomega\\n' > /home/aib/aib-edit-test.txt; DISPLAY=:0 nohup mousepad /home/aib/aib-edit-test.txt >/home/aib/pi-validation/mousepad.log 2>&1 </dev/null &",
+    "prompt": "Operate the Linux VM using only vm_* tools. Mousepad is open with /home/aib/aib-edit-test.txt. Take a screenshot, click into the text area, press ctrl+a, then use vm_type_text to enter exactly these three lines with newlines: alpha\\nnew-line\\nomega\\n. Press ctrl+s to save. Do not use bash/read/write/edit tools. The file must contain only alpha, new-line, omega in that order.",
+    "verify": "sha256sum /home/aib/aib-edit-test.txt",
+    "verifyType": "sha256",
+    "expectedSha256": "428f69f893de5c1e5878783c9883b47710daf3e10c673dacee622ab6e5741808"
+  },
+  {
+    "id": "REAL-BROWSER-SCROLL-DRAG",
+    "taskId": "CUA-SCROLL-005",
+    "setup": "DISPLAY=:0 nohup epiphany-browser file:///home/aib/pi-validation/cua-test-page.html >/home/aib/pi-validation/browser.log 2>&1 </dev/null &",
+    "prompt": "Operate the Linux VM using only vm_* tools. A browser is showing a local test page. Take a screenshot. Scroll to the bottom of the page until you see BOTTOM MARKER (use vm_scroll with large positive deltaY). Then drag the blue DRAG box to the dashed DROP HERE target using vm_drag with coordinates from a fresh screenshot. The page title must become bottom-and-drag-ok. Do not use bash/read/write/edit tools.",
+    "verify": "DISPLAY=:0 xdotool search --name bottom-and-drag-ok",
+    "verifyType": "nonempty"
+  }
+]

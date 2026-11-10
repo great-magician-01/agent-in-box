@@ -34,4 +34,8 @@ cat >/home/aib/.pi/agent/models.json <<EOF
 EOF
 
 rm -f /tmp/aib-real-model-ok
-node run-real-rpc-validation.mjs
+if [ -n "${AIB_REAL_TASK:-}" ]; then
+  node run-real-task.mjs "$AIB_REAL_TASK"
+else
+  node run-real-rpc-validation.mjs
+fi

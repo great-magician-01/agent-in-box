@@ -35,6 +35,14 @@ function decide(body) {
     }
   }
   const slow = slowIndex >= 0;
+  const plain = messages.some((message) => {
+    if (message.role !== "user") return false;
+    const text = typeof message.content === "string" ? message.content : JSON.stringify(message.content || "");
+    return text.includes("plain");
+  });
+  if (plain && !slow) {
+    return { text: "plain-ok" };
+  }
 
   if (slow) {
     const waitIssued = messages.slice(slowIndex + 1).some(

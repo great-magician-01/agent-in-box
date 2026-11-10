@@ -1,0 +1,25 @@
+{
+  "runId": "2026-11-10-h1-qemu-whpx-repeat-3",
+  "taskId": "VM-LIFE-002",
+  "attempt": 2,
+  "status": "success",
+  "hostProfile": "H1",
+  "guestProfile": "G1",
+  "resourceProfile": "R1",
+  "provider": "go-qemu-whpx",
+  "engine": "internal/vmprovider",
+  "startedAt": "2026-11-10T09:52:00Z",
+  "finishedAt": "2026-11-10T09:54:00Z",
+  "completionEvidence": [
+    {
+      "type": "machine_check",
+      "description": "Three consecutive real TestQemuProviderIntegration runs passed in 33.18s, 31.73s and 31.27s while the 4 GB desktop VM was also running."
+    },
+    {
+      "type": "artifact_reference",
+      "description": "Per-run Go test logs retained on the validation host.",
+      "artifactPath": "%LOCALAPPDATA%\\AgentInBox\\vms-go-test-output-run1.txt ... run3.txt"
+    }
+  ],
+  "notes": "This is repeated lifecycle evidence, not a long-duration soak test. The earlier guest kernel panic still requires a longer desktop/Computer Use stability run."
+}

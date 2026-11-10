@@ -38,8 +38,11 @@
 
 - `model-broker.mjs` 在 WSL 侧读取既有 Pi provider 配置，持有真实上游凭据；Guest 使用 `http://10.0.2.2:6719/v1` 和本地 Broker Token。
 - `run-real-rpc-validation.mjs` 使用真实模型执行一个固定 CUA 任务，并校验 Guest 文件和工具调用。
-- `run-real-guest-validation.sh` 为 Guest 生成同时包含 mock/broker 的 models.json，运行真实模型验证。
-- 2026-11-10：`pro` 模型一次通过，13.37 秒完成截图 → 中文输入 → 回车 → 截图；回读 Guest models.json 确认不含上游 API Key。
+- `run-real-task.mjs` + `real-tasks.json` 是通用真实任务 Runner：每个任务定义 setup、prompt 和机器校验命令；当前覆盖桌面 Home 图标双击、Mousepad GUI 编辑保存，以及 Epiphany 滚动/HTML5 拖拽测试页。
+- `cua-test-page.html` 用窗口标题暴露 `bottom-reached`、`drag-start`、`bottom-and-drag-ok` 等机器可检查状态。
+- `run-real-guest-validation.sh` 为 Guest 生成同时包含 mock/broker 的 models.json，运行真实模型验证；设置 `AIB_REAL_TASK=<id>` 时运行指定任务。
+- 2026-11-10：`pro` 模型一次通过，13.37 秒完成截图 → 中文输入 → 回车 → 截图；回读 Guest models.json 确认不含上游 API Key。随后桌面 Home 双击（25.14 秒）和 Mousepad 编辑保存（27.84 秒）也分别一次通过，证据见 `../results/`。
+- Epiphany 浏览器滚动到底部成功，但 HTML5 drag-and-drop 在 240 秒内未完成（38 次工具调用）；xdotool 对照也只触发 `drag-start`，没有目标 `dragenter/dragover`。这是当前 X11/Epiphany 栈的负面结果，已记录为 `CUA-SCROLL-005` 失败，不得隐藏。窗口标题栏拖拽则由 Guest Agent 独立验证通过（`CUA-DRAG-001`）。
 
 Broker 当前是验证原型：只支持 OpenAI-compatible chat completions，监听 WSL 回环，日志不记录内容和密钥。生产版本还需短期令牌签发/撤销、模型白名单、用量记录、超时和错误映射。
 

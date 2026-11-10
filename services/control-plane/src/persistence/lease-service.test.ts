@@ -88,6 +88,91 @@ describe("LeaseService", () => {
     expect(await service.getActive(ctx.vmId, now)).toBeUndefined();
   });
 
+  it("lets human takeover revoke AI input and rejects workers until released", async () => {
+    const worker = await service.acquire({ vmId: ctx.vmId, owner: "worker", taskId: "task-a" });
+    const human = await service.acquire({ vmId: ctx.vmId, owner: "human", taskId: null });
+
+    expect(human.id).not.toBe(worker.id);
+    expect((await service.control(ctx.vmId)).state).toBe("human");
+    await expect(
+      service.executeWithLease(ctx.vmId, worker.id, "worker", async () => "unexpected"),
+    ).rejects.toBeInstanceOf(LeaseConflictError);
+    await expect(
+      service.acquire({ vmId: ctx.vmId, owner: "worker", taskId: "task-a" }),
+    ).rejects.toBeInstanceOf(LeaseConflictError);
+    await expect(
+      service.executeWithLease(ctx.vmId, human.id, "human", async () => "input"),
+    ).resolves.toBe("input");
+    expect(await service.release(ctx.vmId, human.id)).toBe(true);
+    expect((await service.control(ctx.vmId)).state).toBe("idle");
+  });
+
+  it("does not renew or replay actions through an expired lease", async () => {
+    const now = new Date("2026-11-10T00:00:00.000Z");
+    const lease = await service.acquire({
+      vmId: ctx.vmId,
+      owner: "worker",
+      taskId: "task-a",
+      now,
+      ttlMs: 1_000,
+    });
+    await expect(
+      service.renew(lease.id, 30_000, new Date(now.getTime() + 1_001)),
+    ).rejects.toBeInstanceOf(LeaseConflictError);
+    await expect(
+      service.executeWithLease(ctx.vmId, lease.id, "worker", async () => "unexpected"),
+    ).rejects.toBeInstanceOf(LeaseConflictError);
+  });
+
+  it("does not shorten a worker lease when a heartbeat uses a smaller default TTL", async () => {
+    const now = new Date("2026-11-10T00:00:00.000Z");
+    const lease = await service.acquire({
+      vmId: ctx.vmId,
+      owner: "worker",
+      taskId: "task-a",
+      now,
+      ttlMs: 30_000,
+    });
+    const renewed = await service.renew(lease.id, 15_000, new Date(now.getTime() + 1_000));
+    expect(renewed.expiresAt).toBe(lease.expiresAt);
+  });
+
+  it("uses the post-lock clock so a queued heartbeat cannot revive an expired lease", async () => {
+    const lease = await service.acquire({
+      vmId: ctx.vmId,
+      owner: "worker",
+      taskId: "task-a",
+      ttlMs: 1_000,
+    });
+    const input = service.executeWithLease(ctx.vmId, lease.id, "worker", async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1_100));
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await expect(service.renewForVm(ctx.vmId, lease.id)).rejects.toBeInstanceOf(LeaseConflictError);
+    await input;
+  });
+
+  it("serializes input operations that use the same active worker lease", async () => {
+    const lease = await service.acquire({ vmId: ctx.vmId, owner: "worker", taskId: "task-a" });
+    const events: string[] = [];
+    let finishFirst: (() => void) | undefined;
+    const first = service.executeWithLease(ctx.vmId, lease.id, "worker", async () => {
+      events.push("first:start");
+      await new Promise<void>((resolve) => {
+        finishFirst = resolve;
+      });
+      events.push("first:end");
+    });
+    const second = service.executeWithLease(ctx.vmId, lease.id, "worker", async () => {
+      events.push("second");
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(events).toEqual(["first:start"]);
+    finishFirst?.();
+    await Promise.all([first, second]);
+    expect(events).toEqual(["first:start", "first:end", "second"]);
+  });
+
   it("does not release a lease through the wrong VM", async () => {
     const lease = await service.acquire({
       vmId: ctx.vmId,

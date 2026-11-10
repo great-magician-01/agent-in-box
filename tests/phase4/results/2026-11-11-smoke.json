@@ -1,0 +1,18 @@
+{
+  "phase": 4,
+  "startedAt": "2026-11-10T17:06:50.857Z",
+  "completedAt": "2026-11-10T17:06:53.678Z",
+  "platform": "win32",
+  "architecture": "x64",
+  "checks": [
+    "真实控制平面启动，Guest/Supervisor ACL 文件均从 VM 数据目录解析",
+    "真实 Guest Agent 拒绝未认证输入",
+    "控制平面认证管理通道、心跳、能力和版本信息可用",
+    "Guest Agent 更新经过大小/SHA-256 校验后暂存，更新源未收到 Bearer 令牌",
+    "人工接管撤销 AI Lease，旧 AI 动作被拒绝且未发送给 Guest",
+    "noVNC WebSocket 代理逐帧校验人工 Lease，释放后输入立即失败关闭"
+  ],
+  "realQemuValidated": false,
+  "realDesktopInputValidated": false,
+  "note": "Real control-plane and guest-agent processes with a synthetic RFB/update peer; not a QEMU/WHPX or X11 acceptance run."
+}

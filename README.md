@@ -1,6 +1,6 @@
 # Agent-in-Box
 
-面向个人用户的本地 AI 虚拟机工作平台。当前仓库已完成 **开发计划阶段 1（工程骨架、协议和本地持久化）**、**阶段 2（Electron、本地服务与自定义存储）** 和 **阶段 3（镜像服务、VM 生命周期与管理 UI）**：包含无特权 Electron 壳、控制平面进程监管、首次启动向导、自定义数据目录、可续传镜像服务、受 ACL 保护的 Go VM Supervisor、QEMU/WHPX 生命周期以及 Linux VM 管理页面。Guest 实时画面、noVNC 人工控制和统一输入 Lease 属于阶段 4。
+面向个人用户的本地 AI 虚拟机工作平台。当前仓库已完成 **开发计划阶段 1（工程骨架、协议和本地持久化）**、**阶段 2（Electron、本地服务与自定义存储）**、**阶段 3（镜像服务、VM 生命周期与管理 UI）** 和 **阶段 4（Guest Agent、noVNC 实时控制台与统一 Execution Lease）**：包含无特权 Electron 壳、控制平面进程监管、首次启动向导、自定义数据目录、可续传镜像服务、受 ACL 保护的 Go VM Supervisor、QEMU/WHPX 生命周期、认证 Guest 管理通道，以及 AI/人工互斥的桌面输入。真实 QEMU/WHPX 和浏览器/Electron 人工桌面验收仍按阶段 4 记录单独执行。
 
 完整方案见：
 
@@ -9,6 +9,16 @@
 - [开发计划](docs/03-development-plan.md)
 - [阶段 2 验收记录](tests/phase2/summary.md)
 - [阶段 3 验收记录](tests/phase3/summary.md)
+- [阶段 4 验收记录](tests/phase4/summary.md)
+
+## 阶段 4 已落地
+
+- **Guest Agent 管理通道**：Bearer 令牌文件轮换/撤销、心跳、能力与版本兼容握手；截图、动态分辨率/DPI、输入动作 ID/超时/去重；更新包经大小和 SHA-256 校验后原子暂存，由外部服务管理器激活。
+- **noVNC 实时画面**：Web/Electron 共用控制台组件；回环 WebSocket 代理使用短时一次性票据和 Origin/Host 校验，严格解析 RFB 3.8，不是通用 TCP 隧道。
+- **统一 Execution Lease**：SQLite Per-VM Lease、心跳、过期和释放；AI 与人工输入共用校验和串行锁；人工接管抢占 AI，旧 AI 动作和失效控制台输入均被拒绝。
+- **验证边界**：真实控制平面/Guest Agent 进程 Smoke 已通过；RFB 对端是合成测试服务，真实 QEMU/WHPX、X11 和浏览器/Electron 人工操作仍需显式验收。
+
+详见 [`tests/phase4/summary.md`](tests/phase4/summary.md)。
 
 ## 阶段 3 已落地
 
@@ -96,6 +106,9 @@ pnpm smoke:phase2
 # Image Service + 真实控制平面/Supervisor + ACL + 进程重启续传
 pnpm smoke:phase3
 
+# Guest Agent + 版本/更新握手 + noVNC 代理 + AI/人工 Lease 互斥
+pnpm smoke:phase4
+
 # 已打包桌面壳的 Renderer 隔离、preload IPC 和 UI 加载
 # 需先执行 pnpm package:desktop:dir；Linux/WSL 还需要 X/WSLg 和 Electron 系统库
 pnpm smoke:desktop
@@ -124,8 +137,8 @@ pnpm check        # lint + typecheck + test + build
 GitHub Actions 工作流位于 `.github/workflows/ci.yml`，在 `main` 推送、Pull Request 和手动触发时运行。Windows 与 Linux 矩阵使用固定 pnpm、Node.js 24 和 `go.mod` 中的 Go 版本，依次执行：
 
 - `pnpm install --frozen-lockfile`；
-- `pnpm check`、`go vet ./...` 与关键 Go 包的 race 测试；
-- 阶段 2 和阶段 3 服务 Smoke Test，并上传阶段 3 的机器结果 artifact。
+- `pnpm check`、`go vet ./...`、关键 Go 包的 race 测试与自包含 Control Plane 打包；
+- 阶段 2、3、4 服务 Smoke Test，并上传阶段 3/4 的机器结果 artifact。
 
 CI 不申请模型或机器人凭据，也不运行真实 QEMU/WHPX；这些仍由对应阶段的显式集成测试和宿主环境验收覆盖。
 
@@ -136,7 +149,7 @@ go run ./services/vm-supervisor/cmd/vm-supervisor
 go run ./services/guest-agent/cmd/guest-agent
 ```
 
-两者默认只监听回环地址，并提供 `/healthz` 和 `/readyz`。
+两者默认只监听回环地址，并提供 `/healthz` 和 `/readyz`。Guest Agent 的认证管理接口还需 `-token-file <guest-token-file>`；宿主控制平面读取 `<vm-storage-root>/guest-agent.token`，或通过 `AGENT_IN_BOX_GUEST_TOKEN_FILE` 使用开发/旧镜像的共享令牌文件。两处令牌必须一致，令牌文件支持轮换，删除后旧凭据立即失效。
 
 ## 目录结构
 
@@ -147,7 +160,7 @@ apps/
 services/
   control-plane/     NestJS 本地控制平面（宿主检查、存储管理、设置与持久化）
   vm-supervisor/     Go 宿主机 VM 管理服务（ACL、QEMU 生命周期与状态对账）
-  guest-agent/       Go Guest Agent（当前仅健康检查）
+  guest-agent/       Go Guest Agent（认证管理、桌面输入/截图、心跳与更新暂存）
 scripts/             打包、开发启动与阶段 Smoke Test
 packages/
   protocol/          跨进程协议与事件类型
@@ -190,12 +203,19 @@ SQLite 数据库位于数据根目录下的 `agent-in-box.sqlite`，使用 WAL �
 已在当前开发环境实际执行：
 
 - `pnpm install`：成功；pnpm 11 仅允许 `esbuild`、`electron`、`better-sqlite3` 构建脚本
-- `pnpm check`：lint、typecheck、129 个 Vitest 测试、Go test、全部构建均通过
+- `pnpm check`：lint、typecheck、145 个 Vitest 测试、Go test、全部构建均通过
 - 控制平面 `GET /api/v1/health`、`GET /api/v1/runtime` 返回正常
 - 控制平面启动时创建 SQLite 数据库并应用 `001_initial_schema`、`002_phase2_settings`
 - SQLite 表、WAL 模式和迁移记录在真实运行中验证通过
 - Web 开发服务器可访问，`/api` 代理到控制平面正常
 - VM Supervisor 与 Guest Agent 的 `/healthz`、`/readyz` 正常
+
+### 阶段 4 验证（2026-11-11）
+
+- `pnpm smoke:phase4`：真实控制平面和 Guest Agent 进程验证认证、心跳/版本握手、更新校验暂存、人工抢占 AI、一次性控制台票据及 Lease 释放后的 RFB 输入阻断
+- 控制平面新增 Lease/Guest/RFB 测试，包含 ServerInit 拆包时早期输入不得绕过 Lease 的回归；Go Guest Agent race 测试通过
+- Smoke 使用合成 RFB/更新对端，`realQemuValidated=false`、`realDesktopInputValidated=false`；真实 noVNC 浏览器/Electron 与 X11 动态分辨率验收尚未执行
+- 详细证据和未关闭门槛见 [`tests/phase4/summary.md`](tests/phase4/summary.md)
 
 ### 阶段 3 验证（2026-11-10～11）
 
@@ -255,6 +275,7 @@ SQLite 数据库位于数据根目录下的 `agent-in-box.sqlite`，使用 WAL �
 - NestJS 12.4.2
 - SQLite: better-sqlite3 13.0.3 + Kysely 0.29.8
 - Electron 45.2.3
+- noVNC 1.5.0 + WebSocket RFB 代理
 - Vitest 5.1.0
 - Go 1.26
 
@@ -278,6 +299,7 @@ SQLite 数据库位于数据根目录下的 `agent-in-box.sqlite`，使用 WAL �
 - Windows/Linux Host Inspect：WHPX/KVM、QEMU 加速器、内存和磁盘检查；Windows amd64 版本已在本机实际运行
 - Linux X11 Guest Agent：Bearer 认证、能力/桌面信息、PNG 截图、鼠标/键盘/Unicode 输入和动作日志
 - `PiWorkerEngine`：Pi RPC 子进程、受控工具暴露、事件映射、Prompt/Steer/Follow-up/Abort、会话归档与原生恢复；包含假 Pi 单元测试和真实 Pi 集成测试
+- Guest Agent 心跳/版本/能力/截图/输入/更新暂存，noVNC 实时画面与统一 AI/人工 Execution Lease
 - Electron 无特权壳、Renderer 白名单 IPC、Control Plane 进程监管、健康检查超时、日志轮转和崩溃诊断
 - 首次启动向导、宿主机检查、数据目录选择、Host Reserve/自动启动策略、本机管理员和敏感操作审批
 - Storage Manager：分类路径、可写/空间检查、存储锁、哈希校验迁移、SQLite 在线备份与完整性检查、下载缓存清理
@@ -292,10 +314,11 @@ SQLite 数据库位于数据根目录下的 `agent-in-box.sqlite`，使用 WAL �
 - 本地 API 管理员认证/CSRF 加固；当前为回环监听、Host 白名单与 CORS 限制，完整防护在阶段 11～12
 - 生产级镜像来源签名与 CDN 长期可用性；当前 Manifest 使用来源白名单、大小和 SHA-256，跨多个控制平面进程的下载文件锁尚未实现
 - Electron 自动托管/打包 VM Supervisor 与 Go 二进制更新；当前 Supervisor 作为独立本机进程启动
-- Guest RPC 的短期令牌签发/撤销和 Per-VM Lease 强制接入；当前 Guest Health 使用回环 `/healthz`，生产输入认证仍需阶段 4 完成
+- Guest Agent 更新的服务管理器激活/回滚、发布签名和新镜像令牌自动 provision；当前已实现认证、令牌轮换/撤销与安全暂存
+- 真实 QEMU/WHPX + X11 的动态分辨率/DPI、noVNC 浏览器/Electron 人工接管回归；合成 RFB Smoke 不替代此验收
 - Wayland 与 Windows Guest 的截图/输入路径
 - Pi Worker 与 Task/Lease/Router 的控制平面接入、生产级 Model Broker 服务
 - Router、HTTP 任务 API、Worker 注册表查询接口和任务看板
 - 真实飞书/QQ 应用凭据验收；本地长连接框架和 mock 协议测试已完成
 
-阶段 0～3 的代码主链路已完成。下一步按 [开发计划](docs/03-development-plan.md) 进入阶段 4：Guest Agent 管理通道与更新握手、noVNC 实时画面和人工控制、统一 Execution Lease；同时继续跟踪真实 QEMU/WHPX 阶段 3 回归、Windows NSIS 安装包和干净环境 Smoke Test 门槛。
+阶段 0～4 的代码主链路已完成。下一步按 [开发计划](docs/03-development-plan.md) 进入阶段 5：项目/VM 绑定、Task Service 和任务看板；同时继续跟踪阶段 4 的真实桌面交互与更新激活、真实 QEMU/WHPX 回归、Windows NSIS 安装包和干净环境 Smoke Test 门槛。

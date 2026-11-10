@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -16,12 +17,26 @@ import (
 	"agent-in-box/internal/health"
 )
 
-const version = "0.1.0"
+// version is the explicit build version reported by /v1/capabilities,
+// /v1/version and /v1/heartbeat. Release builds override it with:
+//
+//	go build -ldflags "-X main.version=<version>"
+var version = "0.1.0"
+
+func defaultUpdateDir() string {
+	if configDir, err := os.UserConfigDir(); err == nil && strings.TrimSpace(configDir) != "" {
+		return filepath.Join(configDir, "agent-in-box", "guest-agent", "updates")
+	}
+	return filepath.Join(os.TempDir(), "agent-in-box-guest-agent-updates")
+}
 
 func main() {
 	addr := flag.String("addr", "127.0.0.1:7611", "guest agent listen address")
 	tokenFile := flag.String("token-file", "", "0600 file containing the host-issued guest RPC bearer token")
 	display := flag.String("display", os.Getenv("DISPLAY"), "X11 display, for example :0")
+	actionTimeout := flag.Duration("action-timeout", 30*time.Second, "maximum time allowed for one input action (capped at 30s)")
+	updateDir := flag.String("update-dir", defaultUpdateDir(), "directory for verified staged updates; empty disables update staging")
+	maxUpdateBytes := flag.Int64("update-max-bytes", 128<<20, "largest guest-agent update that may be staged")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
@@ -45,7 +60,16 @@ func main() {
 	}
 
 	healthHandler := health.NewHandler("guest-agent", version)
-	rpc := guestagent.NewServer(token, desktop, logger)
+	rpc := guestagent.NewServerWithOptions(guestagent.ServerOptions{
+		Token:          token,
+		TokenFile:      *tokenFile,
+		AgentVersion:   version,
+		Desktop:        desktop,
+		Logger:         logger,
+		ActionTimeout:  *actionTimeout,
+		UpdateDir:      *updateDir,
+		MaxUpdateBytes: *maxUpdateBytes,
+	})
 	mux := http.NewServeMux()
 	mux.Handle("/healthz", healthHandler)
 	mux.Handle("/readyz", healthHandler)

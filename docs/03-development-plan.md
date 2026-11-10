@@ -16,7 +16,8 @@
 - **WHPX 稳定性证据**：Provider 生命周期累计 9 次通过，桌面 10 分钟长稳 20/20 采样正常；Unicode VM 路径经短路径/ASCII junction 修复后，C:/D: 的真实创建/启动/停止/快照恢复均通过。
 - **保留的负面结果与外部门槛**：Epiphany HTML5 drag-and-drop 失败；出现过一次 Guest 内核 panic，需更长 soak；Hyper-V 需 Pro/Enterprise 环境；Wayland 首版不支持；真实飞书/QQ 凭据验收仍待测试应用；真实镜像 CDN 与断电恢复待补。
 - **阶段 3 完成（代码与本机服务验证）**：Image Service 的 Manifest/白名单/不可变版本、续传/取消/去重/SSE/重启恢复；Supervisor 的完整 QEMU 生命周期 API、ACL、进程/QMP 对账；Linux VM 控制平面与资源/绑定/任务/健康分离的管理 UI。`pnpm check` 与 Windows 服务 Smoke 通过。当前环境未重新执行真实 QEMU/WHPX 回归，未关闭门槛见 [`tests/phase3/summary.md`](../tests/phase3/summary.md)。
-- **下一步**：进入阶段 4（Guest Agent 管理通道与更新握手、noVNC 实时画面和人工控制、统一 Execution Lease），并将 PiWorkerEngine 接入 Task Service、Per-VM Lease 和 Worker Registry。真实 QEMU/WHPX 阶段 3 回归、Electron 托管 Supervisor、Windows NSIS 安装包与干净 Windows Smoke Test、真实飞书/QQ 和长时稳定性作为发布前验收门槛持续跟踪。
+- **阶段 4 完成（代码与本机服务验证）**：Guest Agent 认证/令牌轮换、心跳、版本握手、动作 ID/超时/去重、安全更新暂存；X11 动态分辨率/DPI；noVNC 实时控制台、回环一次性票据与逐帧 RFB 输入门控；统一 Per-VM Execution Lease 和人工抢占 AI。Windows 真实进程 Smoke 与自动化回归通过。真实 QEMU/WHPX、X11 和浏览器/Electron 人工桌面交互、服务管理器更新激活仍需显式验收，详见 [`tests/phase4/summary.md`](../tests/phase4/summary.md)。
+- **下一步**：进入阶段 5（Project/ProjectVmBinding、Task Service、目标 VM 队列和任务看板），随后按阶段 6 将 PiWorkerEngine 接入 Task Service、Lease 和 Worker Registry。真实 QEMU/WHPX 与 noVNC 回归、Electron 托管 Supervisor、Windows NSIS 安装包与干净 Windows Smoke Test、真实飞书/QQ 和长时稳定性作为发布前验收门槛持续跟踪。
 
 1. 先验证 Hypervisor、镜像、Pi Computer Use 和模型代理等高风险链路，再大规模开发 UI。
 2. 每个阶段形成可运行、可测试的纵向能力，避免一次性生成大量空模块。
@@ -375,6 +376,8 @@
 - 两个请求不能同时向同一 VM 注入桌面输入；
 - 人工接管后 AI 动作被拒绝或暂停；
 - Lease 过期后不会盲目重放旧动作。
+
+**实现与验证记录（2026-11-11）**：上述代码主链路已完成，统一 Lease 同时约束 Guest RPC 与 RFB/noVNC 输入。真实控制平面/Guest Agent 进程 Smoke 通过；真实 Hypervisor、X11 和浏览器/Electron 人工操作尚未在本轮执行，不能仅以 synthetic RFB Smoke 关闭全部验收。详见 [`tests/phase4/summary.md`](../tests/phase4/summary.md)。
 
 ---
 

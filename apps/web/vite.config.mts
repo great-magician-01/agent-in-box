@@ -15,6 +15,7 @@ export default defineConfig({
       "/api": {
         target: `http://${controlPlaneHost}:${controlPlanePort}`,
         changeOrigin: false,
+        ws: true,
       },
     },
   },

@@ -7,15 +7,28 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"image"
 	"image/png"
 	"log/slog"
 	"net/http"
+	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
-const protocolVersion = "0.1.0"
+const (
+	// defaultActionTimeout bounds a single input action when the caller does
+	// not request a shorter one.
+	defaultActionTimeout = 30 * time.Second
+	// hardMaxActionTimeout is the absolute upper bound. The ServerOptions value
+	// may lower it but can never raise it.
+	hardMaxActionTimeout = 30 * time.Second
+
+	defaultMaxUpdateBytes int64 = 128 << 20
+	defaultUpdateTimeout        = 2 * time.Minute
+)
 
 // Desktop is implemented by the in-guest display driver (X11 first).
 type Desktop interface {
@@ -25,47 +38,143 @@ type Desktop interface {
 	Close() error
 }
 
-// Server exposes authenticated guest desktop RPC over HTTP.
-type Server struct {
-	token   string
-	desktop Desktop
-	logger  *slog.Logger
+// ServerOptions configures the guest RPC server. Zero values are safe defaults.
+type ServerOptions struct {
+	Token string
+	// TokenFile enables per-request token rotation and revocation. The path must
+	// remain a regular, non-symlink file; read failures fail closed.
+	TokenFile     string
+	AgentVersion  string
+	Desktop       Desktop
+	Logger        *slog.Logger
+	ActionTimeout time.Duration
+	// UpdateDir enables authenticated staged updates when non-empty.
+	UpdateDir        string
+	MaxUpdateBytes   int64
+	UpdateHTTPClient *http.Client
+	Now              func() time.Time
 }
 
+// Server exposes authenticated guest desktop RPC over HTTP.
+type Server struct {
+	token            string
+	tokenFile        string
+	agentVersion     string
+	desktop          Desktop
+	logger           *slog.Logger
+	actionTimeout    time.Duration
+	updateDir        string
+	maxUpdateBytes   int64
+	updateTimeout    time.Duration
+	updateHTTPClient *http.Client
+	startedAt        time.Time
+	now              func() time.Time
+	actions          *actionTracker
+}
+
+// NewServer preserves the original constructor for existing callers. The
+// capabilities endpoint reports the protocol version until a build version is
+// supplied through NewServerWithOptions.
 func NewServer(token string, desktop Desktop, logger *slog.Logger) *Server {
+	return NewServerWithOptions(ServerOptions{Token: token, Desktop: desktop, Logger: logger})
+}
+
+// NewServerWithOptions builds a server with an explicit build version and
+// bounded action/update behavior.
+func NewServerWithOptions(options ServerOptions) *Server {
+	logger := options.Logger
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{token: token, desktop: desktop, logger: logger}
+	agentVersion := strings.TrimSpace(options.AgentVersion)
+	if agentVersion == "" {
+		agentVersion = protocolVersion
+	}
+	now := options.Now
+	if now == nil {
+		now = time.Now
+	}
+	actionTimeout := options.ActionTimeout
+	if actionTimeout <= 0 {
+		actionTimeout = defaultActionTimeout
+	}
+	if actionTimeout > hardMaxActionTimeout {
+		actionTimeout = hardMaxActionTimeout
+	}
+	maxUpdateBytes := options.MaxUpdateBytes
+	if maxUpdateBytes <= 0 {
+		maxUpdateBytes = defaultMaxUpdateBytes
+	}
+	return &Server{
+		token:            options.Token,
+		tokenFile:        strings.TrimSpace(options.TokenFile),
+		agentVersion:     agentVersion,
+		desktop:          options.Desktop,
+		logger:           logger,
+		actionTimeout:    actionTimeout,
+		updateDir:        strings.TrimSpace(options.UpdateDir),
+		maxUpdateBytes:   maxUpdateBytes,
+		updateTimeout:    defaultUpdateTimeout,
+		updateHTTPClient: options.UpdateHTTPClient,
+		startedAt:        now(),
+		now:              now,
+		actions:          newActionTracker(now),
+	}
 }
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/capabilities", s.capabilities)
+	mux.HandleFunc("GET /v1/heartbeat", s.heartbeat)
+	mux.HandleFunc("GET /v1/version", s.versionHandshake)
 	mux.HandleFunc("GET /v1/desktop", s.desktopInfo)
 	mux.HandleFunc("GET /v1/screenshot", s.screenshot)
 	mux.HandleFunc("POST /v1/input", s.input)
+	mux.HandleFunc("POST /v1/update", s.update)
 	return s.authenticate(mux)
 }
 
 func (s *Server) authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.token == "" {
-			writeError(w, http.StatusServiceUnavailable, "unavailable", "guest authentication token is not configured")
+		actionID, _ := parseActionIDHeader(r)
+		token, err := s.authenticationToken()
+		if err != nil || token == "" {
+			writeActionError(w, http.StatusServiceUnavailable, actionID, "unavailable", "guest authentication token is not configured")
 			return
 		}
-		expected := "Bearer " + s.token
+		expected := "Bearer " + token
 		provided := r.Header.Get("Authorization")
 		if subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) != 1 {
-			writeError(w, http.StatusUnauthorized, "unauthorized", "invalid bearer token")
+			writeActionError(w, http.StatusUnauthorized, actionID, "unauthorized", "invalid bearer token")
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
 }
 
+func (s *Server) authenticationToken() (string, error) {
+	if s.tokenFile == "" {
+		return s.token, nil
+	}
+	info, err := os.Lstat(s.tokenFile)
+	if err != nil {
+		return "", err
+	}
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() > 4096 {
+		return "", errors.New("guest token file must be a small regular file")
+	}
+	data, err := os.ReadFile(s.tokenFile)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(data)), nil
+}
+
 func (s *Server) capabilities(w http.ResponseWriter, r *http.Request) {
-	capabilities := Capabilities{ProtocolVersion: protocolVersion}
+	capabilities := Capabilities{
+		ProtocolVersion: protocolVersion,
+		AgentVersion:    s.agentVersion,
+	}
 	if s.desktop != nil {
 		info, err := s.desktop.Info(r.Context())
 		if err == nil {
@@ -76,6 +185,45 @@ func (s *Server) capabilities(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, capabilities)
+}
+
+func (s *Server) versionHandshake(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, versionInfo(s.agentVersion, strings.TrimSpace(r.URL.Query().Get("protocolVersion"))))
+}
+
+func (s *Server) heartbeat(w http.ResponseWriter, r *http.Request) {
+	requested := strings.TrimSpace(r.URL.Query().Get("protocolVersion"))
+	compatible, compatibilityError := protocolCompatibility(requested)
+	now := s.now()
+	heartbeat := Heartbeat{
+		Status:                   "ok",
+		AgentVersion:             s.agentVersion,
+		ProtocolVersion:          protocolVersion,
+		Compatible:               compatible,
+		RequestedProtocolVersion: requested,
+		CompatibilityError:       compatibilityError,
+		DesktopAvailable:         s.desktop != nil,
+		UptimeSeconds:            int64(now.Sub(s.startedAt) / time.Second),
+		Now:                      now.UTC().Format(time.RFC3339Nano),
+	}
+	if heartbeat.UptimeSeconds < 0 {
+		heartbeat.UptimeSeconds = 0
+	}
+	if s.desktop == nil {
+		heartbeat.Status = "degraded"
+		heartbeat.DesktopError = "no guest desktop driver"
+	} else {
+		ctx, cancel := context.WithTimeout(r.Context(), time.Second)
+		defer cancel()
+		info, err := s.desktop.Info(ctx)
+		if err != nil {
+			heartbeat.Status = "degraded"
+			heartbeat.DesktopError = err.Error()
+		} else {
+			heartbeat.DisplayServer = info.DisplayServer
+		}
+	}
+	writeJSON(w, http.StatusOK, heartbeat)
 }
 
 func (s *Server) desktopInfo(w http.ResponseWriter, r *http.Request) {
@@ -108,38 +256,110 @@ func (s *Server) screenshot(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "image/png")
 	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("X-Agent-In-Box-Action-Id", newActionID())
+	w.Header().Set(ActionIDHeader, newActionID())
 	w.Header().Set("X-Agent-In-Box-Width", strconv.Itoa(capture.Bounds().Dx()))
 	w.Header().Set("X-Agent-In-Box-Height", strconv.Itoa(capture.Bounds().Dy()))
 	_, _ = w.Write(buffer.Bytes())
 }
 
 func (s *Server) input(w http.ResponseWriter, r *http.Request) {
-	actionID := newActionID()
-	if s.desktop == nil {
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "no guest desktop driver")
+	headerID, headerError := parseActionIDHeader(r)
+	if headerError != "" {
+		writeActionError(w, http.StatusBadRequest, "", "invalid_action_id", headerError)
 		return
 	}
+
 	var request InputRequest
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&request); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		writeActionError(w, http.StatusBadRequest, headerID, "bad_request", err.Error())
 		return
 	}
+
+	actionID, mergeError := mergeActionID(headerID, request.ActionID)
+	if mergeError != "" {
+		writeActionError(w, http.StatusBadRequest, headerID, "invalid_action_id", mergeError)
+		return
+	}
+	if actionID == "" {
+		actionID = newActionID()
+	}
+	request.ActionID = actionID
+
+	requestedTimeout, timeoutError := timeoutFromRequest(r, request.TimeoutMillis)
+	if timeoutError != "" {
+		writeActionError(w, http.StatusBadRequest, actionID, "invalid_timeout", timeoutError)
+		return
+	}
+	timeout := s.effectiveActionTimeout(requestedTimeout)
+
+	if s.desktop == nil {
+		writeJSON(w, http.StatusServiceUnavailable, ActionResult{
+			ActionID:  actionID,
+			OK:        false,
+			Error:     "no guest desktop driver",
+			ErrorCode: "unavailable",
+		})
+		return
+	}
+	if !s.actions.reserve(actionID) {
+		writeJSON(w, http.StatusConflict, ActionResult{
+			ActionID:  actionID,
+			OK:        false,
+			Error:     "action id has already been used",
+			ErrorCode: "duplicate_action_id",
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	defer cancel()
 	started := time.Now()
-	err := s.desktop.Input(r.Context(), request)
+	inputError := s.desktop.Input(ctx, request)
+	elapsed := time.Since(started)
 	s.logger.Info("guest input action",
 		"actionId", actionID,
 		"type", request.Type,
-		"ok", err == nil,
-		"durationMs", time.Since(started).Milliseconds(),
+		"ok", inputError == nil,
+		"timeoutMs", timeout.Milliseconds(),
+		"durationMs", elapsed.Milliseconds(),
 	)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, ActionResult{ActionID: actionID, OK: false, Error: err.Error()})
+	if inputError != nil || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		if errors.Is(inputError, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			writeJSON(w, http.StatusRequestTimeout, ActionResult{
+				ActionID:  actionID,
+				OK:        false,
+				Error:     "action exceeded the server timeout",
+				ErrorCode: "action_timeout",
+			})
+			return
+		}
+	}
+	if inputError != nil {
+		writeJSON(w, http.StatusBadRequest, ActionResult{
+			ActionID:  actionID,
+			OK:        false,
+			Error:     inputError.Error(),
+			ErrorCode: "action_failed",
+		})
 		return
 	}
 	writeJSON(w, http.StatusOK, ActionResult{ActionID: actionID, OK: true})
+}
+
+func (s *Server) effectiveActionTimeout(requested time.Duration) time.Duration {
+	timeout := requested
+	if timeout <= 0 {
+		timeout = s.actionTimeout
+	}
+	if timeout > s.actionTimeout {
+		timeout = s.actionTimeout
+	}
+	if timeout <= 0 {
+		timeout = defaultActionTimeout
+	}
+	return timeout
 }
 
 func newActionID() string {
@@ -158,8 +378,16 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 }
 
 func writeError(w http.ResponseWriter, status int, code string, message string) {
-	writeJSON(w, status, map[string]any{
+	writeActionError(w, status, "", code, message)
+}
+
+func writeActionError(w http.ResponseWriter, status int, actionID string, code string, message string) {
+	payload := map[string]any{
 		"ok":    false,
 		"error": map[string]string{"code": code, "message": message},
-	})
+	}
+	if actionID != "" {
+		payload["actionId"] = actionID
+	}
+	writeJSON(w, status, payload)
 }

@@ -1,4 +1,12 @@
-import { existsSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  readlinkSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
@@ -50,6 +58,38 @@ if (existsSync(deployedModules)) {
   renameSync(deployedModules, runtimeModules);
 }
 
+// pnpm 11 may emit absolute symlinks on Windows. Once node_modules is renamed,
+// those links still point at the old directory. Rewrite only links into the
+// deployed tree. POSIX uses relative links; Windows uses non-elevated junctions.
+function repairDeployedSymlinks(directory) {
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const entryPath = path.join(directory, entry.name);
+    if (entry.isSymbolicLink()) {
+      const rawTarget = readlinkSync(entryPath);
+      const absoluteTarget = path.resolve(directory, rawTarget);
+      const marker = `${path.sep}node_modules${path.sep}`;
+      const markerIndex = absoluteTarget.indexOf(marker);
+      if (markerIndex < 0) continue;
+      const repairedTarget =
+        absoluteTarget.slice(0, markerIndex) +
+        `${path.sep}runtime_modules${path.sep}` +
+        absoluteTarget.slice(markerIndex + marker.length);
+      rmSync(entryPath);
+      if (process.platform === "win32") {
+        symlinkSync(repairedTarget, entryPath, "junction");
+      } else {
+        symlinkSync(path.relative(directory, repairedTarget), entryPath, "dir");
+      }
+    } else if (entry.isDirectory()) {
+      repairDeployedSymlinks(entryPath);
+    }
+  }
+}
+
+if (existsSync(runtimeModules)) {
+  repairDeployedSymlinks(runtimeModules);
+}
+
 // pnpm adds a self-reference back into the workspace. It is broken once the
 // bundle is copied into the installer and is not needed at runtime.
 rmSync(path.join(runtimeModules, ".pnpm", "node_modules", "@agent-in-box", "control-plane"), {
@@ -60,6 +100,7 @@ rmSync(path.join(runtimeModules, ".pnpm", "node_modules", "@agent-in-box", "cont
 for (const required of [
   "dist/main.js",
   "runtime_modules/better-sqlite3/package.json",
+  "runtime_modules/ws/package.json",
   "runtime_modules/@agent-in-box/config/dist/index.js",
   "runtime_modules/@agent-in-box/protocol/dist/index.js",
 ]) {

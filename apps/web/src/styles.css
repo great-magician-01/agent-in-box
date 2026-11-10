@@ -1217,6 +1217,72 @@ button.danger:disabled {
   margin: 0;
 }
 
+.novnc-console {
+  display: grid;
+  gap: 0.55rem;
+  min-width: 0;
+  padding: 0.75rem;
+  border: 1px solid rgba(44, 94, 75, 0.24);
+  border-radius: 12px;
+  background: #17201b;
+  color: #f3f5f0;
+}
+
+.console-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.console-toolbar > div:first-child {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.console-state {
+  width: fit-content;
+  font-size: 0.75rem;
+  color: #d9c58b;
+}
+
+.console-state.connected {
+  color: #8ee0ad;
+}
+
+.console-state.error {
+  color: #ffaaa3;
+}
+
+.console-message {
+  margin: 0;
+  color: #cbd3cd;
+}
+
+.novnc-screen {
+  position: relative;
+  width: 100%;
+  min-height: 360px;
+  max-height: 70vh;
+  aspect-ratio: 16 / 10;
+  overflow: auto;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: #050706;
+}
+
+.novnc-screen > canvas {
+  display: block;
+  max-width: 100%;
+}
+
+@media (max-width: 720px) {
+  .novnc-screen {
+    min-height: 240px;
+  }
+}
+
 @media (max-width: 1020px) {
   .create-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));

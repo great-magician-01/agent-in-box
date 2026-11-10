@@ -17,6 +17,10 @@ import type {
   StorageReport,
   StorageValidation,
   VmConsole,
+  VmConsoleSession,
+  VmControlView,
+  ExecutionLeaseView,
+  WorkerLeaseRequest,
   VmCreateRequest,
   VmInstanceView,
   VmListResponse,
@@ -221,4 +225,26 @@ export const api = {
       method: "POST",
     }),
   vmConsole: (id: string) => apiFetch<VmConsole>(`/api/v1/vms/${encodeURIComponent(id)}/console`),
+  vmControl: (id: string) =>
+    apiFetch<VmControlView>(`/api/v1/vms/${encodeURIComponent(id)}/control`),
+  openVmConsole: (id: string) =>
+    apiFetch<VmConsoleSession>(`/api/v1/vms/${encodeURIComponent(id)}/console/sessions`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+  acquireWorkerLease: (id: string, body: WorkerLeaseRequest) =>
+    apiFetch<ExecutionLeaseView>(`/api/v1/vms/${encodeURIComponent(id)}/lease/worker`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  heartbeatVmLease: (id: string, leaseId: string) =>
+    apiFetch<ExecutionLeaseView>(`/api/v1/vms/${encodeURIComponent(id)}/lease/heartbeat`, {
+      method: "POST",
+      body: JSON.stringify({ leaseId }),
+    }),
+  releaseVmLease: (id: string, leaseId: string) =>
+    apiFetch<{ released: boolean }>(`/api/v1/vms/${encodeURIComponent(id)}/lease/release`, {
+      method: "POST",
+      body: JSON.stringify({ leaseId }),
+    }),
 };

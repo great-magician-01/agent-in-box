@@ -19,6 +19,9 @@ function controlPlaneEnv() {
     ...process.env,
     HOME: homeDirectory,
     USERPROFILE: homeDirectory,
+    LOCALAPPDATA: path.join(homeDirectory, "AppData", "Local"),
+    XDG_CONFIG_HOME: path.join(homeDirectory, ".config"),
+    XDG_DATA_HOME: path.join(homeDirectory, ".local", "share"),
     AGENT_IN_BOX_CONFIG_DIR: configDirectory,
     CONTROL_PLANE_HOST: "127.0.0.1",
     CONTROL_PLANE_PORT: String(port),
@@ -123,7 +126,7 @@ async function main() {
   console.log("[smoke] health ok");
 
   const onboarding = await json("GET", "/api/v1/onboarding");
-  assert.equal(onboarding.required, true);
+  assert.equal(onboarding.required, true, JSON.stringify(onboarding));
   assert.equal(onboarding.dataRootSource, "default");
   const oldRoot = onboarding.dataRoot;
   createSeedData(oldRoot);

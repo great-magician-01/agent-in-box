@@ -200,7 +200,7 @@ export class VmService {
       vmId: vm.id,
       consoleUrl: await this.supervisor.console(id),
       message:
-        "这是仅绑定回环地址的 VNC 救援控制台；noVNC 画面与人工输入将在阶段 4 接入统一 Lease。",
+        "QEMU VNC 仅绑定回环地址。请通过阶段 4 的 noVNC 会话建立连接；人工输入由统一 Execution Lease 保护。",
     };
   }
 
@@ -223,6 +223,10 @@ export class VmService {
       );
       throw error;
     }
+  }
+
+  async getRecord(id: string) {
+    return this.requireVm(id);
   }
 
   private async requireVm(id: string) {

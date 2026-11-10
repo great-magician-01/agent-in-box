@@ -6,13 +6,14 @@ import type {
   ImageCatalog,
   ImageRecord,
   ImageStatus,
-  VmConsole,
+  VmConsoleSession,
   VmCreateRequest,
   VmInstanceView,
   VmListResponse,
   VmPowerState,
 } from "@agent-in-box/protocol";
 import { api, ApiRequestError, subscribeImageEvents, type ImageEventStreamState } from "./api";
+import { VmConsole } from "./VmConsole";
 import {
   GUEST_HEALTH_LABELS,
   IMAGE_STATUS_LABELS,
@@ -51,7 +52,7 @@ export function VmManager({ host, hostReserveBytes }: VmManagerProps): React.JSX
   const [refreshingManifest, setRefreshingManifest] = useState(false);
 
   const [vmBusy, setVmBusy] = useState<Record<string, VmAction>>({});
-  const [consoles, setConsoles] = useState<Record<string, VmConsole>>({});
+  const [consoles, setConsoles] = useState<Record<string, VmConsoleSession>>({});
 
   const [showCreate, setShowCreate] = useState(false);
   const [createBusy, setCreateBusy] = useState(false);
@@ -393,8 +394,18 @@ export function VmManager({ host, hostReserveBytes }: VmManagerProps): React.JSX
     vmBusyRef.current.add(id);
     setVmBusy((current) => ({ ...current, [id]: "console" }));
     try {
-      const info = await api.vmConsole(id);
+      const control = await api.vmControl(id);
+      if (
+        control.state === "ai" &&
+        !window.confirm(
+          `「${view.vm.name}」当前由 AI 控制。人工接管会立即撤销 AI Lease，后续 AI 桌面动作将被拒绝。确定接管吗？`,
+        )
+      ) {
+        return;
+      }
+      const info = await api.openVmConsole(id);
       if (!mountedRef.current) {
+        await api.releaseVmLease(id, info.lease.id).catch(() => undefined);
         return;
       }
       setConsoles((current) => ({ ...current, [id]: info }));
@@ -1151,14 +1162,19 @@ export function VmManager({ host, hostReserveBytes }: VmManagerProps): React.JSX
                 </p>
 
                 {consoleInfo && (
-                  <div className="console-box" role="status">
-                    <span className="muted small">控制台地址（仅回环地址）</span>
-                    <code>{consoleInfo.consoleUrl}</code>
-                    <p className="muted small">{consoleInfo.message}</p>
-                    <p className="muted small">
-                      阶段 4 才会接入 noVNC 画面与人工输入；此处不会嵌入伪造的内联控制台。
-                    </p>
-                  </div>
+                  <VmConsole
+                    key={consoleInfo.lease.id}
+                    session={consoleInfo}
+                    vmName={view.vm.name}
+                    onClose={() =>
+                      setConsoles((current) => {
+                        const next = { ...current };
+                        delete next[view.vm.id];
+                        return next;
+                      })
+                    }
+                    onReconnect={() => void openConsole(view)}
+                  />
                 )}
               </article>
             );

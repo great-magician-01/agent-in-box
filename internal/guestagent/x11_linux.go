@@ -52,16 +52,51 @@ func newX11Desktop(display string) (*x11Desktop, error) {
 }
 
 func (d *x11Desktop) Info(ctx context.Context) (DesktopInfo, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if err := d.refreshGeometry(); err != nil {
+		return DesktopInfo{}, err
+	}
+	return d.info(), nil
+}
+
+// refreshGeometry reads the current root window instead of relying on the X11
+// setup block captured at connection time. XRandR changes therefore update both
+// screenshots and input bounds without requiring an agent restart.
+func (d *x11Desktop) refreshGeometry() error {
+	geometry, err := xproto.GetGeometry(d.conn, xproto.Drawable(d.screen.Root)).Reply()
+	if err != nil {
+		return fmt.Errorf("read X11 root geometry: %w", err)
+	}
+	if geometry.Width == 0 || geometry.Height == 0 {
+		return fmt.Errorf("X11 root geometry is empty")
+	}
+	d.screen.WidthInPixels = geometry.Width
+	d.screen.HeightInPixels = geometry.Height
+	return nil
+}
+
+func (d *x11Desktop) info() DesktopInfo {
+	dpi := 96.0
+	if d.screen.WidthInMillimeters > 0 {
+		dpi = float64(d.screen.WidthInPixels) * 25.4 / float64(d.screen.WidthInMillimeters)
+	}
+	dpi = math.Round(dpi*10) / 10
 	return DesktopInfo{
 		DisplayServer: "x11",
 		Width:         int(d.screen.WidthInPixels),
 		Height:        int(d.screen.HeightInPixels),
-	}, nil
+		DPI:           dpi,
+		ScaleFactor:   math.Round(dpi/96*1000) / 1000,
+	}
 }
 
 func (d *x11Desktop) Screenshot(ctx context.Context) (image.Image, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if err := d.refreshGeometry(); err != nil {
+		return nil, err
+	}
 	width := int(d.screen.WidthInPixels)
 	height := int(d.screen.HeightInPixels)
 	reply, err := xproto.GetImage(
@@ -116,6 +151,9 @@ func (d *x11Desktop) Screenshot(ctx context.Context) (image.Image, error) {
 func (d *x11Desktop) Input(ctx context.Context, request InputRequest) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if err := d.refreshGeometry(); err != nil {
+		return err
+	}
 
 	switch request.Type {
 	case "move":

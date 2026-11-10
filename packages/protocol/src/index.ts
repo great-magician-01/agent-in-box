@@ -173,6 +173,12 @@ export interface DomainEventPayloads {
   "worker.archived": { workerId: Id; summaryRef: string | null };
   "worker.resumed": { workerId: Id; restoreMode: "native" | "summary" };
   "vm.power_changed": { vmId: Id; from: VmPowerState; to: VmPowerState };
+  "vm.control_changed": {
+    vmId: Id;
+    from: "idle" | "ai" | "human";
+    to: "idle" | "ai" | "human";
+    leaseId: Id | null;
+  };
   "bot.connected": { platform: "feishu" | "qq" };
   "bot.disconnected": { platform: "feishu" | "qq"; reason: string };
 }
@@ -739,6 +745,122 @@ export interface VmConsole {
   vmId: Id;
   consoleUrl: string;
   message: string;
+}
+
+/* Phase 4: authenticated consoles, guest RPC and unified execution control. */
+export type VmControlState = "idle" | "ai" | "human";
+export type ExecutionLeaseOwner = "worker" | "human";
+
+export interface ExecutionLeaseView {
+  id: Id;
+  vmId: Id;
+  owner: ExecutionLeaseOwner;
+  taskId: Id | null;
+  acquiredAt: IsoTimestamp;
+  expiresAt: IsoTimestamp;
+}
+
+export interface VmControlView {
+  vmId: Id;
+  state: VmControlState;
+  lease: ExecutionLeaseView | null;
+}
+
+export interface WorkerLeaseRequest {
+  taskId: Id;
+  ttlMs?: number;
+}
+
+export interface VmConsoleSession {
+  vmId: Id;
+  /** Relative loopback WebSocket URL containing a short-lived, one-time ticket. */
+  webSocketUrl: string;
+  lease: ExecutionLeaseView;
+  ticketExpiresAt: IsoTimestamp;
+}
+
+export interface GuestPoint {
+  x: number;
+  y: number;
+}
+
+export interface GuestInputAction {
+  type: "move" | "click" | "drag" | "scroll" | "type_text" | "keypress" | "wait";
+  point?: GuestPoint;
+  button?: "left" | "middle" | "right";
+  count?: number;
+  deltaX?: number;
+  deltaY?: number;
+  text?: string;
+  keys?: string[];
+  from?: GuestPoint;
+  to?: GuestPoint;
+  milliseconds?: number;
+}
+
+export interface GuestActionRequest {
+  leaseId: Id;
+  actionId?: string;
+  timeoutMs?: number;
+  action: GuestInputAction;
+}
+
+export interface GuestActionResult {
+  actionId: Id;
+  ok: boolean;
+  error?: string;
+  startedAt: IsoTimestamp;
+  durationMs: number;
+}
+
+export interface GuestAgentCapabilities {
+  protocolVersion: string;
+  agentVersion?: string;
+  displayServer: string;
+  screenshot: boolean;
+  input: boolean;
+  unicodeInput: boolean;
+  updateSupported?: boolean;
+}
+
+export interface GuestDesktopInfo {
+  displayServer: string;
+  width: number;
+  height: number;
+  dpi?: number;
+  scaleFactor?: number;
+}
+
+export interface GuestVersionHandshake {
+  agentVersion: string;
+  protocolVersion: string;
+  minimumProtocolVersion: string;
+  maximumProtocolVersion: string;
+  requestedProtocolVersion?: string;
+  compatible: boolean;
+  compatibilityError?: string;
+}
+
+export interface GuestHeartbeat {
+  status: "ok" | "degraded";
+  protocolVersion: string;
+  agentVersion: string;
+  now: IsoTimestamp;
+  uptimeSeconds: number;
+  compatible: boolean;
+  desktopAvailable: boolean;
+  requestedProtocolVersion?: string;
+  compatibilityError?: string;
+  displayServer?: string;
+  desktopError?: string;
+}
+
+export interface GuestScreenshot {
+  actionId: Id;
+  width: number;
+  height: number;
+  capturedAt: IsoTimestamp;
+  dataBase64: string;
 }
 
 export function isTaskStatus(value: unknown): value is TaskStatus {

@@ -5,6 +5,7 @@ import type { NestExpressApplication } from "@nestjs/platform-express";
 import { controlPlaneConfigFromEnv } from "@agent-in-box/config";
 import { AppModule } from "./app.module";
 import { ApiExceptionFilter } from "./http/api-exception.filter";
+import { ConsoleService } from "./vms/console.service";
 
 const ALLOWED_HOSTNAMES = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 
@@ -60,6 +61,9 @@ async function bootstrap(): Promise<void> {
   app.enableShutdownHooks();
 
   await app.listen(config.port, config.host);
+  const httpServer = app.getHttpServer();
+  const detachConsole = app.get(ConsoleService).attach(httpServer);
+  httpServer.once("close", detachConsole);
   console.log(`control-plane listening on http://${config.host}:${config.port}`);
 }
 

@@ -50,11 +50,14 @@ jobs:
       - name: Lint, typecheck, test and build
         run: pnpm check
 
+      - name: Package self-contained control plane
+        run: pnpm package:control-plane
+
       - name: Vet Go packages
         run: go vet ./...
 
       - name: Race-test stateful Go packages
-        run: go test -race ./internal/vmprovider ./internal/vmsupervisor ./internal/imagedownload
+        run: go test -race ./internal/vmprovider ./internal/vmsupervisor ./internal/imagedownload ./internal/guestagent
 
       - name: Run phase 2 service smoke test
         run: pnpm smoke:phase2
@@ -63,6 +66,20 @@ jobs:
         run: pnpm smoke:phase3
         env:
           AGENT_IN_BOX_PHASE3_RESULT: ${{ runner.temp }}/phase3-smoke.json
+
+      - name: Run phase 4 service smoke test
+        run: pnpm smoke:phase4
+        env:
+          AGENT_IN_BOX_PHASE4_RESULT: ${{ runner.temp }}/phase4-smoke.json
+
+      - name: Upload phase 4 smoke result
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase4-smoke-${{ runner.os }}
+          path: ${{ runner.temp }}/phase4-smoke.json
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Upload phase 3 smoke result
         if: success()

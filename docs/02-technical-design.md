@@ -452,6 +452,10 @@ getProcessHealth()
 
 管理通道优先使用隔离的 Host-Guest 通道；不支持时使用仅绑定管理网络、具有 mTLS 或等效认证的通道。该接口不能暴露到 VM 的普通业务网络或公网。
 
+**阶段 4 实现状态（2026-11-11）**：Guest Agent 提供 Bearer 文件令牌轮换/撤销、心跳、版本兼容、能力、截图、桌面信息与动作接口；动作 ID 有界去重，单动作超时硬上限 30 秒。X11 输入/截图前重新读取 Root Window 几何，返回 DPI/ScaleFactor。更新接口仅将固定大小和 SHA-256 的 HTTPS/回环 HTTP 构建安全暂存，由外部服务管理器激活，不执行下载命令。宿主控制平面逐请求读取 VM 对应 Guest 令牌；真实 X11、更新重启与回滚仍需 VM 验收。
+
+noVNC 使用控制平面回环 WebSocket 代理和一次性短时票据。代理严格处理 RFB 3.8 协商与消息边界，KeyEvent、PointerEvent、ClientCutText 均逐条调用统一 Lease；ServerInit 前的额外输入会缓存并在之后接受相同检查，不作为协商字节绕过。控制平面复用 SQLite `vm_leases`，输入和接管共享 Per-VM 锁，人工接管撤销 AI Lease，控制变化写 Outbox。详细边界见 [`tests/phase4/summary.md`](../tests/phase4/summary.md)。
+
 ### 9.2 Computer Use 动作协议
 
 基础动作：

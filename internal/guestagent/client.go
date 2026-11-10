@@ -9,6 +9,7 @@ import (
 	"image/png"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -30,11 +31,14 @@ func NewClient(baseURL string, token string) *Client {
 	}
 }
 
-// RPCError preserves the HTTP status and guest error code.
+// RPCError preserves the HTTP status, guest error code, and any action id or
+// update compatibility metadata included in the error response.
 type RPCError struct {
-	StatusCode int
-	Code       string
-	Message    string
+	StatusCode    int
+	Code          string
+	Message       string
+	ActionID      string
+	Compatibility *UpdateCompatibility
 }
 
 func (e *RPCError) Error() string {
@@ -55,16 +59,42 @@ func (c *Client) newRequest(ctx context.Context, method string, path string, bod
 
 func decodeRPCError(response *http.Response) error {
 	var payload struct {
-		Error struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
+		ActionID      string               `json:"actionId"`
+		ErrorCode     string               `json:"errorCode"`
+		Error         json.RawMessage      `json:"error"`
+		Compatibility *UpdateCompatibility `json:"compatibility"`
 	}
 	_ = json.NewDecoder(response.Body).Decode(&payload)
-	if payload.Error.Message == "" {
-		payload.Error.Message = response.Status
+
+	code := payload.ErrorCode
+	message := ""
+	if len(payload.Error) > 0 {
+		var structured struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		}
+		if err := json.Unmarshal(payload.Error, &structured); err == nil &&
+			(structured.Code != "" || structured.Message != "") {
+			code = structured.Code
+			message = structured.Message
+		} else {
+			// Input actions historically returned the error as a plain string.
+			var text string
+			if err := json.Unmarshal(payload.Error, &text); err == nil {
+				message = text
+			}
+		}
 	}
-	return &RPCError{StatusCode: response.StatusCode, Code: payload.Error.Code, Message: payload.Error.Message}
+	if message == "" {
+		message = response.Status
+	}
+	return &RPCError{
+		StatusCode:    response.StatusCode,
+		Code:          code,
+		Message:       message,
+		ActionID:      payload.ActionID,
+		Compatibility: payload.Compatibility,
+	}
 }
 
 func (c *Client) doJSON(ctx context.Context, method string, path string, input any, output any) error {
@@ -100,6 +130,25 @@ func (c *Client) Capabilities(ctx context.Context) (Capabilities, error) {
 	return result, err
 }
 
+func (c *Client) Heartbeat(ctx context.Context) (Heartbeat, error) {
+	var result Heartbeat
+	err := c.doJSON(ctx, http.MethodGet, "/v1/heartbeat", nil, &result)
+	return result, err
+}
+
+// VersionHandshake asks the guest which protocol it speaks and whether the
+// caller's protocol is compatible. An empty requested protocol skips the
+// compatibility check.
+func (c *Client) VersionHandshake(ctx context.Context, requestedProtocol string) (VersionInfo, error) {
+	path := "/v1/version"
+	if requestedProtocol != "" {
+		path += "?protocolVersion=" + url.QueryEscape(requestedProtocol)
+	}
+	var result VersionInfo
+	err := c.doJSON(ctx, http.MethodGet, path, nil, &result)
+	return result, err
+}
+
 func (c *Client) DesktopInfo(ctx context.Context) (DesktopInfo, error) {
 	var result DesktopInfo
 	err := c.doJSON(ctx, http.MethodGet, "/v1/desktop", nil, &result)
@@ -109,6 +158,14 @@ func (c *Client) DesktopInfo(ctx context.Context) (DesktopInfo, error) {
 func (c *Client) Input(ctx context.Context, request InputRequest) (ActionResult, error) {
 	var result ActionResult
 	err := c.doJSON(ctx, http.MethodPost, "/v1/input", request, &result)
+	return result, err
+}
+
+// Update asks the guest to verify and stage an update. The agent reports
+// restartRequired but does not restart itself.
+func (c *Client) Update(ctx context.Context, manifest UpdateManifest) (UpdateResult, error) {
+	var result UpdateResult
+	err := c.doJSON(ctx, http.MethodPost, "/v1/update", manifest, &result)
 	return result, err
 }
 

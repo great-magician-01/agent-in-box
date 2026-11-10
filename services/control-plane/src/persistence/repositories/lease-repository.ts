@@ -1,7 +1,9 @@
 import type { Kysely } from "kysely";
+import { Inject } from "@nestjs/common";
 import type { VmLeaseRecord } from "@agent-in-box/domain";
 import type { DatabaseExecutor } from "../executor";
 import type { DatabaseSchema } from "../schema";
+import { KYSELY } from "../tokens";
 
 function toLeaseRecord(row: {
   id: string;
@@ -25,7 +27,7 @@ function toLeaseRecord(row: {
 }
 
 export class LeaseRepository {
-  constructor(private readonly db: Kysely<DatabaseSchema>) {}
+  constructor(@Inject(KYSELY) private readonly db: Kysely<DatabaseSchema>) {}
 
   async getByVm(
     vmId: string,

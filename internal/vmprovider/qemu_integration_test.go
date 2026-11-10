@@ -53,6 +53,7 @@ func TestQemuProviderIntegration(t *testing.T) {
 		CPUCount:      2,
 		MemoryMB:      2048,
 		DiskSizeGB:    20,
+		Desktop:       true,
 	})
 	if err != nil {
 		t.Fatalf("create vm: %v", err)
@@ -104,6 +105,19 @@ func TestQemuProviderIntegration(t *testing.T) {
 	}
 	if state.PID != originalPID {
 		t.Fatalf("idempotent start launched a new process: old %d new %d", originalPID, state.PID)
+	}
+
+	state, err = restarted.SuspendVm(ctx, vmID)
+	if err != nil || state.PowerState != PowerSuspended {
+		t.Fatalf("suspend: %+v %v", state, err)
+	}
+	state, err = restarted.StartVm(ctx, vmID)
+	if err != nil || state.PowerState != PowerSuspended {
+		t.Fatalf("start must not hide suspended state: %+v %v", state, err)
+	}
+	state, err = restarted.ResumeVm(ctx, vmID)
+	if err != nil || state.PowerState != PowerRunning || state.PID != originalPID {
+		t.Fatalf("resume: %+v %v", state, err)
 	}
 
 	state, err = restarted.StopVm(ctx, vmID, "graceful")

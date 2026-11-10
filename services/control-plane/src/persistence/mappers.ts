@@ -63,6 +63,13 @@ export function toImageRecord(row: Selectable<ImagesTable>): ImageRecord {
     localPath: row.local_path,
     createdAt: row.created_at,
     verifiedAt: row.verified_at,
+    sourceUrl: row.source_url,
+    fileName: row.file_name,
+    downloadedBytes: row.downloaded_bytes,
+    errorCode: row.error_code,
+    errorMessage: row.error_message,
+    updatedAt: row.updated_at || row.created_at,
+    seedLocalPath: row.seed_local_path,
   };
 }
 

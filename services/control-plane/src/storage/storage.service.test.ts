@@ -10,8 +10,14 @@ import { StorageService, type StorageServiceOptions } from "./storage.service";
 import { StorageError, StorageLockedError } from "./storage-errors";
 
 const temporaryDirectories: string[] = [];
+const openDatabases: AppDatabase[] = [];
 
 afterEach(async () => {
+  for (const app of openDatabases.splice(0)) {
+    if (app.sqlite.open) {
+      await app.close();
+    }
+  }
   for (const directory of temporaryDirectories.splice(0)) {
     await rm(directory, { recursive: true, force: true });
   }
@@ -51,6 +57,7 @@ async function createFixture(
   await writeFile(path.join(root, "archives", "worker.json"), "archive");
 
   const app = AppDatabase.open({ filename: path.join(root, "agent-in-box.sqlite") });
+  openDatabases.push(app);
   await app.migrate();
   const catalog = new CatalogRepository(app.db);
   await catalog.createProject({ name: "Storage test project" });
@@ -109,7 +116,7 @@ describe("storage path validation", () => {
     expect((await fixture.service.validateRoot(file)).errors).toContain("所选路径已存在但不是目录");
   });
 
-  it("resolves symlinks and reports a warning", async () => {
+  it.skipIf(process.platform === "win32")("resolves symlinks and reports a warning", async () => {
     const fixture = await createFixture();
     const realTarget = path.join(fixture.dir, "real-target");
     const link = path.join(fixture.dir, "link-target");
@@ -123,7 +130,7 @@ describe("storage path validation", () => {
     expect(validation.warnings.join("\n")).toContain("符号链接");
   });
 
-  it("reports an unwritable directory", async () => {
+  it.skipIf(process.platform === "win32")("reports an unwritable directory", async () => {
     if (process.getuid?.() === 0) {
       return;
     }
@@ -233,29 +240,32 @@ describe("storage migration", () => {
     }
   });
 
-  it("leaves the old path usable when copying fails", async () => {
-    const fixture = await createFixture();
-    await symlink("/tmp", path.join(fixture.root, "images", "external-link"));
-    const target = path.join(fixture.dir, "broken-target");
+  it.skipIf(process.platform === "win32")(
+    "leaves the old path usable when copying fails",
+    async () => {
+      const fixture = await createFixture();
+      await symlink("/tmp", path.join(fixture.root, "images", "external-link"));
+      const target = path.join(fixture.dir, "broken-target");
 
-    await expect(fixture.service.migrateTo(target)).rejects.toBeInstanceOf(StorageError);
+      await expect(fixture.service.migrateTo(target)).rejects.toBeInstanceOf(StorageError);
 
-    const config = readAppConfig(fixture.configPath);
-    expect(config.dataRoot).toBe(fixture.root);
-    expect(config.pendingMigration).toBeUndefined();
-    expect(await readFile(path.join(fixture.root, "images", "base.qcow2"), "utf8")).toBe(
-      "base image",
-    );
-    const project = await fixture.app.db.selectFrom("projects").selectAll().executeTakeFirst();
-    expect(project?.name).toBe("Storage test project");
-    await expect(stat(target)).rejects.toThrow();
+      const config = readAppConfig(fixture.configPath);
+      expect(config.dataRoot).toBe(fixture.root);
+      expect(config.pendingMigration).toBeUndefined();
+      expect(await readFile(path.join(fixture.root, "images", "base.qcow2"), "utf8")).toBe(
+        "base image",
+      );
+      const project = await fixture.app.db.selectFrom("projects").selectAll().executeTakeFirst();
+      expect(project?.name).toBe("Storage test project");
+      await expect(stat(target)).rejects.toThrow();
 
-    const audit = await fixture.app.db
-      .selectFrom("storage_migrations")
-      .selectAll()
-      .executeTakeFirst();
-    expect(audit?.status).toBe("failed");
-  });
+      const audit = await fixture.app.db
+        .selectFrom("storage_migrations")
+        .selectAll()
+        .executeTakeFirst();
+      expect(audit?.status).toBe("failed");
+    },
+  );
 
   it("refuses to migrate when the root is controlled by the environment", async () => {
     const fixture = await createFixture({ source: "environment" });

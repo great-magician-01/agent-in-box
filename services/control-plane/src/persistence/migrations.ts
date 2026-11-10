@@ -353,6 +353,50 @@ const migrations: Record<string, MigrationDefinition> = {
       }
     },
   },
+  "003_phase3_images": {
+    async up(db: Kysely<DatabaseSchema>): Promise<void> {
+      await db.schema
+        .alterTable("images")
+        .addColumn("source_url", "text", (column) => column.notNull().defaultTo(""))
+        .execute();
+      await db.schema
+        .alterTable("images")
+        .addColumn("file_name", "text", (column) => column.notNull().defaultTo(""))
+        .execute();
+      await db.schema
+        .alterTable("images")
+        .addColumn("downloaded_bytes", "integer", (column) => column.notNull().defaultTo(0))
+        .execute();
+      await db.schema.alterTable("images").addColumn("error_code", "text").execute();
+      await db.schema.alterTable("images").addColumn("error_message", "text").execute();
+      await db.schema
+        .alterTable("images")
+        .addColumn("updated_at", "text", (column) => column.notNull().defaultTo(""))
+        .execute();
+      await db.schema.alterTable("images").addColumn("seed_local_path", "text").execute();
+      await db.schema
+        .alterTable("images")
+        .addColumn("manifest_json", "text", (column) => column.notNull().defaultTo(""))
+        .execute();
+      await db.schema.createIndex("images_status_idx").on("images").column("status").execute();
+    },
+
+    async down(db: Kysely<DatabaseSchema>): Promise<void> {
+      await db.schema.dropIndex("images_status_idx").ifExists().execute();
+      for (const column of [
+        "manifest_json",
+        "seed_local_path",
+        "updated_at",
+        "error_message",
+        "error_code",
+        "downloaded_bytes",
+        "file_name",
+        "source_url",
+      ]) {
+        await db.schema.alterTable("images").dropColumn(column).execute();
+      }
+    },
+  },
 };
 
 export async function migrateToLatest(db: Kysely<DatabaseSchema>): Promise<string[]> {

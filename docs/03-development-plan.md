@@ -15,7 +15,8 @@
 - **真实模型任务证据**：终端中文输入、桌面 Home 双击打开 Thunar、Mousepad 多行编辑保存均通过；Pi 图片回传、活跃工具 Abort、Session Resume 和真实 Pi Adapter 集成测试通过。
 - **WHPX 稳定性证据**：Provider 生命周期累计 9 次通过，桌面 10 分钟长稳 20/20 采样正常；Unicode VM 路径经短路径/ASCII junction 修复后，C:/D: 的真实创建/启动/停止/快照恢复均通过。
 - **保留的负面结果与外部门槛**：Epiphany HTML5 drag-and-drop 失败；出现过一次 Guest 内核 panic，需更长 soak；Hyper-V 需 Pro/Enterprise 环境；Wayland 首版不支持；真实飞书/QQ 凭据验收仍待测试应用；真实镜像 CDN 与断电恢复待补。
-- **下一步**：进入阶段 3（Image Service、VM Supervisor 完整生命周期 API/ACL、Linux Guest 创建启动、VM 管理 UI），同时把 PiWorkerEngine 接入 Task Service、Per-VM Lease 和 Worker Registry。Windows NSIS 安装包与干净 Windows Smoke Test、真实飞书/QQ 和长时稳定性作为发布前验收门槛持续跟踪。
+- **阶段 3 完成（代码与本机服务验证）**：Image Service 的 Manifest/白名单/不可变版本、续传/取消/去重/SSE/重启恢复；Supervisor 的完整 QEMU 生命周期 API、ACL、进程/QMP 对账；Linux VM 控制平面与资源/绑定/任务/健康分离的管理 UI。`pnpm check` 与 Windows 服务 Smoke 通过。当前环境未重新执行真实 QEMU/WHPX 回归，未关闭门槛见 [`tests/phase3/summary.md`](../tests/phase3/summary.md)。
+- **下一步**：进入阶段 4（Guest Agent 管理通道与更新握手、noVNC 实时画面和人工控制、统一 Execution Lease），并将 PiWorkerEngine 接入 Task Service、Per-VM Lease 和 Worker Registry。真实 QEMU/WHPX 阶段 3 回归、Electron 托管 Supervisor、Windows NSIS 安装包与干净 Windows Smoke Test、真实飞书/QQ 和长时稳定性作为发布前验收门槛持续跟踪。
 
 1. 先验证 Hypervisor、镜像、Pi Computer Use 和模型代理等高风险链路，再大规模开发 UI。
 2. 每个阶段形成可运行、可测试的纵向能力，避免一次性生成大量空模块。
@@ -253,6 +254,8 @@
 ---
 
 ## 阶段 3：镜像和 VM 生命周期
+
+> 实现与验收状态见 [`tests/phase3/summary.md`](../tests/phase3/summary.md)。以下工作项已落地；真实 Hypervisor 回归和安装集成等未关闭门槛按验收记录继续执行。
 
 ### 3.1 实现 Image Service
 

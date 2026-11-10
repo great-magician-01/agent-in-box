@@ -34,14 +34,14 @@ describe("desktop paths", () => {
     expect(
       resolveDesktopPaths("linux", { XDG_CONFIG_HOME: "/home/me/.config" }, "/home/me"),
     ).toMatchObject({
-      configDirectory: "/home/me/.config/agent-in-box",
-      logDirectory: "/home/me/.config/agent-in-box/logs",
+      configDirectory: path.join("/home/me/.config", "agent-in-box"),
+      logDirectory: path.join("/home/me/.config", "agent-in-box", "logs"),
     });
     expect(
       resolveDesktopPaths("linux", { AGENT_IN_BOX_CONFIG_DIR: "/tmp/config" }, "/x"),
     ).toMatchObject({
-      configPath: "/tmp/config/app-config.json",
-      credentialsPath: "/tmp/config/credentials.json",
+      configPath: path.join(path.resolve("/tmp/config"), "app-config.json"),
+      credentialsPath: path.join(path.resolve("/tmp/config"), "credentials.json"),
     });
   });
 });

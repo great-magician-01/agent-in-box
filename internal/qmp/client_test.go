@@ -123,6 +123,34 @@ func TestClientErrorResponse(t *testing.T) {
 	}
 }
 
+func TestClientStopAndContUseFixedCommands(t *testing.T) {
+	address, commands := startFakeServer(t, func(command recordedCommand) []string {
+		return []string{`{"return":{}}`}
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	client, err := Dial(ctx, address, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer client.Close()
+
+	if err := client.Stop(ctx); err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	if err := client.Cont(ctx); err != nil {
+		t.Fatalf("cont: %v", err)
+	}
+
+	if len(*commands) != 3 {
+		t.Fatalf("expected handshake + 2 commands, got %+v", *commands)
+	}
+	if (*commands)[1].Execute != "stop" || (*commands)[2].Execute != "cont" {
+		t.Fatalf("unexpected commands: %+v", *commands)
+	}
+}
+
 func TestClientInputEncoding(t *testing.T) {
 	address, commands := startFakeServer(t, func(command recordedCommand) []string {
 		return []string{`{"return":{}}`}

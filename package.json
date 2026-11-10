@@ -27,6 +27,7 @@
     "package:desktop:win": "pnpm package:prepare && pnpm --filter @agent-in-box/desktop dist:win",
     "package:desktop:win:portable": "pnpm package:prepare && pnpm --filter @agent-in-box/desktop dist:win:portable",
     "smoke:phase2": "pnpm build:packages && pnpm --filter @agent-in-box/control-plane build && pnpm --filter @agent-in-box/web build && node scripts/smoke-phase2.mjs",
+    "smoke:phase3": "pnpm build:packages && pnpm --filter @agent-in-box/control-plane build && pnpm --filter @agent-in-box/web build && tsx scripts/smoke-phase3.mts",
     "smoke:desktop": "node scripts/smoke-desktop-package.mjs"
   },
   "devDependencies": {

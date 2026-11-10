@@ -25,38 +25,45 @@ var (
 	ErrNotFound       = errors.New("vm not found")
 	ErrAlreadyExists  = errors.New("vm already exists")
 	ErrNotStopped     = errors.New("vm must be stopped for this operation")
+	ErrNotRunning     = errors.New("vm is not running")
 	ErrUnsupported    = errors.New("operation is not supported by this provider")
 	ErrInvalidSpec    = errors.New("invalid vm specification")
 	ErrQmpUnavailable = errors.New("qmp is unavailable")
 )
 
-// VmSpec is the fixed, validated input for QEMU VM creation.
+// VmSpec is the fixed, validated input for QEMU VM creation. The JSON tags are
+// the HTTP boundary contract; encoding/json still accepts the historical
+// upper-case field names from vm.json case-insensitively.
 type VmSpec struct {
-	ID            string
-	Name          string
-	BaseImagePath string
-	SeedImagePath string
-	CPUCount      int
-	MemoryMB      int
-	DiskSizeGB    int
-	Desktop       bool
-	QMPPort       int
-	SSHHostPort   int
-	VNCDisplay    int
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	BaseImagePath string `json:"baseImagePath"`
+	SeedImagePath string `json:"seedImagePath"`
+	CPUCount      int    `json:"cpuCount"`
+	MemoryMB      int    `json:"memoryMb"`
+	DiskSizeGB    int    `json:"diskSizeGb"`
+	Desktop       bool   `json:"desktop"`
+	QMPPort       int    `json:"qmpPort"`
+	SSHHostPort   int    `json:"sshHostPort"`
+	GuestHostPort int    `json:"guestHostPort"`
+	VNCDisplay    int    `json:"vncDisplay"`
 }
 
-// VmState is persisted in the VM directory and reconciled with the real process.
+// VmState is persisted in the VM directory and reconciled with the real
+// process. PowerState and GuestHealth are deliberately separate: suspend/resume
+// only changes the power state and never fabricates guest health.
 type VmState struct {
-	ID          string
-	PowerState  PowerState
-	PID         int
-	QMPPort     int
-	SSHHostPort int
-	ConsoleURL  string
-	DiskPath    string
-	GuestHealth string
-	LastError   string
-	UpdatedAt   time.Time
+	ID            string     `json:"id"`
+	PowerState    PowerState `json:"powerState"`
+	PID           int        `json:"pid"`
+	QMPPort       int        `json:"qmpPort"`
+	SSHHostPort   int        `json:"sshHostPort"`
+	GuestHostPort int        `json:"guestHostPort"`
+	ConsoleURL    string     `json:"consoleUrl"`
+	DiskPath      string     `json:"diskPath"`
+	GuestHealth   string     `json:"guestHealth"`
+	LastError     string     `json:"lastError"`
+	UpdatedAt     time.Time  `json:"updatedAt"`
 }
 
 // Provider is the Go counterpart of the shared protocol VmProvider contract.
@@ -64,6 +71,8 @@ type Provider interface {
 	CreateVm(ctx context.Context, spec VmSpec) (VmState, error)
 	StartVm(ctx context.Context, vmID string) (VmState, error)
 	StopVm(ctx context.Context, vmID string, mode string) (VmState, error)
+	SuspendVm(ctx context.Context, vmID string) (VmState, error)
+	ResumeVm(ctx context.Context, vmID string) (VmState, error)
 	GetVmState(ctx context.Context, vmID string) (VmState, error)
 	CreateSnapshot(ctx context.Context, vmID string, tag string) (VmState, error)
 	RestoreSnapshot(ctx context.Context, vmID string, tag string) (VmState, error)

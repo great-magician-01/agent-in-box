@@ -2,59 +2,91 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
-	"agent-in-box/internal/health"
 	"agent-in-box/internal/vmprovider"
+	"agent-in-box/internal/vmsupervisor"
 )
 
 const version = "0.1.0"
 
-func defaultStorageRoot() string {
-	if root := os.Getenv("AGENT_IN_BOX_DATA_ROOT"); root != "" {
-		return filepath.Join(root, "vms")
-	}
-	localAppData := os.Getenv("LOCALAPPDATA")
-	if localAppData == "" {
-		return "vms"
-	}
-	return filepath.Join(localAppData, "AgentInBox", "vms")
-}
-
 func main() {
-	addr := flag.String("addr", "127.0.0.1:7610", "loopback address for the supervisor health surface")
-	storageRoot := flag.String("storage-root", defaultStorageRoot(), "VM storage root used for capability and disk checks")
+	defaultStorageRoot, err := vmsupervisor.DefaultStorageRoot(vmsupervisor.StoragePathOptions{})
+	if err != nil {
+		_, _ = os.Stderr.WriteString("resolve vm storage root: " + err.Error() + "\n")
+		os.Exit(1)
+	}
+	addr := flag.String("addr", "127.0.0.1:7610", "loopback address for the supervisor API")
+	storageRoot := flag.String("storage-root", defaultStorageRoot, "VM storage root")
 	qemuSystem := flag.String("qemu-system", "qemu-system-x86_64", "fixed QEMU system executable")
+	qemuImg := flag.String("qemu-img", "qemu-img", "fixed qemu-img executable")
+	accelerator := flag.String("accelerator", "", "QEMU accelerator (default: whpx on Windows, kvm elsewhere)")
+	aclTokenFile := flag.String("acl-token-file", "", "ACL bearer token file (default: <data-root>/supervisor-acl.token)")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	healthHandler := health.NewHandler("vm-supervisor", version)
-	mux := http.NewServeMux()
-	mux.Handle("/healthz", healthHandler)
-	mux.Handle("/readyz", healthHandler)
-	mux.HandleFunc("GET /api/v1/host", func(w http.ResponseWriter, request *http.Request) {
-		inspection := vmprovider.InspectHost(request.Context(), vmprovider.QemuConfig{
-			SystemBinary: *qemuSystem,
-			StorageRoot:  *storageRoot,
-		})
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-store")
-		_ = json.NewEncoder(w).Encode(inspection)
+
+	if err := vmsupervisor.ValidateListenAddress(*addr); err != nil {
+		logger.Error("refusing non-loopback listen address", "addr", *addr, "error", err)
+		os.Exit(1)
+	}
+
+	provider, err := vmprovider.NewQemuProvider(vmprovider.QemuConfig{
+		SystemBinary: *qemuSystem,
+		ImageBinary:  *qemuImg,
+		StorageRoot:  *storageRoot,
+		Accelerator:  *accelerator,
+		Logger:       logger,
 	})
+	if err != nil {
+		logger.Error("create qemu provider", "error", err)
+		os.Exit(1)
+	}
+
+	token, err := vmsupervisor.ResolveACLToken(vmsupervisor.TokenOptions{
+		File:        *aclTokenFile,
+		StorageRoot: *storageRoot,
+	})
+	if err != nil {
+		logger.Error("resolve supervisor acl token", "error", err)
+		os.Exit(1)
+	}
+
+	supervisor, err := vmsupervisor.New(vmsupervisor.Config{
+		StorageRoot: *storageRoot,
+		Provider:    provider,
+		Token:       token.Token,
+		Logger:      logger,
+		ServiceName: "vm-supervisor",
+		Version:     version,
+		QemuConfig: vmprovider.QemuConfig{
+			SystemBinary: *qemuSystem,
+			ImageBinary:  *qemuImg,
+			StorageRoot:  *storageRoot,
+			Accelerator:  *accelerator,
+			Logger:       logger,
+		},
+	})
+	if err != nil {
+		logger.Error("create supervisor", "error", err)
+		os.Exit(1)
+	}
 
 	server := &http.Server{
 		Addr:              *addr,
-		Handler:           mux,
+		Handler:           supervisor,
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      120 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    16 << 10,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -62,7 +94,10 @@ func main() {
 
 	errCh := make(chan error, 1)
 	go func() {
-		logger.Info("vm-supervisor listening", "addr", *addr, "version", version)
+		// Never log token.Token itself; the path is safe operational context.
+		logger.Info("vm-supervisor listening",
+			"addr", *addr, "version", version,
+			"storageRoot", *storageRoot, "aclTokenFile", token.Path)
 		errCh <- server.ListenAndServe()
 	}()
 

@@ -16,6 +16,7 @@ import type {
 } from "@agent-in-box/protocol";
 import { api, ApiRequestError } from "./api";
 import { chooseDirectory, saveCloseBehavior } from "./desktop";
+import { VmManager } from "./VmManager";
 import {
   CONTROL_PLANE_STATE_LABELS,
   DATA_ROOT_SOURCE_LABELS,
@@ -321,6 +322,13 @@ export function Dashboard({
           </dl>
         </article>
       </section>
+
+      <VmManager
+        host={host}
+        hostReserveBytes={
+          settings?.resourcePolicy.hostReserveBytes ?? onboarding.resourcePolicy.hostReserveBytes
+        }
+      />
 
       <section className="panel">
         <div className="panel-heading">

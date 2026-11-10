@@ -40,6 +40,10 @@ type QemuConfig struct {
 // QemuProvider manages one qcow2 overlay and one QEMU process per VM.
 type QemuProvider struct {
 	config QemuConfig
+	// locks serializes lifecycle operations per VM. A single supervisor process
+	// is the only writer of vm.json, so this is sufficient to prevent concurrent
+	// start/stop/suspend/resume races.
+	locks keyedMutex
 }
 
 func NewQemuProvider(config QemuConfig) (*QemuProvider, error) {
@@ -178,6 +182,8 @@ func (p *QemuProvider) CreateVm(ctx context.Context, spec VmSpec) (VmState, erro
 	if err := validateSpec(spec); err != nil {
 		return VmState{}, err
 	}
+	unlock := p.locks.Lock(spec.ID)
+	defer unlock()
 	dir, err := p.vmDir(spec.ID)
 	if err != nil {
 		return VmState{}, err
@@ -199,6 +205,12 @@ func (p *QemuProvider) CreateVm(ctx context.Context, spec VmSpec) (VmState, erro
 		spec.SSHHostPort, err = freePort()
 		if err != nil {
 			return VmState{}, fmt.Errorf("allocate ssh port: %w", err)
+		}
+	}
+	if spec.GuestHostPort == 0 {
+		spec.GuestHostPort, err = freePort()
+		if err != nil {
+			return VmState{}, fmt.Errorf("allocate guest agent port: %w", err)
 		}
 	}
 	if spec.VNCDisplay == 0 {
@@ -232,13 +244,14 @@ func (p *QemuProvider) CreateVm(ctx context.Context, spec VmSpec) (VmState, erro
 		Spec:      spec,
 		CreatedAt: time.Now().UTC(),
 		State: VmState{
-			ID:          spec.ID,
-			PowerState:  PowerStopped,
-			QMPPort:     spec.QMPPort,
-			SSHHostPort: spec.SSHHostPort,
-			ConsoleURL:  fmt.Sprintf("vnc://127.0.0.1:%d", 5900+spec.VNCDisplay),
-			DiskPath:    diskPath,
-			GuestHealth: "unknown",
+			ID:            spec.ID,
+			PowerState:    PowerStopped,
+			QMPPort:       spec.QMPPort,
+			SSHHostPort:   spec.SSHHostPort,
+			GuestHostPort: spec.GuestHostPort,
+			ConsoleURL:    fmt.Sprintf("vnc://127.0.0.1:%d", 5900+spec.VNCDisplay),
+			DiskPath:      diskPath,
+			GuestHealth:   "unknown",
 		},
 	}
 	if err := p.save(metadata); err != nil {
@@ -289,8 +302,12 @@ func buildQemuArgsWithResolver(metadata *vmMetadata, accelerator string, cpuMode
 		// absolute pointer input without requiring a q35 USB controller.
 		args = append(args, "-vga", "none", "-device", "virtio-gpu-pci", "-device", "virtio-tablet-pci")
 	}
+	network := fmt.Sprintf("user,id=n0,hostfwd=tcp:127.0.0.1:%d-:22", spec.SSHHostPort)
+	if spec.GuestHostPort > 0 {
+		network += fmt.Sprintf(",hostfwd=tcp:127.0.0.1:%d-:7611", spec.GuestHostPort)
+	}
 	args = append(args,
-		"-netdev", fmt.Sprintf("user,id=n0,hostfwd=tcp:127.0.0.1:%d-:22", spec.SSHHostPort),
+		"-netdev", network,
 		"-device", "virtio-net-pci,netdev=n0",
 		"-display", "none",
 		"-vnc", fmt.Sprintf("127.0.0.1:%d", spec.VNCDisplay),
@@ -313,6 +330,9 @@ func (p *QemuProvider) failStart(metadata *vmMetadata, err error) (VmState, erro
 }
 
 func (p *QemuProvider) StartVm(ctx context.Context, vmID string) (VmState, error) {
+	unlock := p.locks.Lock(vmID)
+	defer unlock()
+
 	metadata, err := p.load(vmID)
 	if err != nil {
 		return VmState{}, err
@@ -321,9 +341,17 @@ func (p *QemuProvider) StartVm(ctx context.Context, vmID string) (VmState, error
 		qmpCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		defer cancel()
 		if client, err := qmp.Dial(qmpCtx, p.qmpAddress(metadata), nil); err == nil {
-			defer client.Close()
-			if _, err := client.QueryStatus(qmpCtx); err == nil {
-				metadata.State.PowerState = PowerRunning
+			status, queryErr := client.QueryStatus(qmpCtx)
+			_ = client.Close()
+			if queryErr == nil {
+				switch status.Status {
+				case "running":
+					metadata.State.PowerState = PowerRunning
+				case "suspended", "paused":
+					metadata.State.PowerState = PowerSuspended
+				default:
+					return VmState{}, fmt.Errorf("%w: existing qemu process is %s", ErrNotRunning, status.Status)
+				}
 				metadata.State.LastError = ""
 				return metadata.State, p.save(metadata)
 			}
@@ -387,8 +415,9 @@ func (p *QemuProvider) StartVm(ctx context.Context, vmID string) (VmState, error
 		dialCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		client, err := qmp.Dial(dialCtx, p.qmpAddress(metadata), nil)
 		if err == nil {
-			defer client.Close()
-			if _, err := client.QueryStatus(dialCtx); err == nil {
+			_, queryErr := client.QueryStatus(dialCtx)
+			_ = client.Close()
+			if queryErr == nil {
 				cancel()
 				metadata.State.PowerState = PowerRunning
 				return metadata.State, p.save(metadata)
@@ -407,6 +436,9 @@ func (p *QemuProvider) StopVm(ctx context.Context, vmID string, mode string) (Vm
 	if mode != "graceful" && mode != "force" {
 		return VmState{}, fmt.Errorf("%w: stop mode must be graceful or force", ErrInvalidSpec)
 	}
+	unlock := p.locks.Lock(vmID)
+	defer unlock()
+
 	metadata, err := p.load(vmID)
 	if err != nil {
 		return VmState{}, err
@@ -427,12 +459,12 @@ func (p *QemuProvider) StopVm(ctx context.Context, vmID string, mode string) (Vm
 	qmpCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	client, qmpErr := qmp.Dial(qmpCtx, p.qmpAddress(metadata), nil)
 	if qmpErr == nil {
-		defer client.Close()
 		if mode == "graceful" {
 			qmpErr = client.SystemPowerdown(qmpCtx)
 		} else {
 			qmpErr = client.Quit(qmpCtx)
 		}
+		_ = client.Close()
 	}
 	cancel()
 	if qmpErr != nil && mode == "graceful" {
@@ -459,6 +491,9 @@ func (p *QemuProvider) StopVm(ctx context.Context, vmID string, mode string) (Vm
 }
 
 func (p *QemuProvider) GetVmState(ctx context.Context, vmID string) (VmState, error) {
+	unlock := p.locks.Lock(vmID)
+	defer unlock()
+
 	metadata, err := p.load(vmID)
 	if err != nil {
 		return VmState{}, err
@@ -485,18 +520,146 @@ func (p *QemuProvider) GetVmState(ctx context.Context, vmID string) (VmState, er
 		metadata.State.LastError = err.Error()
 		return metadata.State, p.save(metadata)
 	}
+	metadata.State.PowerState = powerStateFromQMP(status.Status)
+	metadata.State.LastError = ""
+	return metadata.State, p.save(metadata)
+}
+
+func powerStateFromQMP(status string) PowerState {
+	switch status {
+	case "running":
+		return PowerRunning
+	case "suspended", "paused":
+		return PowerSuspended
+	case "shutdown":
+		return PowerStopped
+	default:
+		return PowerError
+	}
+}
+
+// suspendClient opens one short-lived QMP connection for a state transition.
+// It never forwards arbitrary commands: only query-status, stop and cont are
+// reachable through this path.
+func (p *QemuProvider) suspendClient(ctx context.Context, metadata *vmMetadata) (*qmp.Client, context.Context, context.CancelFunc, error) {
+	qmpCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	client, err := qmp.Dial(qmpCtx, p.qmpAddress(metadata), nil)
+	if err != nil {
+		cancel()
+		return nil, nil, nil, fmt.Errorf("%w: %v", ErrQmpUnavailable, err)
+	}
+	return client, qmpCtx, cancel, nil
+}
+
+// SuspendVm pauses vCPUs through the fixed QMP stop command. A VM that is
+// already suspended is returned unchanged (idempotent); the command is only
+// sent when query-status reports a running VM.
+func (p *QemuProvider) SuspendVm(ctx context.Context, vmID string) (VmState, error) {
+	unlock := p.locks.Lock(vmID)
+	defer unlock()
+
+	metadata, err := p.load(vmID)
+	if err != nil {
+		return VmState{}, err
+	}
+	if metadata.State.PID == 0 || !processAlive(metadata.State.PID) {
+		metadata.State.PID = 0
+		metadata.State.PowerState = PowerStopped
+		metadata.State.GuestHealth = "unknown"
+		if err := p.save(metadata); err != nil {
+			return VmState{}, err
+		}
+		return VmState{}, fmt.Errorf("%w: cannot suspend a stopped vm", ErrNotRunning)
+	}
+
+	client, qmpCtx, cancel, err := p.suspendClient(ctx, metadata)
+	if err != nil {
+		return p.failSuspendResume(metadata, err)
+	}
+	defer cancel()
+	defer client.Close()
+
+	status, err := client.QueryStatus(qmpCtx)
+	if err != nil {
+		return p.failSuspendResume(metadata, fmt.Errorf("%w: %v", ErrQmpUnavailable, err))
+	}
+	switch status.Status {
+	case "suspended", "paused":
+		metadata.State.PowerState = PowerSuspended
+		metadata.State.LastError = ""
+		return metadata.State, p.save(metadata)
+	case "running":
+		if err := client.Stop(qmpCtx); err != nil {
+			return p.failSuspendResume(metadata, fmt.Errorf("pause qemu: %w", err))
+		}
+		metadata.State.PowerState = PowerSuspended
+		metadata.State.LastError = ""
+		return metadata.State, p.save(metadata)
+	default:
+		metadata.State.PowerState = powerStateFromQMP(status.Status)
+		metadata.State.LastError = fmt.Sprintf("cannot suspend while qemu status is %q", status.Status)
+		_ = p.save(metadata)
+		return VmState{}, fmt.Errorf("%w: qemu status %s", ErrNotRunning, status.Status)
+	}
+}
+
+// ResumeVm resumes vCPUs through the fixed QMP cont command. A VM that is
+// already running is returned unchanged (idempotent); cont is only sent when
+// query-status reports a suspended/paused VM.
+func (p *QemuProvider) ResumeVm(ctx context.Context, vmID string) (VmState, error) {
+	unlock := p.locks.Lock(vmID)
+	defer unlock()
+
+	metadata, err := p.load(vmID)
+	if err != nil {
+		return VmState{}, err
+	}
+	if metadata.State.PID == 0 || !processAlive(metadata.State.PID) {
+		metadata.State.PID = 0
+		metadata.State.PowerState = PowerStopped
+		metadata.State.GuestHealth = "unknown"
+		if err := p.save(metadata); err != nil {
+			return VmState{}, err
+		}
+		return VmState{}, fmt.Errorf("%w: cannot resume a stopped vm", ErrNotRunning)
+	}
+
+	client, qmpCtx, cancel, err := p.suspendClient(ctx, metadata)
+	if err != nil {
+		return p.failSuspendResume(metadata, err)
+	}
+	defer cancel()
+	defer client.Close()
+
+	status, err := client.QueryStatus(qmpCtx)
+	if err != nil {
+		return p.failSuspendResume(metadata, fmt.Errorf("%w: %v", ErrQmpUnavailable, err))
+	}
 	switch status.Status {
 	case "running":
 		metadata.State.PowerState = PowerRunning
+		metadata.State.LastError = ""
+		return metadata.State, p.save(metadata)
 	case "suspended", "paused":
-		metadata.State.PowerState = PowerSuspended
-	case "shutdown":
-		metadata.State.PowerState = PowerStopped
+		if err := client.Cont(qmpCtx); err != nil {
+			return p.failSuspendResume(metadata, fmt.Errorf("resume qemu: %w", err))
+		}
+		metadata.State.PowerState = PowerRunning
+		metadata.State.LastError = ""
+		return metadata.State, p.save(metadata)
 	default:
-		metadata.State.PowerState = PowerError
+		metadata.State.PowerState = powerStateFromQMP(status.Status)
+		metadata.State.LastError = fmt.Sprintf("cannot resume while qemu status is %q", status.Status)
+		_ = p.save(metadata)
+		return VmState{}, fmt.Errorf("%w: qemu status %s", ErrNotRunning, status.Status)
 	}
-	metadata.State.LastError = ""
-	return metadata.State, p.save(metadata)
+}
+
+func (p *QemuProvider) failSuspendResume(metadata *vmMetadata, err error) (VmState, error) {
+	metadata.State.PowerState = PowerError
+	metadata.State.LastError = err.Error()
+	_ = p.save(metadata)
+	return VmState{}, err
 }
 
 func (p *QemuProvider) requireStopped(metadata *vmMetadata) error {
@@ -507,6 +670,9 @@ func (p *QemuProvider) requireStopped(metadata *vmMetadata) error {
 }
 
 func (p *QemuProvider) CreateSnapshot(ctx context.Context, vmID string, tag string) (VmState, error) {
+	unlock := p.locks.Lock(vmID)
+	defer unlock()
+
 	metadata, err := p.load(vmID)
 	if err != nil {
 		return VmState{}, err
@@ -525,6 +691,9 @@ func (p *QemuProvider) CreateSnapshot(ctx context.Context, vmID string, tag stri
 }
 
 func (p *QemuProvider) RestoreSnapshot(ctx context.Context, vmID string, tag string) (VmState, error) {
+	unlock := p.locks.Lock(vmID)
+	defer unlock()
+
 	metadata, err := p.load(vmID)
 	if err != nil {
 		return VmState{}, err
@@ -548,6 +717,9 @@ func (p *QemuProvider) AttachConsole(ctx context.Context, vmID string) (string, 
 }
 
 func (p *QemuProvider) DeleteVm(ctx context.Context, vmID string) error {
+	unlock := p.locks.Lock(vmID)
+	defer unlock()
+
 	metadata, err := p.load(vmID)
 	if err != nil {
 		return err

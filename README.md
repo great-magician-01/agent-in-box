@@ -1,6 +1,6 @@
 # Agent-in-Box
 
-面向个人用户的本地 AI 虚拟机工作平台。当前仓库已完成 **开发计划阶段 1（工程骨架、协议和本地持久化）** 和 **阶段 2（Electron、本地服务与自定义存储）**：包含无特权 Electron 壳、控制平面进程监管、首次启动向导、宿主机检查、自定义数据目录、存储锁与迁移、系统安全存储中的模型凭据，以及可打包的本地服务。VM 生命周期、镜像服务、Computer Use 和 Worker 主链路仍属于后续阶段。
+面向个人用户的本地 AI 虚拟机工作平台。当前仓库已完成 **开发计划阶段 1（工程骨架、协议和本地持久化）**、**阶段 2（Electron、本地服务与自定义存储）** 和 **阶段 3（镜像服务、VM 生命周期与管理 UI）**：包含无特权 Electron 壳、控制平面进程监管、首次启动向导、自定义数据目录、可续传镜像服务、受 ACL 保护的 Go VM Supervisor、QEMU/WHPX 生命周期以及 Linux VM 管理页面。Guest 实时画面、noVNC 人工控制和统一输入 Lease 属于阶段 4。
 
 完整方案见：
 
@@ -8,6 +8,17 @@
 - [技术设计](docs/02-technical-design.md)
 - [开发计划](docs/03-development-plan.md)
 - [阶段 2 验收记录](tests/phase2/summary.md)
+- [阶段 3 验收记录](tests/phase3/summary.md)
+
+## 阶段 3 已落地
+
+- **Image Service**：Manifest 与来源白名单、不可变版本、流式下载、Range 续传、并发去重、取消、失败诊断、SHA-256/大小校验和原子启用；数据库进度、SSE 事件和应用重启后的自动恢复。
+- **VM Supervisor**：回环监听和文件支持的 Bearer ACL；Create/List/Start/Stop/Suspend/Resume/State/Console；QEMU 进程/QMP 对账、按 VM 锁、结构化错误和超时；不开放删除 HTTP 路由。
+- **Linux Guest**：只从 Available 镜像创建独立 qcow2 覆盖盘，配置 VirtIO、回环网络/显示/控制台与 Guest Agent 转发；电源状态和 Guest Health 分开，异常 VM 不误标 Ready。
+- **VM 管理 UI**：镜像下载与进度、VM 创建和资源建议、多 VM 状态、存储路径和实际占用、绑定项目、当前任务、启停/休眠/恢复及控制台入口；强制停止有数据风险说明。
+- **验证边界**：本机服务 Smoke 和全部自动化测试通过；当前环境没有阶段 0 的 QEMU/镜像资产，因此新的真实 WHPX 休眠/恢复回归仍需按验收记录显式执行。
+
+详见 [`tests/phase3/summary.md`](tests/phase3/summary.md)。
 
 ## 阶段 2 已落地
 
@@ -51,6 +62,14 @@ pnpm --filter @agent-in-box/web dev
 - 控制平面: http://127.0.0.1:3000
 - 健康检查: http://127.0.0.1:3000/api/v1/health
 
+VM 操作另需启动 Go Supervisor（普通用户、仅回环监听）：
+
+```bash
+go run ./services/vm-supervisor/cmd/vm-supervisor
+```
+
+Supervisor 与控制平面读取同一个 `AGENT_IN_BOX_DATA_ROOT` 或首次向导保存的 `app-config.json`，默认 ACL 令牌位于 `<data-root>/supervisor-acl.token`。QEMU 不在 PATH 时通过 `-qemu-system` 和 `-qemu-img` 指定阶段 0 已安装的固定二进制路径。Electron 自动托管/打包 Supervisor 仍是后续安装集成项。
+
 桌面壳开发可以直接使用统一脚本（构建共享包、Web、Control Plane 和 Electron，并由 Control Plane 提供同源页面）：
 
 ```bash
@@ -73,6 +92,9 @@ pnpm package:desktop:win
 
 # 控制平面首次启动/迁移/重启对账（不需要 Electron）
 pnpm smoke:phase2
+
+# Image Service + 真实控制平面/Supervisor + ACL + 进程重启续传
+pnpm smoke:phase3
 
 # 已打包桌面壳的 Renderer 隔离、preload IPC 和 UI 加载
 # 需先执行 pnpm package:desktop:dir；Linux/WSL 还需要 X/WSLg 和 Electron 系统库
@@ -97,6 +119,16 @@ pnpm lint
 pnpm check        # lint + typecheck + test + build
 ```
 
+## 持续集成
+
+GitHub Actions 工作流位于 `.github/workflows/ci.yml`，在 `main` 推送、Pull Request 和手动触发时运行。Windows 与 Linux 矩阵使用固定 pnpm、Node.js 24 和 `go.mod` 中的 Go 版本，依次执行：
+
+- `pnpm install --frozen-lockfile`；
+- `pnpm check`、`go vet ./...` 与关键 Go 包的 race 测试；
+- 阶段 2 和阶段 3 服务 Smoke Test，并上传阶段 3 的机器结果 artifact。
+
+CI 不申请模型或机器人凭据，也不运行真实 QEMU/WHPX；这些仍由对应阶段的显式集成测试和宿主环境验收覆盖。
+
 Go 服务可单独运行：
 
 ```bash
@@ -114,7 +146,7 @@ apps/
   web/               React + Vite 本地 Web UI（首次向导、存储和设置页面）
 services/
   control-plane/     NestJS 本地控制平面（宿主检查、存储管理、设置与持久化）
-  vm-supervisor/     Go 宿主机 VM 管理服务（当前仅健康检查）
+  vm-supervisor/     Go 宿主机 VM 管理服务（ACL、QEMU 生命周期与状态对账）
   guest-agent/       Go Guest Agent（当前仅健康检查）
 scripts/             打包、开发启动与阶段 Smoke Test
 packages/
@@ -158,12 +190,20 @@ SQLite 数据库位于数据根目录下的 `agent-in-box.sqlite`，使用 WAL �
 已在当前开发环境实际执行：
 
 - `pnpm install`：成功；pnpm 11 仅允许 `esbuild`、`electron`、`better-sqlite3` 构建脚本
-- `pnpm check`：lint、typecheck、123 个 Vitest 测试、Go test、全部构建均通过
+- `pnpm check`：lint、typecheck、129 个 Vitest 测试、Go test、全部构建均通过
 - 控制平面 `GET /api/v1/health`、`GET /api/v1/runtime` 返回正常
 - 控制平面启动时创建 SQLite 数据库并应用 `001_initial_schema`、`002_phase2_settings`
 - SQLite 表、WAL 模式和迁移记录在真实运行中验证通过
 - Web 开发服务器可访问，`/api` 代理到控制平面正常
 - VM Supervisor 与 Guest Agent 的 `/healthz`、`/readyz` 正常
+
+### 阶段 3 验证（2026-11-10～11）
+
+- `pnpm smoke:phase3`：在 Windows 上启动真实 Go Supervisor 和控制平面，验证 ACL、Manifest、SSE、校验启用、同镜像去重及强制结束控制平面后的自动续传
+- Image Service 与 VM Service 新增 9 个测试；Go API/ACL/QMP/Provider 包含状态、幂等、并发锁和异常测试
+- `go vet ./...` 和关键 VM/下载包 race 测试通过
+- 当前未重新运行真实 QEMU/WHPX；`realQemuValidated=false` 已写入机器结果，不能用合成镜像 Smoke 替代 Hypervisor 验收
+- 详细证据和未关闭门槛见 [`tests/phase3/summary.md`](tests/phase3/summary.md)
 
 ### 阶段 2 验证（2026-11-10）
 
@@ -250,12 +290,12 @@ SQLite 数据库位于数据根目录下的 `agent-in-box.sqlite`，使用 WAL �
 - 迁移后 qcow2 backing file 路径重写；当前会校验镜像并警告旧路径引用，依赖旧目录保留
 - 迁移进度流式事件；当前为单次请求并持有存储锁
 - 本地 API 管理员认证/CSRF 加固；当前为回环监听、Host 白名单与 CORS 限制，完整防护在阶段 11～12
-- 生产级 Image Service（分块续传、下载去重和版本管理）
-- Supervisor 的完整 VM 生命周期 HTTP API 与 ACL；当前仅 Host Inspect 和 Go Provider 原型
-- Guest RPC 的生产级传输、短期令牌签发/撤销和 Per-VM Lease 强制接入；当前验证使用静态测试令牌
+- 生产级镜像来源签名与 CDN 长期可用性；当前 Manifest 使用来源白名单、大小和 SHA-256，跨多个控制平面进程的下载文件锁尚未实现
+- Electron 自动托管/打包 VM Supervisor 与 Go 二进制更新；当前 Supervisor 作为独立本机进程启动
+- Guest RPC 的短期令牌签发/撤销和 Per-VM Lease 强制接入；当前 Guest Health 使用回环 `/healthz`，生产输入认证仍需阶段 4 完成
 - Wayland 与 Windows Guest 的截图/输入路径
 - Pi Worker 与 Task/Lease/Router 的控制平面接入、生产级 Model Broker 服务
 - Router、HTTP 任务 API、Worker 注册表查询接口和任务看板
 - 真实飞书/QQ 应用凭据验收；本地长连接框架和 mock 协议测试已完成
 
-阶段 0～2 已完成。下一步按 [开发计划](docs/03-development-plan.md) 进入阶段 3：Image Service 的 Manifest/下载/续传/校验/版本管理，VM Supervisor 的完整生命周期 API 与 ACL，Linux Guest 创建启动、VM 管理 UI，并继续跟踪 Windows NSIS 安装包和干净环境 Smoke Test 门槛。
+阶段 0～3 的代码主链路已完成。下一步按 [开发计划](docs/03-development-plan.md) 进入阶段 4：Guest Agent 管理通道与更新握手、noVNC 实时画面和人工控制、统一 Execution Lease；同时继续跟踪真实 QEMU/WHPX 阶段 3 回归、Windows NSIS 安装包和干净环境 Smoke Test 门槛。

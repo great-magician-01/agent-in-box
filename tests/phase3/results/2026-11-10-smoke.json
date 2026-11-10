@@ -1,0 +1,17 @@
+{
+  "taskId": "PHASE3-SMOKE-001",
+  "status": "success",
+  "startedAt": "2026-11-10T15:56:00.571Z",
+  "finishedAt": "2026-11-10T15:56:05.432Z",
+  "platform": "win32",
+  "checks": [
+    "Supervisor starts and creates its ACL token",
+    "Supervisor ACL rejects anonymous requests and accepts the file-backed token",
+    "Control plane opens the phase-3 migration and connects to Supervisor",
+    "Manifest download, SHA-256 activation, SSE progress and same-image dedupe pass",
+    "Control plane reaches the authenticated VM lifecycle surface",
+    "A killed control plane resumes persisted partial bytes after restart and verifies the result"
+  ],
+  "realQemuValidated": false,
+  "notes": "Local HTTP artifacts and real control-plane/Supervisor processes. No QEMU/WHPX claim; run the explicitly gated provider integration test on a host with the phase-0 assets."
+}

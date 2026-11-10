@@ -14,8 +14,14 @@ import type { HostInspectionService } from "../host/host-inspection.service";
 const GIB = 1024 * 1024 * 1024;
 
 const temporaryDirectories: string[] = [];
+const openDatabases: AppDatabase[] = [];
 
 afterEach(async () => {
+  for (const app of openDatabases.splice(0)) {
+    if (app.sqlite.open) {
+      await app.close();
+    }
+  }
   for (const directory of temporaryDirectories.splice(0)) {
     await rm(directory, { recursive: true, force: true });
   }
@@ -40,6 +46,7 @@ async function createFixture(source: "config" | "environment" = "config"): Promi
   writeAppConfig(configPath, { version: 1, dataRoot: root });
 
   const app = AppDatabase.open({ filename: path.join(root, "agent-in-box.sqlite") });
+  openDatabases.push(app);
   await app.migrate();
 
   const fakeDatabase = {

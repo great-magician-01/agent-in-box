@@ -13,6 +13,14 @@ export interface ImagesTable {
   local_path: string | null;
   created_at: string;
   verified_at: string | null;
+  source_url: string;
+  file_name: string;
+  downloaded_bytes: number;
+  error_code: string | null;
+  error_message: string | null;
+  updated_at: string;
+  seed_local_path: string | null;
+  manifest_json: string;
 }
 
 export interface VmInstancesTable {

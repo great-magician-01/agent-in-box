@@ -76,6 +76,13 @@ export class CatalogRepository {
       localPath: input.localPath ?? null,
       createdAt: now,
       verifiedAt: null,
+      sourceUrl: "",
+      fileName: "",
+      downloadedBytes: 0,
+      errorCode: null,
+      errorMessage: null,
+      updatedAt: now,
+      seedLocalPath: null,
     };
 
     await this.db
@@ -93,6 +100,14 @@ export class CatalogRepository {
         local_path: record.localPath,
         created_at: record.createdAt,
         verified_at: null,
+        source_url: "",
+        file_name: "",
+        downloaded_bytes: 0,
+        error_code: null,
+        error_message: null,
+        updated_at: now,
+        seed_local_path: null,
+        manifest_json: "",
       })
       .execute();
 

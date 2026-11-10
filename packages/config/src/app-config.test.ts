@@ -33,19 +33,19 @@ describe("app config location", () => {
       appConfigDirectory("win32", { APPDATA: "C:\\Users\\me\\AppData\\Roaming" }, "/home/me"),
     ).toBe(path.join("C:\\Users\\me\\AppData\\Roaming", "AgentInBox"));
     expect(appConfigDirectory("linux", { XDG_CONFIG_HOME: "/home/me/.config" }, "/home/me")).toBe(
-      "/home/me/.config/agent-in-box",
+      path.join("/home/me/.config", "agent-in-box"),
     );
     expect(appConfigDirectory("darwin", {}, "/Users/me")).toBe(
-      "/Users/me/Library/Application Support/AgentInBox",
+      path.join("/Users/me", "Library", "Application Support", "AgentInBox"),
     );
   });
 
   it("honors the explicit config directory override", () => {
     expect(
       appConfigDirectory("linux", { AGENT_IN_BOX_CONFIG_DIR: "/tmp/aib-config" }, "/home/me"),
-    ).toBe("/tmp/aib-config");
+    ).toBe(path.resolve("/tmp/aib-config"));
     expect(appConfigPath("linux", { AGENT_IN_BOX_CONFIG_DIR: "/tmp/aib-config" })).toBe(
-      "/tmp/aib-config/app-config.json",
+      path.join(path.resolve("/tmp/aib-config"), "app-config.json"),
     );
   });
 });

@@ -163,6 +163,16 @@ func (c *Client) SystemPowerdown(ctx context.Context) error {
 	return c.Execute(ctx, "system_powerdown", nil, nil)
 }
 
+// Stop pauses all vCPUs. It is the QMP "stop" command used for VM suspend.
+func (c *Client) Stop(ctx context.Context) error {
+	return c.Execute(ctx, "stop", nil, nil)
+}
+
+// Cont resumes all vCPUs. It is the QMP "cont" command used for VM resume.
+func (c *Client) Cont(ctx context.Context) error {
+	return c.Execute(ctx, "cont", nil, nil)
+}
+
 // Quit terminates QEMU immediately and should only be used after a graceful timeout.
 func (c *Client) Quit(ctx context.Context) error {
 	return c.Execute(ctx, "quit", nil, nil)

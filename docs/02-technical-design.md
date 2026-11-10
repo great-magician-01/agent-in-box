@@ -402,6 +402,8 @@ Linux Guest 的默认 Provider 在技术验证后确定，不在验证前写死�
 - 更新生成新版本，不覆盖使用中版本；
 - 镜像来源和重定向需要白名单与大小限制。
 
+**阶段 3 实现状态（2026-11-11）**：控制平面提供 Manifest 注册、不可变版本、并发去重、取消、数据库进度与 SSE；下载器手动检查重定向和来源白名单，使用 `.partial` 和 HTTP Range 恢复，大小与 SHA-256 通过后才原子启用。重启后自动恢复中断记录。Supervisor 通过独立回环 ACL API 提供 QEMU 生命周期，控制平面同步 VM 状态并用 Guest Agent `/healthz` 单独探测健康。详细边界见 [`tests/phase3/summary.md`](../tests/phase3/summary.md)。
+
 ### 8.2 Storage Manager
 
 数据根目录由用户选择，支持按 VM 覆盖：

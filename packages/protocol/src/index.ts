@@ -14,7 +14,8 @@ export type IsoTimestamp = string;
 export type OsFamily = "linux" | "windows";
 export const OS_FAMILIES = ["linux", "windows"] as const;
 
-export type ImageStatus = "not_downloaded" | "downloading" | "verifying" | "available" | "failed";
+export type ImageStatus =
+  "not_downloaded" | "downloading" | "verifying" | "available" | "cancelled" | "failed";
 
 export const VM_POWER_STATES = [
   "stopped",
@@ -75,6 +76,13 @@ export interface ImageRecord {
   localPath: string | null;
   createdAt: IsoTimestamp;
   verifiedAt: IsoTimestamp | null;
+  sourceUrl: string;
+  fileName: string;
+  downloadedBytes: number;
+  errorCode: string | null;
+  errorMessage: string | null;
+  updatedAt: IsoTimestamp;
+  seedLocalPath: string | null;
 }
 
 export interface VmInstanceRecord {
@@ -628,6 +636,109 @@ export interface DesktopBridge {
     remove(providerId: string): Promise<DesktopCredentialStatus>;
   };
   log(level: "info" | "warn" | "error", message: string, data?: unknown): void;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Phase 3: immutable image catalogs and supervised Linux VM lifecycle.       */
+/* ------------------------------------------------------------------------- */
+
+export interface ImageArtifactManifest {
+  url: string;
+  fileName: string;
+  sizeBytes: number;
+  sha256: string;
+}
+
+export interface ImageManifestEntry extends ImageArtifactManifest {
+  id: Id;
+  name: string;
+  osFamily: OsFamily;
+  osVersion: string;
+  architecture: "amd64" | "arm64";
+  version: string;
+  seed?: ImageArtifactManifest;
+}
+
+export interface ImageManifest {
+  schemaVersion: 1;
+  allowedHosts: string[];
+  images: ImageManifestEntry[];
+}
+
+export interface ImageCatalog {
+  source: string;
+  allowedHosts: string[];
+  items: ImageRecord[];
+}
+
+export interface ImageDownloadEvent {
+  imageId: Id;
+  status: ImageStatus;
+  downloadedBytes: number;
+  totalBytes: number;
+  errorCode: string | null;
+  errorMessage: string | null;
+  occurredAt: IsoTimestamp;
+}
+
+export interface SupervisorVmState {
+  id: Id;
+  powerState: VmPowerState;
+  pid: number;
+  qmpPort: number;
+  sshHostPort: number;
+  guestHostPort: number;
+  consoleUrl: string;
+  diskPath: string;
+  guestHealth: GuestHealthState;
+  lastError: string;
+  updatedAt: IsoTimestamp;
+}
+
+export interface VmCreateRequest {
+  name: string;
+  imageId: Id;
+  cpuCount: number;
+  memoryGb: number;
+  diskGb: number;
+  /** Optional phase-0 NoCloud artifact. It is never generated from model input. */
+  seedImagePath?: string;
+}
+
+export interface VmProjectReference {
+  id: Id;
+  name: string;
+  isPrimary: boolean;
+}
+
+export interface VmTaskReference {
+  id: Id;
+  objective: string;
+  status: TaskStatus;
+}
+
+export interface VmInstanceView {
+  vm: VmInstanceRecord;
+  runtime: SupervisorVmState | null;
+  diskUsageBytes: number;
+  boundProjects: VmProjectReference[];
+  currentTask: VmTaskReference | null;
+}
+
+export interface SupervisorAvailability {
+  available: boolean;
+  message: string | null;
+}
+
+export interface VmListResponse {
+  items: VmInstanceView[];
+  supervisor: SupervisorAvailability;
+}
+
+export interface VmConsole {
+  vmId: Id;
+  consoleUrl: string;
+  message: string;
 }
 
 export function isTaskStatus(value: unknown): value is TaskStatus {

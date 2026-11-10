@@ -55,7 +55,7 @@ export async function createTestContext(): Promise<TestContext> {
     vmId: vm.id,
     conversationId: conversation.id,
     async close() {
-      await app.close();
+      await this.app.close();
       rmSync(dir, { recursive: true, force: true });
     },
   };

@@ -191,6 +191,10 @@ docs/
 
 ## 5. 核心数据模型
 
+**已实现（阶段 1）**：SQLite 使用 `better-sqlite3` + `Kysely`。迁移由内置轻量 Runner 管理，`schema_migrations` 表记录已应用版本，每条迁移在独立事务中执行；不依赖 Kysely Migrator 的 ESM 子路径，避免与 NestJS 的 CommonJS 构建冲突。Kysely 继续负责类型化查询、事务和表达式。
+
+已落库的表包括 `images`、`vm_instances`、`projects`、`project_vm_bindings`、`conversations`、`workers`、`tasks`、`task_events`、`outbox`、`vm_leases`、`processed_events`、`idempotency_keys`。仓储方法支持传入调用方事务，任务创建、状态迁移、任务事件和 Outbox 在同一事务内提交。
+
 ### 5.1 Image
 
 ```text

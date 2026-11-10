@@ -6,31 +6,59 @@
 export const PROTOCOL_VERSION = "0.1.0" as const;
 export type ProtocolVersion = typeof PROTOCOL_VERSION;
 
+export const IDEMPOTENCY_KEY_HEADER = "x-idempotency-key" as const;
+
 export type Id = string;
 export type IsoTimestamp = string;
 
 export type OsFamily = "linux" | "windows";
+export const OS_FAMILIES = ["linux", "windows"] as const;
 
 export type ImageStatus = "not_downloaded" | "downloading" | "verifying" | "available" | "failed";
 
-export type VmPowerState = "stopped" | "starting" | "running" | "stopping" | "suspended" | "error";
+export const VM_POWER_STATES = [
+  "stopped",
+  "starting",
+  "running",
+  "stopping",
+  "suspended",
+  "error",
+] as const;
+export type VmPowerState = (typeof VM_POWER_STATES)[number];
 
-export type GuestHealthState = "unknown" | "starting" | "healthy" | "degraded" | "unreachable";
+export const GUEST_HEALTH_STATES = [
+  "unknown",
+  "starting",
+  "healthy",
+  "degraded",
+  "unreachable",
+] as const;
+export type GuestHealthState = (typeof GUEST_HEALTH_STATES)[number];
 
-export type TaskStatus =
-  | "created"
-  | "waiting_resources"
-  | "waiting_vm"
-  | "queued"
-  | "running"
-  | "waiting_approval"
-  | "blocked"
-  | "completed"
-  | "failed"
-  | "cancelled";
+export const TASK_STATUSES = [
+  "created",
+  "waiting_resources",
+  "waiting_vm",
+  "queued",
+  "running",
+  "waiting_approval",
+  "blocked",
+  "completed",
+  "failed",
+  "cancelled",
+] as const;
+export type TaskStatus = (typeof TASK_STATUSES)[number];
 
-export type WorkerStatus =
-  "starting" | "running" | "idle" | "archiving" | "archived" | "restoring" | "failed";
+export const WORKER_STATUSES = [
+  "starting",
+  "running",
+  "idle",
+  "archiving",
+  "archived",
+  "restoring",
+  "failed",
+] as const;
+export type WorkerStatus = (typeof WORKER_STATUSES)[number];
 
 export type ConversationKind = "router" | "project";
 
@@ -99,6 +127,14 @@ export interface TaskRecord {
   errorCode: string | null;
 }
 
+export interface TaskEventRecord {
+  id: number;
+  taskId: Id;
+  type: string;
+  payload: unknown;
+  createdAt: IsoTimestamp;
+}
+
 export interface WorkerRecord {
   id: Id;
   projectId: Id;
@@ -138,6 +174,7 @@ export type DomainEventType = keyof DomainEventPayloads;
 export interface DomainEvent<T extends DomainEventType = DomainEventType> {
   id: number;
   type: T;
+  eventVersion: 1;
   occurredAt: IsoTimestamp;
   protocolVersion: ProtocolVersion;
   projectId?: Id;
@@ -155,26 +192,183 @@ export interface HealthResponse {
   now: IsoTimestamp;
 }
 
+export type ApiErrorCode =
+  | "bad_request"
+  | "unauthorized"
+  | "forbidden"
+  | "not_found"
+  | "conflict"
+  | "validation_failed"
+  | "idempotency_conflict"
+  | "lease_conflict"
+  | "rate_limited"
+  | "internal_error"
+  | "unavailable";
+
 export interface ApiError {
-  code: string;
+  code: ApiErrorCode;
   message: string;
   details?: unknown;
+  requestId?: string;
+}
+
+export interface ApiSuccess<T> {
+  ok: true;
+  data: T;
+}
+
+export interface ApiFailure {
+  ok: false;
+  error: ApiError;
+}
+
+export type ApiResponse<T> = ApiSuccess<T> | ApiFailure;
+
+export const MAX_PAGE_SIZE = 200;
+export const DEFAULT_PAGE_SIZE = 50;
+
+export interface PageRequest {
+  cursor: string | null;
+  limit: number;
+}
+
+export interface Page<T> {
+  items: T[];
+  nextCursor: string | null;
+}
+
+export function normalizePageRequest(input?: {
+  cursor?: string | null;
+  limit?: number;
+}): PageRequest {
+  const rawLimit = input?.limit;
+  const limit =
+    rawLimit === undefined || !Number.isFinite(rawLimit)
+      ? DEFAULT_PAGE_SIZE
+      : Math.max(1, Math.min(MAX_PAGE_SIZE, Math.trunc(rawLimit)));
+
+  return {
+    cursor: input?.cursor?.trim() || null,
+    limit,
+  };
+}
+
+/**
+ * Guest Agent RPC. The transport is a loopback or host-only channel; the payloads
+ * intentionally contain no host paths or credentials.
+ */
+export const GUEST_PROTOCOL_VERSION = "0.1.0" as const;
+
+export type GuestMethod =
+  | "health"
+  | "getCapabilities"
+  | "captureScreen"
+  | "getDesktopState"
+  | "executeInput"
+  | "transferFileIn"
+  | "getProcessHealth";
+
+export interface GuestRpcRequest<T = unknown> {
+  id: string;
+  method: GuestMethod;
+  params: T;
+  protocolVersion: string;
+}
+
+export interface GuestRpcError {
+  code: string;
+  message: string;
+  retryable: boolean;
+}
+
+export type GuestRpcResponse<T = unknown> =
+  { id: string; ok: true; result: T } | { id: string; ok: false; error: GuestRpcError };
+
+export interface DisplayInfo {
+  displayId: number;
+  width: number;
+  height: number;
+  scaleFactor: number;
+  primary: boolean;
+}
+
+export interface ScreenCapture {
+  displayId: number;
+  width: number;
+  height: number;
+  scaleFactor: number;
+  mimeType: "image/png" | "image/jpeg";
+  dataBase64: string;
+  capturedAt: IsoTimestamp;
+}
+
+export interface DesktopState {
+  displays: DisplayInfo[];
+  activeWindowTitle: string | null;
+  sessionLocked: boolean;
+}
+
+export interface GuestCapabilities {
+  protocolVersion: string;
+  platform: OsFamily;
+  canCaptureScreen: boolean;
+  canInjectInput: boolean;
+  canTransferFiles: boolean;
+}
+
+/**
+ * Host-side VM provider contract. Every implementation must enforce the same
+ * power/health semantics and must never accept model-generated commands.
+ */
+export type VirtualizationSupport = "available" | "unavailable" | "unknown";
+
+export interface HostInspection {
+  providerId: string;
+  platform: string;
+  virtualization: VirtualizationSupport;
+  details: Record<string, string>;
+}
+
+export interface VmCreateSpec {
+  name: string;
+  imageId: Id;
+  osFamily: OsFamily;
+  cpuCount: number;
+  memoryBytes: number;
+  diskBytes: number;
+  storageRoot: string;
+}
+
+export interface VmRuntimeState {
+  vmId: Id;
+  powerState: VmPowerState;
+  guestHealth: GuestHealthState;
+  providerVmId: string | null;
+}
+
+export interface VmProvider {
+  readonly providerId: string;
+  inspectHost(): Promise<HostInspection>;
+  createVm(spec: VmCreateSpec): Promise<VmRuntimeState>;
+  startVm(vmId: Id): Promise<VmRuntimeState>;
+  stopVm(vmId: Id, mode: "graceful" | "force"): Promise<VmRuntimeState>;
+  suspendVm(vmId: Id): Promise<VmRuntimeState>;
+  resumeVm(vmId: Id): Promise<VmRuntimeState>;
+  deleteVm(vmId: Id): Promise<void>;
+  createSnapshot(vmId: Id): Promise<{ snapshotId: string }>;
+  restoreSnapshot(vmId: Id, snapshotId: string): Promise<VmRuntimeState>;
+  getVmState(vmId: Id): Promise<VmRuntimeState>;
+  attachConsole(vmId: Id): Promise<{ consoleUrl: string }>;
 }
 
 export function isTaskStatus(value: unknown): value is TaskStatus {
-  return (
-    typeof value === "string" &&
-    [
-      "created",
-      "waiting_resources",
-      "waiting_vm",
-      "queued",
-      "running",
-      "waiting_approval",
-      "blocked",
-      "completed",
-      "failed",
-      "cancelled",
-    ].includes(value)
-  );
+  return typeof value === "string" && (TASK_STATUSES as readonly string[]).includes(value);
+}
+
+export function isWorkerStatus(value: unknown): value is WorkerStatus {
+  return typeof value === "string" && (WORKER_STATUSES as readonly string[]).includes(value);
+}
+
+export function isVmPowerState(value: unknown): value is VmPowerState {
+  return typeof value === "string" && (VM_POWER_STATES as readonly string[]).includes(value);
 }

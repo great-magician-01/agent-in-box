@@ -3,7 +3,13 @@
 > 文档状态：实施计划草案 v0.1  
 > 使用方式：按阶段顺序开发。每个阶段先完成验收条件，再进入下一阶段；技术验证未通过时先调整对应选型，不在不稳定的底座上继续堆叠产品功能。
 
-## 1. 实施原则
+## 0. 当前进度（2026-11-10）
+
+- **阶段 1.1 完成**：单仓库 Monorepo、pnpm Workspace、TypeScript/Go 工具链、统一构建与检查。
+- **阶段 1.2 完成（初版）**：核心协议、分页/错误/幂等契约、任务与 Worker 状态机、VM 多对多绑定规则、Computer Use 动作、Guest RPC、VmProvider、Worker Engine 和 Bot Connector 接口均有类型与契约测试。
+- **阶段 1.3 完成**：SQLite WAL、外键、内置 Migration Runner、在线备份；项目/VM/会话/任务/Worker/Lease/Outbox/事件去重仓储；幂等任务创建、事务化状态迁移、任务事件与 Outbox 同事务写入；Per-VM Lease 与过期替换。33 个 Vitest 测试和 Go 测试通过。
+- **阶段 0 尚未开始**：Hypervisor、镜像供给、Pi Computer Use、Model Broker 和真实机器人长连接仍需按测试矩阵验证。
+- **下一步**：执行阶段 0，先冻结 Windows Host 运行 Linux Guest 的 Provider，再进入阶段 2～4。
 
 1. 先验证 Hypervisor、镜像、Pi Computer Use 和模型代理等高风险链路，再大规模开发 UI。
 2. 每个阶段形成可运行、可测试的纵向能力，避免一次性生成大量空模块。

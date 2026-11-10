@@ -11,14 +11,18 @@
   },
   "dependencies": {
     "@agent-in-box/config": "workspace:*",
+    "@agent-in-box/domain": "workspace:*",
     "@agent-in-box/protocol": "workspace:*",
     "@nestjs/common": "12.4.2",
     "@nestjs/core": "12.4.2",
     "@nestjs/platform-express": "12.4.2",
+    "better-sqlite3": "13.0.3",
+    "kysely": "0.29.8",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "9.6.0",
     "@types/express": "5.0.6"
   }
 }

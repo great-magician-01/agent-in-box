@@ -1,0 +1,36 @@
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+coverage/
+**/coverage/
+*.log
+.env
+.env.*
+!.env.example
+.DS_Store
+
+# Electron and installer artifacts
+release/
+out/
+*.exe
+*.msi
+*.AppImage
+
+# VM images and runtime data are never committed
+*.qcow2
+*.qcow
+*.img
+*.iso
+*.vmdk
+*.vdi
+*.vhd
+*.vhdx
+*.partial
+vm-data/
+downloads/
+
+# Local databases
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal

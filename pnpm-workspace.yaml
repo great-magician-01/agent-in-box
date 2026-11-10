@@ -1,0 +1,40 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+  - "services/control-plane"
+allowBuilds:
+  esbuild: true
+  electron: true
+minimumReleaseAgeExclude:
+  - "@nestjs/common@12.4.2"
+  - "@nestjs/core@12.4.2"
+  - "@nestjs/platform-express@12.4.2"
+  - "@rolldown/binding-android-arm-eabi@1.2.18"
+  - "@rolldown/binding-android-arm64@1.2.18"
+  - "@rolldown/binding-darwin-arm64@1.2.18"
+  - "@rolldown/binding-darwin-x64@1.2.18"
+  - "@rolldown/binding-freebsd-x64@1.2.18"
+  - "@rolldown/binding-linux-arm-gnueabihf@1.2.18"
+  - "@rolldown/binding-linux-arm64-gnu@1.2.18"
+  - "@rolldown/binding-linux-arm64-musl@1.2.18"
+  - "@rolldown/binding-linux-ppc64-gnu@1.2.18"
+  - "@rolldown/binding-linux-s390x-gnu@1.2.18"
+  - "@rolldown/binding-linux-x64-gnu@1.2.18"
+  - "@rolldown/binding-linux-x64-musl@1.2.18"
+  - "@rolldown/binding-openharmony-arm64@1.2.18"
+  - "@rolldown/binding-win32-arm64-msvc@1.2.18"
+  - "@rolldown/binding-win32-x64-msvc@1.2.18"
+  - "@typescript-eslint/eslint-plugin@8.72.2"
+  - "@typescript-eslint/parser@8.72.2"
+  - "@typescript-eslint/project-service@8.72.2"
+  - "@typescript-eslint/scope-manager@8.72.2"
+  - "@typescript-eslint/tsconfig-utils@8.72.2"
+  - "@typescript-eslint/type-utils@8.72.2"
+  - "@typescript-eslint/types@8.72.2"
+  - "@typescript-eslint/typescript-estree@8.72.2"
+  - "@typescript-eslint/utils@8.72.2"
+  - "@typescript-eslint/visitor-keys@8.72.2"
+  - "@vitejs/plugin-react@6.3.0"
+  - rolldown@1.2.18
+  - typescript-eslint@8.72.2
+  - vite@8.3.7

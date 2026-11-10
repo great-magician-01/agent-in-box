@@ -1,0 +1,4 @@
+=== RUN   TestQemuProviderIntegration
+    qemu_integration_test.go:111: graceful stop: kill qemu process 44984: TerminateProcess: Access is denied.
+--- FAIL: TestQemuProviderIntegration (111.70s)
+FAIL

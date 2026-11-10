@@ -123,7 +123,9 @@ SQLite 数据库位于数据根目录下的 `agent-in-box.sqlite`，使用 WAL �
 - VM Supervisor 与 Guest Agent 的 `/healthz`、`/readyz` 正常
 - Electron TypeScript 构建通过，但 **Electron 二进制在当前网络环境下载失败**
 
-### 阶段 0 P0 验证（2026-11-10）
+### 阶段 0 技术验证（2026-11-10）
+
+阶段 0 的高风险主链路已完成验证，完整结果与未关闭门槛见 [`tests/phase0/summary.md`](tests/phase0/summary.md)。首版选型已冻结为 QEMU/WHPX + XFCE/X11 + Pi RPC + 宿主 Model Broker；飞书使用官方 Node SDK，机器人平台可扩展。
 
 已在真实 Windows 11 家庭版宿主机上完成，而非仅在 WSL 中模拟：
 
@@ -200,6 +202,6 @@ WSL 环境还需要可用的图形转发或 Windows 侧运行 Electron。桌面�
 - Wayland 与 Windows Guest 的截图/输入路径
 - Pi Worker 与 Task/Lease/Router 的控制平面接入、生产级 Model Broker 服务
 - Router、HTTP 任务 API、Worker 注册表查询接口和任务看板
-- 飞书/QQ 适配器
+- 真实飞书/QQ 应用凭据验收；本地长连接框架和 mock 协议测试已完成
 
-阶段 1 已完成；阶段 0 已开始，Windows Host + QEMU/WHPX 运行 Linux Guest 的核心 P0 链路已在本机验证。下一步按 [开发计划](docs/03-development-plan.md) 补齐 Linux 桌面 Golden Image、显示/输入、Supervisor 接管和 Pi Computer Use 验证，再进入阶段 2～4 的 Electron、存储和 VM 生命周期。
+阶段 1 与阶段 0 的高风险主链路验证已完成。下一步按 [开发计划](docs/03-development-plan.md) 进入阶段 2～3 的 Electron、Storage Manager、Image Service 和 VM 生命周期产品化，并把 PiWorkerEngine 接入 Task/Lease/Worker Registry。

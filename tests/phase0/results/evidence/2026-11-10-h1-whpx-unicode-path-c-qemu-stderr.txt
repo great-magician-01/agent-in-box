@@ -1,0 +1,1 @@
+C:\Users\admin\AppData\Local\AgentInBox\tools\msys64\ucrt64\bin\qemu-system-x86_64.exe: cannot create PID file: Failed to create PID file

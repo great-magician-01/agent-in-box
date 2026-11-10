@@ -1,0 +1,40 @@
+Windows 11 Home 26200 / QEMU 11.1.3 MSYS2 UCRT64 / WHPX
+Date: 2026-11-10 (local UTC+8). All probes used correctly quoted QEMU
+arguments (the same arg shapes Go os/exec produces for paths with spaces).
+
+Paths used below:
+  unicode+space: C:\Users\admin\AppData\Local\AgentInBox\路径 测试\
+  unicode no-space: C:\Users\admin\AppData\Local\AgentInBox\路径测试\
+  ascii+space: C:\Users\admin\AppData\Local\AgentInBox\stability-logs\space test dir\
+
+Probe results:
+A1  -machine none -display none -pidfile "<unicode+space>\pid-u-space.pid"
+    FAIL: "cannot create PID file: Failed to create PID file"; file absent.
+A2  -machine none -display none -pidfile "<ascii+space>\pid-ascii-space.pid"
+    PASS: pidfile created (6 bytes), QEMU process still alive after 3s.
+A3  -machine none -display none -pidfile "<unicode no-space>\pid-u-nospace.pid"
+    FAIL: same "cannot create PID file" error; file absent.
+A4  -serial "file:<unicode+space>\serial-u-space.log"
+    FAIL: "open ... failed", "could not connect serial device to character backend".
+A5  -serial "file:<unicode no-space>\serial-u-nospace.log"
+    FAIL: same open failure.
+A7  -drive "file=<unicode+space>\vms\go-provider-smoke\disk.qcow2,if=virtio,format=qcow2"
+    FAIL: "Could not open '...\disk.qcow2': 系统找不到指定的路径。"
+qemu-img info "<unicode+space>\vms\go-provider-smoke\disk.qcow2"
+    PASS: qcow2 20 GiB virtual, 192 KiB disk size, backing file opens correctly.
+
+Provider test with env AGENT_IN_BOX_VM_STORAGE:
+  C:\Users\admin\AppData\Local\AgentInBox\space path test\vms
+    PASS in 24.77s (TestQemuProviderIntegration, exit 0).
+  C:\Users\admin\AppData\Local\AgentInBox\路径 测试\vms
+    FAIL in 0.54s: "start vm: qemu exited during startup"; QEMU stderr
+    "cannot create PID file: Failed to create PID file".
+  D:\路径 测试\vms
+    FAIL in 0.55s with the same QEMU stderr error.
+
+Interpretation: paths with ASCII spaces work; paths containing Chinese
+characters fail for every QEMU file consumer tested (-pidfile, -serial, -drive).
+qemu-img itself handles the Unicode path. The Windows ANSI code page is CP936,
+so QEMU's UTF-8 path handling is not sufficient for ANSI file APIs. This is a
+QEMU-on-Windows file path limitation, not a space-only or drive-letter issue.
+No system setting was changed to test the UTF-8 beta locale workaround.

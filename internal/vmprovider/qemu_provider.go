@@ -209,8 +209,20 @@ func (p *QemuProvider) CreateVm(ctx context.Context, spec VmSpec) (VmState, erro
 	}
 
 	diskPath := filepath.Join(dir, "disk.qcow2")
+	// On Windows, QEMU cannot open non-ASCII paths. qemu-img itself handles
+	// them, but the backing file name written into the qcow2 is later opened by
+	// QEMU, so both the backing image and the overlay path must be converted to
+	// an ASCII short path or junction before qemu-img creates the overlay.
+	baseImagePath, err := resolveQemuPathDefault(spec.BaseImagePath)
+	if err != nil {
+		return VmState{}, fmt.Errorf("prepare QEMU base image path: %w", err)
+	}
+	overlayPath, err := resolveQemuPathDefault(diskPath)
+	if err != nil {
+		return VmState{}, fmt.Errorf("prepare QEMU overlay path: %w", err)
+	}
 	command := exec.CommandContext(ctx, p.config.ImageBinary,
-		"create", "-f", "qcow2", "-F", "qcow2", "-b", spec.BaseImagePath, diskPath,
+		"create", "-f", "qcow2", "-F", "qcow2", "-b", baseImagePath, overlayPath,
 		strconv.Itoa(spec.DiskSizeGB)+"G")
 	if output, err := command.CombinedOutput(); err != nil {
 		return VmState{}, fmt.Errorf("create qcow2 overlay: %w: %s", err, strings.TrimSpace(string(output)))
@@ -235,9 +247,26 @@ func (p *QemuProvider) CreateVm(ctx context.Context, spec VmSpec) (VmState, erro
 	return metadata.State, nil
 }
 
-func buildQemuArgs(metadata *vmMetadata, accelerator string, cpuModel string) []string {
+func buildQemuArgs(metadata *vmMetadata, accelerator string, cpuModel string) ([]string, error) {
+	return buildQemuArgsWithResolver(metadata, accelerator, cpuModel, resolveQemuPathDefault)
+}
+
+func buildQemuArgsWithResolver(metadata *vmMetadata, accelerator string, cpuModel string, resolve func(string) (string, error)) ([]string, error) {
 	spec := metadata.Spec
 	state := metadata.State
+	vmDir := filepath.Dir(state.DiskPath)
+	diskPath, err := resolve(state.DiskPath)
+	if err != nil {
+		return nil, fmt.Errorf("overlay disk: %w", err)
+	}
+	consolePath, err := resolve(filepath.Join(vmDir, "console.log"))
+	if err != nil {
+		return nil, fmt.Errorf("serial console: %w", err)
+	}
+	pidPath, err := resolve(filepath.Join(vmDir, "qemu.pid"))
+	if err != nil {
+		return nil, fmt.Errorf("pid file: %w", err)
+	}
 	args := []string{
 		"-name", "agent-in-box-" + spec.ID,
 		"-machine", "q35",
@@ -245,10 +274,14 @@ func buildQemuArgs(metadata *vmMetadata, accelerator string, cpuModel string) []
 		"-cpu", cpuModel,
 		"-smp", strconv.Itoa(spec.CPUCount),
 		"-m", strconv.Itoa(spec.MemoryMB),
-		"-drive", "file=" + state.DiskPath + ",if=virtio,format=qcow2",
+		"-drive", "file=" + diskPath + ",if=virtio,format=qcow2",
 	}
 	if spec.SeedImagePath != "" {
-		args = append(args, "-drive", "file="+spec.SeedImagePath+",if=virtio,media=cdrom,format=raw,readonly=on")
+		seedPath, err := resolve(spec.SeedImagePath)
+		if err != nil {
+			return nil, fmt.Errorf("seed image: %w", err)
+		}
+		args = append(args, "-drive", "file="+seedPath+",if=virtio,media=cdrom,format=raw,readonly=on")
 	}
 	if spec.Desktop {
 		// Remove the default std VGA: leaving it beside virtio-gpu made Xorg
@@ -261,15 +294,22 @@ func buildQemuArgs(metadata *vmMetadata, accelerator string, cpuModel string) []
 		"-device", "virtio-net-pci,netdev=n0",
 		"-display", "none",
 		"-vnc", fmt.Sprintf("127.0.0.1:%d", spec.VNCDisplay),
-		"-serial", "file:"+filepath.Join(filepath.Dir(state.DiskPath), "console.log"),
+		"-serial", "file:"+consolePath,
 		"-qmp", fmt.Sprintf("tcp:127.0.0.1:%d,server,nowait", spec.QMPPort),
-		"-pidfile", filepath.Join(filepath.Dir(state.DiskPath), "qemu.pid"),
+		"-pidfile", pidPath,
 	)
-	return args
+	return args, nil
 }
 
 func (p *QemuProvider) qmpAddress(metadata *vmMetadata) string {
 	return net.JoinHostPort("127.0.0.1", strconv.Itoa(metadata.Spec.QMPPort))
+}
+
+func (p *QemuProvider) failStart(metadata *vmMetadata, err error) (VmState, error) {
+	metadata.State.PowerState = PowerError
+	metadata.State.LastError = err.Error()
+	_ = p.save(metadata)
+	return metadata.State, err
 }
 
 func (p *QemuProvider) StartVm(ctx context.Context, vmID string) (VmState, error) {
@@ -291,16 +331,27 @@ func (p *QemuProvider) StartVm(ctx context.Context, vmID string) (VmState, error
 		return VmState{}, fmt.Errorf("%w: existing qemu process %d did not answer", ErrQmpUnavailable, metadata.State.PID)
 	}
 
-	arguments := buildQemuArgs(metadata, p.config.Accelerator, p.config.CPUModel)
+	arguments, err := buildQemuArgs(metadata, p.config.Accelerator, p.config.CPUModel)
+	if err != nil {
+		return p.failStart(metadata, fmt.Errorf("prepare QEMU paths: %w", err))
+	}
 	// MSYS2 QEMU resolves VNC keymaps such as 'en-us' through its data
 	// directory. Pin it explicitly so startup does not depend on the caller's
 	// working directory (which may even be a UNC path under WSL).
 	dataDir := filepath.Clean(filepath.Join(filepath.Dir(p.config.SystemBinary), "..", "share", "qemu"))
 	if info, err := os.Stat(dataDir); err == nil && info.IsDir() {
-		arguments = append(arguments, "-L", dataDir)
+		asciiDataDir, err := resolveQemuDirPathDefault(dataDir)
+		if err != nil {
+			return p.failStart(metadata, fmt.Errorf("prepare QEMU data directory: %w", err))
+		}
+		arguments = append(arguments, "-L", asciiDataDir)
+	}
+	qemuDir, err := resolveQemuDirPathDefault(filepath.Dir(metadata.State.DiskPath))
+	if err != nil {
+		return p.failStart(metadata, fmt.Errorf("prepare QEMU working directory: %w", err))
 	}
 	command := exec.Command(p.config.SystemBinary, arguments...)
-	command.Dir = filepath.Dir(metadata.State.DiskPath)
+	command.Dir = qemuDir
 	configureDetachedProcess(command)
 	stderr, err := os.Create(filepath.Join(filepath.Dir(metadata.State.DiskPath), "qemu-stderr.log"))
 	if err != nil {
@@ -508,5 +559,11 @@ func (p *QemuProvider) DeleteVm(ctx context.Context, vmID string) error {
 	if err != nil {
 		return err
 	}
-	return os.RemoveAll(dir)
+	if err := os.RemoveAll(dir); err != nil {
+		return err
+	}
+	if err := cleanupQemuRuntimeJunction(dir); err != nil {
+		p.config.Logger.Warn("clean up QEMU runtime junction", "vm", vmID, "error", err)
+	}
+	return nil
 }

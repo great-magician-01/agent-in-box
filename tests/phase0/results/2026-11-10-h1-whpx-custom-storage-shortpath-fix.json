@@ -1,0 +1,55 @@
+{
+  "runId": "2026-11-10-h1-whpx-custom-storage-shortpath-fix",
+  "taskId": "VM-LIFE-002",
+  "attempt": 6,
+  "status": "success",
+  "hostProfile": "H1",
+  "guestProfile": "G1",
+  "resourceProfile": "R1",
+  "provider": "go-qemu-whpx",
+  "engine": "internal/vmprovider + qemu-system-x86_64 11.1.3",
+  "engineVersion": "GetShortPathNameW + ASCII directory junction fallback",
+  "startedAt": "2026-11-10T13:04:27Z",
+  "finishedAt": "2026-11-10T13:17:44Z",
+  "durationSeconds": 797,
+  "completionEvidence": [
+    {
+      "type": "machine_check",
+      "description": "Pre-fix failure is preserved: C: and D: Unicode+space storage failed in 0.54s/0.55s with QEMU 'cannot create PID file'. Evidence remains in tests/phase0/results/evidence/2026-11-10-h1-whpx-unicode-path-* and the superseded failed result JSON."
+    },
+    {
+      "type": "machine_check",
+      "description": "internal/vmprovider now resolves every path passed to QEMU through GetShortPathNameW first. On this host C: 8.3 short names still contain Chinese (e.g. 路径测~1) and D: has 8.3 generation disabled, so the resolver falls back to a hash-named ASCII directory junction under %LOCALAPPDATA%\\AgentInBox\\vm-runtime\\dirs created with non-elevated mklink /J. Base image, overlay disk, seed image, pidfile, serial console, -L data directory and the QEMU working directory are all resolved. Resolution errors are returned before QEMU starts with 'prepare QEMU paths: ...' and PowerError state."
+    },
+    {
+      "type": "machine_check",
+      "description": "Post-fix C: %LOCALAPPDATA%\\AgentInBox\\路径 测试\\vms passed five full TestQemuProviderIntegration rounds: 24.21s, 22.82s, 31.87s, 28.34s and 31.94s (Go test durations 22.80s, 22.78s, 30.75s, 28.29s, 30.73s), all exit code 0 with no residual QEMU. Each round covered create, start, login, restart reconciliation, idempotent Start/Stop, graceful ACPI stop, snapshot create/restore and DeleteVm."
+    },
+    {
+      "type": "machine_check",
+      "description": "Post-fix D:\\路径 测试\\vms (non-system partition) passed three full rounds: 21.20s, 29.30s and 29.23s (Go test 21.16s, 29.26s, 29.19s), exit code 0, no residual QEMU. ASCII spaces and Unicode are both now handled. The final C/D runs used the final binary after the runtime-junction cleanup mutex was added."
+    },
+    {
+      "type": "machine_check",
+      "description": "Captured QEMU command line proves the ASCII indirection: -drive file=C:\\Users\\admin\\AppData\\Local\\AgentInBox\\vm-runtime\\dirs\\583da32da56d124d1567a32f\\disk.qcow2, -serial file=...\\console.log, -pidfile ...\\qemu.pid, with -L pointing at the ASCII QEMU data dir; no Chinese characters appear in the QEMU argument list."
+    },
+    {
+      "type": "machine_check",
+      "description": "Unit tests in internal/vmprovider pass (go test ./internal/vmprovider) and the package cross-compiles for Windows/amd64. The path resolver is tested with injected short-path/directory resolvers so unit tests do not depend on the host's 8.3 state. A default-path regression round also passed in 29.18s."
+    },
+    {
+      "type": "machine_check",
+      "description": "End-to-end Unicode input test: the base image (hardlink) and seed ISO were placed under C:\\Users\\admin\\AppData\\Local\\AgentInBox\\路径 测试\\images, while the overlay storage was under ...\\路径 测试\\vms. TestQemuProviderIntegration passed in 29.19s (29.22s wall, exit code 0, no residual QEMU), proving that base image and seed path conversion works as well as disk/console/pidfile."
+    },
+    {
+      "type": "machine_check",
+      "description": "DeleteVm removes the per-VM runtime junction; after the post-fix runs the runtime junction directory was empty and qemu-system-x86_64 count was 0."
+    },
+    {
+      "type": "artifact_reference",
+      "description": "Post-fix C/D Go test stdout, captured QEMU command line, pre-fix and post-fix failure evidence.",
+      "artifactPath": "tests/phase0/results/evidence/2026-11-10-h1-whpx-unicode-path-fix-* and %LOCALAPPDATA%\\AgentInBox\\stability-logs\\provider-shortpath-*.json and provider-shortpath-unicode-inputs.json"
+    }
+  ],
+  "notes": "Fix files: internal/vmprovider/qemu_path.go, qemu_path_windows.go, qemu_path_unix.go, qemu_path_test.go; qemu_provider.go/qemu_provider_test.go updated. No system feature was enabled and no elevation was used. Remaining limitations: (1) a non-ASCII base name (e.g. 中文.img) is rejected with a clear error because an ASCII junction can only map the parent directory, not the file name; (2) non-ASCII base image/seed directories were verified end-to-end, but the qcow2 backing filename records the runtime junction path, so %LOCALAPPDATA%\\AgentInBox\\vm-runtime must persist for such overlays; (3) D: is on the same physical NVMe as C:, so a second physical disk is still untested; (4) one high-overhead WMI capture run failed at StopVm with 'TerminateProcess: Access is denied' after the guest had already powered down (PID-reuse/liveness race, not path-related); eight clean post-fix runs plus the Unicode input run passed and this race should be hardened separately. qemu64 default and all existing provider behavior were preserved."
+}

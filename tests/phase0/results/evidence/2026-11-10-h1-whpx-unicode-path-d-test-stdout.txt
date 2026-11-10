@@ -1,0 +1,4 @@
+﻿=== RUN   TestQemuProviderIntegration
+    qemu_integration_test.go:66: start vm: qemu exited during startup
+--- FAIL: TestQemuProviderIntegration (0.55s)
+FAIL

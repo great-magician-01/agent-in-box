@@ -710,6 +710,19 @@ Local Task Events → Outgoing Formatter → Platform REST API
 
 Windows Guest 的延迟验证只改变开发顺序，不改变其属于本期最终交付范围的决定。
 
+### 18.3 2026-11-10 Linux 先行阶段冻结结果
+
+基于 `tests/phase0/summary.md` 中的真实验证记录，以下选型进入产品化基线：
+
+1. **Windows Host 默认 VmProvider 冻结为 QEMU + WHPX**：使用 MSYS2 UCRT64 QEMU 11.1.3，普通用户权限，不依赖 Hyper-V 管理器。桌面 QEMU 参数固定 `-vga none -device virtio-gpu-pci -device virtio-tablet-pci`，默认 `-cpu qemu64`。Hyper-V 仅保留为待 Pro/Enterprise 环境验证的备选，不宣称已支持。非 ASCII 路径通过 Windows 短路径或 ASCII junction 解析；非 ASCII 文件名仍明确报错。
+2. **Pi 直接承担首个 CUA Worker**：使用 Pi 1.5.1 RPC 与自定义 CUA 工具，不 Fork Pi，暂不增加独立 CUA Engine。若后续完整真实任务集或长会话基线不达标，再启用专用 Engine 备选。
+3. **Guest 管理通道**：首版使用 QEMU loopback hostfwd + Guest Agent HTTP + Bearer 认证。生产接入必须补充短期令牌签发/撤销和 Per-VM Lease 强制校验；当前静态测试令牌只属于验证原型。
+4. **Linux 默认桌面冻结为 XFCE + LightDM + Xorg**。Wayland 首版不支持，Guest Agent 在非 X11 显示栈上必须返回明确不可用，不能误报能力。
+5. **Model Broker 采用宿主侧本地代理**：真实上游凭据只存在宿主/WSL，VM 使用本地 Broker Token；已验证 OpenAI-compatible 的流式、图片和工具调用。生产需补模型白名单、短期令牌、用量、超时和撤销。
+6. **机器人框架保持本地 Ingress + 持久化去重**：飞书生产使用官方 `@larksuiteoapi/node-sdk` WSClient；QQ 保留经过 openclaw-qqbot 对照的最小适配器；BotPlatform 为开放字符串，后续可增加 OneBot/Discord/Telegram 等。真实飞书/QQ 权限矩阵和平台重推行为在获得测试凭据前仍未验证。
+
+这些冻结不代表外部验收全部完成：Epiphany HTML5 drag-and-drop 失败、一次 Guest 内核 panic、Hyper-V/Wayland/真实机器人凭据和更长 soak 均保留为显式限制或发布门槛。
+
 其余领域模型、本地优先、VM 多对多绑定、Per-VM Lease、Worker Registry、任务看板和本地机器人长连接是当前架构基准。
 
 ## 19. 参考资料

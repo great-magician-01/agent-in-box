@@ -48,7 +48,11 @@ func TestBuildQemuArgs(t *testing.T) {
 		},
 		State: VmState{DiskPath: "/vms/vm-1/disk.qcow2"},
 	}
-	args := strings.Join(buildQemuArgs(metadata, "whpx", "qemu64"), " ")
+	qemuArgs, err := buildQemuArgs(metadata, "whpx", "qemu64")
+	if err != nil {
+		t.Fatalf("build args: %v", err)
+	}
+	args := strings.Join(qemuArgs, " ")
 	for _, expected := range []string{
 		"-accel whpx,kernel-irqchip=off",
 		"-cpu qemu64",
@@ -64,6 +68,46 @@ func TestBuildQemuArgs(t *testing.T) {
 	} {
 		if !strings.Contains(args, expected) {
 			t.Fatalf("args missing %q: %s", expected, args)
+		}
+	}
+}
+
+func TestBuildQemuArgsResolvesUnicodePaths(t *testing.T) {
+	vmDir := filepath.Join("vms", "路径 测试", "vm-1")
+	metadata := &vmMetadata{
+		Spec: VmSpec{
+			ID:            "vm-1",
+			BaseImagePath: filepath.Join("images", "base.qcow2"),
+			SeedImagePath: filepath.Join(vmDir, "seed.iso"),
+			CPUCount:      2,
+			MemoryMB:      2048,
+			QMPPort:       14445,
+			SSHHostPort:   10023,
+		},
+		State: VmState{DiskPath: filepath.Join(vmDir, "disk.qcow2")},
+	}
+	resolver := func(path string) (string, error) {
+		if isASCII(path) {
+			return path, nil
+		}
+		return filepath.Join("C:", "runtime", filepath.Base(path)), nil
+	}
+	args, err := buildQemuArgsWithResolver(metadata, "whpx", "qemu64", resolver)
+	if err != nil {
+		t.Fatalf("build args: %v", err)
+	}
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "路径") {
+		t.Fatalf("QEMU args still contain a non-ASCII path: %s", joined)
+	}
+	for _, expected := range []string{
+		filepath.Join("C:", "runtime", "disk.qcow2"),
+		filepath.Join("C:", "runtime", "seed.iso"),
+		"file:" + filepath.Join("C:", "runtime", "console.log"),
+		filepath.Join("C:", "runtime", "qemu.pid"),
+	} {
+		if !strings.Contains(joined, expected) {
+			t.Fatalf("args missing %q: %s", expected, joined)
 		}
 	}
 }

@@ -1,0 +1,35 @@
+{
+  "runId": "2026-11-10-h1-whpx-provider-stability-5x",
+  "taskId": "VM-LIFE-002",
+  "attempt": 3,
+  "status": "success",
+  "hostProfile": "H1",
+  "guestProfile": "G1",
+  "resourceProfile": "R1",
+  "provider": "go-qemu-whpx",
+  "engine": "internal/vmprovider",
+  "engineVersion": "Windows/amd64 test binary built 2026-11-10T11:54:31Z",
+  "startedAt": "2026-11-10T11:56:45Z",
+  "finishedAt": "2026-11-10T11:59:31Z",
+  "durationSeconds": 165.76,
+  "completionEvidence": [
+    {
+      "type": "machine_check",
+      "description": "Five consecutive TestQemuProviderIntegration rounds passed. Round wall-clock times were 31.69s, 31.20s, 30.74s, 29.18s and 31.30s; the Go test durations were 31.65s, 31.17s, 30.70s, 29.15s and 31.25s. Mean wall time 30.82s, min 29.18s, max 31.69s."
+    },
+    {
+      "type": "machine_check",
+      "description": "Every round exercised create overlay, QEMU/WHPX start, guest login prompt, provider restart reconciliation with the original PID, idempotent StartVm/StopVm, ACPI graceful stop, qcow2 snapshot create/restore and DeleteVm. Any step failure would have produced a Go test failure."
+    },
+    {
+      "type": "machine_check",
+      "description": "No residual qemu-system-x86_64 process was observed after any round or at the end; no go-provider-smoke VM directory was left behind after the five passing rounds."
+    },
+    {
+      "type": "artifact_reference",
+      "description": "Harness summary and per-round Go test stdout/stderr logs.",
+      "artifactPath": "%LOCALAPPDATA%\\AgentInBox\\stability-logs\\provider-stability-default.json and %LOCALAPPDATA%\\AgentInBox\\stability-logs\\provider-20261110-195645\\"
+    }
+  ],
+  "notes": "Rounds used the default storage root %LOCALAPPDATA%\\AgentInBox\\vms-go and the noble server seed image. One earlier harness attempt was discarded because Start-Process -PassThru returned an empty ExitCode on this host and the harness incorrectly marked a real PASS as failed; the harness was switched to System.Diagnostics.Process. The five rounds counted here are clean and all reported exit code 0. Together with the four earlier passes at 17:51-17:52 (33.18s, 31.73s, 31.27s, 31.27s), nine runs passed across roughly two hours."
+}

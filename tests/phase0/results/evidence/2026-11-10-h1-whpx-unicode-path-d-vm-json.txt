@@ -1,0 +1,28 @@
+{
+  "spec": {
+    "ID": "go-provider-smoke",
+    "Name": "Go provider integration",
+    "BaseImagePath": "C:\\Users\\admin\\AppData\\Local\\AgentInBox\\images\\noble-server-cloudimg-amd64.img",
+    "SeedImagePath": "C:\\Users\\admin\\AppData\\Local\\AgentInBox\\vms\\phase0-linux\\seed.iso",
+    "CPUCount": 2,
+    "MemoryMB": 2048,
+    "DiskSizeGB": 20,
+    "Desktop": false,
+    "QMPPort": 62227,
+    "SSHHostPort": 62228,
+    "VNCDisplay": 0
+  },
+  "state": {
+    "ID": "go-provider-smoke",
+    "PowerState": "stopped",
+    "PID": 0,
+    "QMPPort": 62227,
+    "SSHHostPort": 62228,
+    "ConsoleURL": "vnc://127.0.0.1:5900",
+    "DiskPath": "D:\\路径 测试\\vms\\go-provider-smoke\\disk.qcow2",
+    "GuestHealth": "unknown",
+    "LastError": "qemu exited before QMP became available",
+    "UpdatedAt": "2026-11-10T12:03:01.956123Z"
+  },
+  "createdAt": "2026-11-10T12:03:01.4465022Z"
+}

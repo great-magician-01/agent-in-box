@@ -1,0 +1,39 @@
+{
+  "runId": "2026-11-10-h1-whpx-cpu-model-boot-probes",
+  "taskId": "VM-BOOT-001",
+  "attempt": 2,
+  "status": "success",
+  "hostProfile": "H1",
+  "guestProfile": "G2",
+  "resourceProfile": "R2",
+  "provider": "qemu-whpx",
+  "engine": "qemu-system-x86_64",
+  "engineVersion": "11.1.3 (MSYS2 mingw-w64-ucrt-x86_64-qemu)",
+  "startedAt": "2026-11-10T12:26:37Z",
+  "finishedAt": "2026-11-10T12:47:31Z",
+  "durationSeconds": 1254,
+  "completionEvidence": [
+    {
+      "type": "machine_check",
+      "description": "-cpu host booted the existing phase0-desktop qcow2 to an XFCE session: SSH ready at 18.55s, xfce4-session present at 18.74s. QMP screendump succeeded in 12.3ms (1280x800 P6, 3,072,016 bytes) and ACPI shutdown completed in 1.4s. Only the known non-fatal 'failed to get xsave state' warnings appeared."
+    },
+    {
+      "type": "machine_check",
+      "description": "The existing phase0-desktop-start.ps1 was also run directly with -CpuModel host: QEMU started, guest-ssh detected SSH at 17.28s and xfce4-session at 17.3s, an external qmp.ps1 screendump took 62.2ms (1280x800 P6, 3,072,016 bytes) and ACPI shutdown took 5.1s with QEMU exiting. Status success."
+    },
+    {
+      "type": "machine_check",
+      "description": "-cpu max booted the same disk once: SSH ready at 14.88s, XFCE at 15.04s, QMP screendump in 13.6ms, ACPI shutdown in 1.4s. The earlier SMP boot hang after desktop provisioning did not reproduce in this single probe; the historical incident is not considered closed by this run."
+    },
+    {
+      "type": "machine_check",
+      "description": "-cpu qemu64 probe (also used for the Agent screenshot check) booted to XFCE at 24.09s (SSH 23.57s) after the preceding probe reboot, QMP screendump in 17.5ms, Guest Agent screenshot HTTP 200 in 161.1ms (1280x800 PNG, 511,464 bytes), ACPI shutdown in 2.1s."
+    },
+    {
+      "type": "artifact_reference",
+      "description": "Harness summaries for host, max and qemu64 probes plus per-run console/stderr copies.",
+      "artifactPath": "%LOCALAPPDATA%\\AgentInBox\\stability-logs\\desktop-cpu-host-final.json, desktop-cpu-max.json, desktop-cpu-qemu64-agentfix.json, desktop-startscript-host.json"
+    }
+  ],
+  "notes": "All three CPU models can reach XFCE on this host today, and -cpu host was additionally verified through the existing phase0-desktop-start.ps1 (XFCE at 17.3s). qemu64 is retained as the provider default and as the long-duration soak model because it is the conservative baseline and the earlier post-provisioning SMP hang was observed with max. Boot-to-XFCE ranged 15.04-24.09s across the harness probes and 17.3s in the direct start-script run; the variance is attributed to host cache state and qcow2 recovery after preceding runs, not to a CPU model difference. The 62.2ms direct qmp.ps1 screendump includes launching a separate PowerShell/qmp.ps1 process, whereas in-process QMP calls measured 12-20ms. Host CPU exposes a non-fatal 'warning: host doesn't support requested feature ... .svm' message on this Intel host. The result's start/finish span covers the interleaved 10-minute soak; individual probe durations were 40.95s (host), 37.53s (max), 38.39s (qemu64) and 22.55s (direct start script)."
+}

@@ -1,0 +1,3 @@
+=== RUN   TestQemuProviderIntegration
+--- PASS: TestQemuProviderIntegration (29.26s)
+PASS

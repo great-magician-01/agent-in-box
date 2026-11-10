@@ -6,6 +6,7 @@ allowBuilds:
   esbuild: true
   electron: true
   better-sqlite3: true
+  protobufjs: false
 minimumReleaseAgeExclude:
   - "@nestjs/common@12.4.2"
   - "@nestjs/core@12.4.2"

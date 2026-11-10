@@ -1,0 +1,45 @@
+{
+  "runId": "2026-11-10-h4-img-download-01",
+  "taskId": "IMG-DOWNLOAD-001",
+  "attempt": 1,
+  "status": "success",
+  "hostProfile": "H4",
+  "guestProfile": "none (host-side unit test)",
+  "resourceProfile": "unit-test",
+  "provider": "none (local httptest)",
+  "engine": "go test",
+  "engineVersion": "go1.26.4 linux/amd64",
+  "startedAt": "2026-11-10T11:57:50Z",
+  "finishedAt": "2026-11-10T11:57:51Z",
+  "durationSeconds": 0.44,
+  "completionEvidence": [
+    {
+      "type": "machine_check",
+      "description": "go test ./internal/imagedownload/ -v -count=1 passed 13 top-level tests (16 manifest-validation subtests) in 0.058s, including success verification, interruption/resume across a new Downloader, server ignoring Range, wrong 206 Content-Range rejection, checksum mismatch with no final file, cancellation, same-target concurrency dedupe, size limits, and redirect limits."
+    },
+    {
+      "type": "machine_check",
+      "description": "go vet ./internal/imagedownload exited 0 with no findings; GOOS=windows GOARCH=amd64 go vet ./internal/imagedownload also exited 0 (compile check only, not executed on Windows)."
+    },
+    {
+      "type": "machine_check",
+      "description": "go test ./internal/imagedownload/ -race -count=1 passed in 1.127s without data races."
+    },
+    {
+      "type": "artifact_reference",
+      "description": "Downloader implementation using only the Go standard library.",
+      "artifactPath": "internal/imagedownload/downloader.go"
+    },
+    {
+      "type": "artifact_reference",
+      "description": "httptest-based unit tests for all required failure and concurrency scenarios.",
+      "artifactPath": "internal/imagedownload/downloader_test.go"
+    },
+    {
+      "type": "artifact_reference",
+      "description": "Validation documentation with commands, results, and prototype boundaries.",
+      "artifactPath": "tests/phase0/image-download.md"
+    }
+  ],
+  "notes": "Standalone phase-0.3 validation prototype; not yet wired into the control-plane Image Service. All HTTP traffic was local httptest and no real image was downloaded. taskId IMG-DOWNLOAD-001 is not defined in acceptance-tasks.json, which was not modified. This is prototype-level machine evidence on H4/WSL2, not a formal Windows-host phase-0 acceptance result; Windows filesystem atomicity and resume after process kill still require real-host validation."
+}

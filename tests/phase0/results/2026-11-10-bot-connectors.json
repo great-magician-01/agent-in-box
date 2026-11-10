@@ -1,0 +1,131 @@
+{
+  "runId": "phase0.5-bot-connectors-local-mock-2026-11-10",
+  "taskId": "V-NET-BOT-LONG-CONNECTION",
+  "attempt": 1,
+  "status": "success",
+  "scope": "local mock HTTP/WebSocket only; real Feishu/QQ platforms are NOT verified",
+  "hostProfile": "H1-WSL2",
+  "guestProfile": "none",
+  "provider": "local-mock-http-websocket",
+  "engine": "vitest",
+  "engineVersion": "5.1.0",
+  "startedAt": "2026-11-10T12:05:20Z",
+  "finishedAt": "2026-11-10T13:14:48Z",
+  "durationSeconds": 4168,
+  "completionEvidence": [
+    {
+      "type": "machine_check",
+      "description": "pnpm --filter @agent-in-box/bot-connector typecheck exited 0",
+      "artifactPath": "packages/bot-connector"
+    },
+    {
+      "type": "machine_check",
+      "description": "pnpm --filter @agent-in-box/bot-connector test passed: 6 test files, 34 tests, 0 failures",
+      "artifactPath": "packages/bot-connector/src"
+    },
+    {
+      "type": "machine_check",
+      "description": "pnpm --filter @agent-in-box/bot-connector build exited 0",
+      "artifactPath": "packages/bot-connector/dist"
+    },
+    {
+      "type": "artifact_reference",
+      "description": "Protocol behaviors, test matrix, and explicit real-platform verification boundary",
+      "artifactPath": "tests/phase0/bot-connectors.md"
+    }
+  ],
+  "mockVerification": {
+    "status": "verified",
+    "networkBoundary": "Tests connect only to ephemeral 127.0.0.1 mock HTTP/WebSocket servers; no request was sent to open.feishu.cn, api.bot.qq.com, bots.qq.com, or any real platform.",
+    "genericFramework": {
+      "stateMachine": ["disconnected", "connecting", "connected", "degraded"],
+      "openPlatformType": "BotPlatform is an open string type with feishu/qq built-in hints",
+      "heartbeatTimeoutReconnect": true,
+      "exponentialBackoff": true,
+      "dedupeBeforeIngressAndAck": true,
+      "ingressQueueDecoupledFromWebSocketCallback": true,
+      "explicitDisconnectStopsReconnect": true,
+      "terminalAuthErrorsStopRetry": true
+    },
+    "feishu": {
+      "productionPath": "official @larksuiteoapi/node-sdk WSClient + EventDispatcher",
+      "protocolReference": "official Node SDK 1.76.0, official long-connection docs, and test-only frame codec for the mock server",
+      "bootstrap": "POST /callback/ws/endpoint with AppID/AppSecret; URL + ClientConfig response handled by the SDK",
+      "frame": "official SDK protobuf framing; test mock uses src/test-support/feishu-frame-codec.ts only",
+      "verified": [
+        "official SDK bootstrap request body and ClientConfig parsing against local mock",
+        "official SDK ping/pong control frames and pong config update",
+        "official SDK flattened im.message.receive_v1 event mapping",
+        "official SDK ACK code 200 with biz_rt after handler completion",
+        "message_id based dedupe for repeated pushes",
+        "official SDK re-bootstrap/reconnect after abnormal close",
+        "disconnect stops official SDK reconnect",
+        "tenant_access_token and text message send over official HTTP API",
+        "terminal 514 auth failure with AppSecret-redacted status and logs"
+      ]
+    },
+    "qq": {
+      "protocolReference": "official QQ bot docs checked against tencent-connect/openclaw-qqbot, @tencent-connect/qqbot-nodejs, and the Satori/Koishi QQ adapter",
+      "verified": [
+        "POST /app/getAppAccessToken and Authorization QQBot token header",
+        "GET /gateway with QQBot authorization",
+        "Hello op 10 -> Identify op 2 -> READY handshake",
+        "heartbeat op 1 with latest s and op 11 ACK",
+        "C2C_MESSAGE_CREATE and GROUP_AT_MESSAGE_CREATE field mapping",
+        "messageId based dedupe for repeated pushes (msg_idx reserved for quote references)",
+        "Resume op 6 with session_id and seq after abnormal close -> RESUMED",
+        "4004 token refresh and re-identify",
+        "4009 session reset and re-identify",
+        "opcode 9 with d=true keeps the session and resumes",
+        "group and C2C text send via /v2/groups/{group_openid}/messages and /v2/users/{user_openid}/messages",
+        "terminal close code 4014 stops reconnect",
+        "terminal 100016 credential error without leaking clientSecret"
+      ]
+    },
+    "testSummary": {
+      "files": 6,
+      "tests": 34,
+      "failed": 0,
+      "filesDetail": {
+        "src/connection.test.ts": 8,
+        "src/feishu.test.ts": 6,
+        "src/qq.test.ts": 11,
+        "src/reconnect.test.ts": 3,
+        "src/logger.test.ts": 2,
+        "src/bot-connector.test.ts": 4
+      }
+    }
+  },
+  "realPlatformVerification": {
+    "status": "unverified",
+    "reason": "No user-owned Feishu test app credentials or QQ test bot credentials were available; connecting to real platforms was intentionally prohibited in this task.",
+    "feishu": {
+      "status": "blocked",
+      "missing": [
+        "enterprise self-built Feishu app App ID and App Secret",
+        "bot capability enabled",
+        "event subscription mode set to long connection",
+        "im.message.receive_v1 subscription and required message permissions",
+        "host network access to open.feishu.cn"
+      ]
+    },
+    "qq": {
+      "status": "blocked",
+      "missing": [
+        "QQ bot AppID and ClientSecret",
+        "approved GROUP_AND_C2C_EVENT (1<<25) intents for the test bot",
+        "test bot added to a test group and a test user C2C conversation",
+        "host network access to api.bot.qq.com and bots.qq.com (or configured tokenBaseUrl)"
+      ]
+    },
+    "notClaimed": [
+      "real platform handshake success",
+      "real platform event delivery or redelivery behavior",
+      "real platform ACK retry timing",
+      "real platform resume/replay behavior",
+      "real platform rate limits and permission errors",
+      "production readiness of bot credentials"
+    ]
+  },
+  "notes": "status=success applies only to local mock protocol verification. It must not be read as real Feishu/QQ integration success. Feishu production ingress uses the official @larksuiteoapi/node-sdk WSClient; the self-written frame codec is test-only. QQ remains a minimal documented adapter checked against active official plugins/SDKs. Bot secrets were never present in this run: mock credentials are fixed fake values and results/logs are redacted. See tests/phase0/bot-connectors.md for protocol details and blockers."
+}

@@ -1,0 +1,35 @@
+{
+  "runId": "2026-11-10-h1-whpx-desktop-soak-10m-qemu64",
+  "taskId": "VM-LIFE-002",
+  "attempt": 5,
+  "status": "success",
+  "hostProfile": "H1",
+  "guestProfile": "G2",
+  "resourceProfile": "R2",
+  "provider": "qemu-whpx",
+  "engine": "qemu-system-x86_64",
+  "engineVersion": "11.1.3 (MSYS2 mingw-w64-ucrt-x86_64-qemu)",
+  "startedAt": "2026-11-10T12:35:36Z",
+  "finishedAt": "2026-11-10T12:46:15Z",
+  "durationSeconds": 637.67,
+  "completionEvidence": [
+    {
+      "type": "machine_check",
+      "description": "qemu64 booted the existing phase0-desktop qcow2 to XFCE: SSH ready in 19.32s, xfce4-session present 22.31s after QEMU start. QMP screendump succeeded in 20.4ms (1280x800 P6, 3,072,016 bytes) and the Guest Agent screenshot returned HTTP 200 in 251.7ms (valid 1280x800 PNG, 511,505 bytes)."
+    },
+    {
+      "type": "machine_check",
+      "description": "The VM was held for 600.0s after XFCE and sampled every 30s: 20/20 samples had successful SSH, xfce4-session count 1, guest-agent count 1 and QEMU alive; guest uptime rose from 31s to 601s. sshFailures=0 and no kernel panic / Oops / segfault signature was found in the full serial console scan. No freeze or performance anomaly was observed."
+    },
+    {
+      "type": "machine_check",
+      "description": "QEMU WorkingSet64 was min 1172.5 MB, max 1192.4 MB, average 1189.3 MB and last 1191.1 MB (stable, no growth trend). Host free memory before the run was 5485.5 MB. The final QMP screendump took 12.1ms (same 1280x800 / 3,072,016 bytes) and ACPI shutdown completed in 2.1s with the QEMU process exiting."
+    },
+    {
+      "type": "artifact_reference",
+      "description": "Raw soak summary, harness samples, two QMP PPM screendumps, Guest Agent PNG and copied console/stderr evidence.",
+      "artifactPath": "%LOCALAPPDATA%\\AgentInBox\\stability-logs\\desktop-longrun-qemu64.json and %LOCALAPPDATA%\\AgentInBox\\stability-logs\\desktop-qemu64-20261110-203536\\ and %LOCALAPPDATA%\\AgentInBox\\stability-logs\\evidence-desktop-qemu64-20261110-203536\\"
+    }
+  ],
+  "notes": "Extended phase-0 hypervisor/desktop soak, not a Pi or model task; broker untouched. The historical guest kernel panic (init SIGSEGV) and earlier max-CPU SMP hang did not reproduce during this 10-minute qemu64 run. qemu-stderr contained only the non-fatal 'host doesn't support requested feature ... .svm' warning. Two harness defects were found and fixed while building this evidence: pgrep -f matched its own ssh shell command, and a launched guest-agent could hold the ssh channel open; the harness now uses pgrep -x and setsid plus a hard SSH timeout. These were harness bugs, not product defects."
+}

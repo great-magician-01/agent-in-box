@@ -1,0 +1,39 @@
+{
+  "runId": "2026-11-10-h1-whpx-custom-storage-unicode-space",
+  "taskId": "VM-LIFE-002",
+  "attempt": 4,
+  "status": "failed",
+  "hostProfile": "H1",
+  "guestProfile": "G1",
+  "resourceProfile": "R1",
+  "provider": "go-qemu-whpx",
+  "engine": "internal/vmprovider + qemu-system-x86_64 11.1.3",
+  "startedAt": "2026-11-10T11:59:43Z",
+  "finishedAt": "2026-11-10T12:03:04Z",
+  "durationSeconds": 201.4,
+  "completionEvidence": [
+    {
+      "type": "machine_check",
+      "description": "Positive control: AGENT_IN_BOX_VM_STORAGE=%LOCALAPPDATA%\\AgentInBox\\space path test\\vms (ASCII with spaces) passed one full TestQemuProviderIntegration round in 24.77s (Go test 24.69s, exit code 0), including create, start, login, restart reconciliation, idempotent start/stop, graceful stop and snapshot create/restore."
+    },
+    {
+      "type": "machine_check",
+      "description": "Negative result: AGENT_IN_BOX_VM_STORAGE=%LOCALAPPDATA%\\AgentInBox\\路径 测试\\vms (Unicode + space) failed at QEMU start in 0.54s. The overlay was created and vm.json written, but qemu-system-x86_64 exited with 'cannot create PID file: Failed to create PID file' before QMP became available."
+    },
+    {
+      "type": "machine_check",
+      "description": "The same failure occurred on non-system drive D: with D:\\路径 测试\\vms; the drive letter is not the cause. Direct probes with correctly quoted QEMU arguments showed that -pidfile, -serial file: and -drive file= all fail to open paths containing Chinese characters, while the same ASCII path with spaces works. qemu-img itself can create and query the qcow2 overlay at the Unicode path."
+    },
+    {
+      "type": "artifact_reference",
+      "description": "QEMU stderr, vm.json and Go test output for the C: and D: Unicode path failures.",
+      "artifactPath": "tests/phase0/results/evidence/2026-11-10-h1-whpx-unicode-path-c-qemu-stderr.txt, ...-d-qemu-stderr.txt, ...-c-vm-json.txt, ...-d-vm-json.txt, ...-manual-probes.txt"
+    }
+  ],
+  "error": {
+    "code": "qemu_unicode_path_unsupported",
+    "message": "The MSYS2 QEMU 11.1.3 Windows build cannot open file paths containing non-ASCII characters (-pidfile, -serial and -drive all fail). The provider places qemu.pid, console.log and the overlay under the configured storage root, so a Unicode storage root cannot be started by this QEMU build.",
+    "stage": "qemu-start"
+  },
+  "notes": "PRE-FIX FAILURE, kept as evidence. Custom storage with ASCII spaces was verified; custom storage containing Unicode failed on both C: and D: with QEMU 'cannot create PID file'. D: is a second partition on the same physical NVMe as C:, not a second physical disk; a separate physical disk remains untested. This result is superseded by 2026-11-10-h1-whpx-custom-storage-shortpath-fix.json, which implements GetShortPathNameW plus an ASCII junction fallback in internal/vmprovider and passes the same C:/D: Unicode tests. The Windows ANSI code page (Chinese CP936) makes QEMU's UTF-8 path bytes unusable for ANSI file APIs; enabling the Windows UTF-8 beta locale was not needed and was not tested."
+}

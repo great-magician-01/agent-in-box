@@ -8,18 +8,12 @@
 - **阶段 1.1 完成**：单仓库 Monorepo、pnpm Workspace、TypeScript/Go 工具链、统一构建与检查。
 - **阶段 1.2 完成（初版）**：核心协议、分页/错误/幂等契约、任务与 Worker 状态机、VM 多对多绑定规则、Computer Use 动作、Guest RPC、VmProvider、Worker Engine 和 Bot Connector 接口均有类型与契约测试。
 - **阶段 1.3 完成**：SQLite WAL、外键、内置 Migration Runner、在线备份；项目/VM/会话/任务/Worker/Lease/Outbox/事件去重仓储；幂等任务创建、事务化状态迁移、任务事件与 Outbox 同事务写入；Per-VM Lease 与过期替换。33 个 Vitest 测试和 Go 测试通过。
-- **阶段 0.1 完成**：`tests/phase0/` 已包含测试矩阵、15 项验收任务、结果 Schema、cloud-init 模板和 Windows QEMU/WHPX Runbook。
-- **阶段 0.2 核心链路通过**：H1（Windows 11 家庭版 26200）已用 MSYS2 QEMU 11.1.3 + WHPX 完成 Ubuntu 24.04 G1 的覆盖盘创建、启动（冷启动 14.1 秒）、cloud-init、SSH、QMP 优雅关机和 qcow2 快照恢复；G2 XFCE 桌面已完成 1280x800 截图、1024x768 分辨率切换、绝对鼠标和 ASCII 键盘输入验证。结果见 `tests/phase0/results/`。
-- **Go 原型已落地**：`internal/qmp` 提供受控 QMP 客户端；`internal/vmprovider` 提供 QEMU 覆盖盘/启动/停止/状态对账/快照原型和 Host Inspect；`internal/guestagent` 提供认证 X11 截图、鼠标、键盘和 Unicode 输入。Windows amd64 `vm-supervisor.exe /api/v1/host` 已在本机返回 `ready=true`、`recommendedProvider=qemu-whpx`。
-- **Guest Agent 核心验证通过**：无令牌和错误令牌返回 401；X11 PNG 截图；点击、ASCII 与中文输入的 Guest 文件 SHA256 完全一致。当前仍使用静态测试令牌，未接入短期令牌撤销和 Per-VM Lease。
-- **Go Provider 真实生命周期验证通过**：`TestQemuProviderIntegration` 在 Windows/WHPX 上 31.83 秒完成创建、启动、登录、Provider 重启对账、重复 Start/Stop、优雅关机、快照恢复和删除；对应 VM-LIFE-002 与 VM-RECOV-004 结果已入库。`internal/guestagent` 同时提供带认证错误映射的 Host 侧 Go RPC Client。
-- **Pi Computer Use 机制验证通过**：`tests/phase0/pi/` 在 Guest 内用 Pi 1.5.1 RPC + 脚本化 OpenAI-compatible 模型 + 真实 Guest Agent 完成截图图片回传、点击、中文输入、活跃 `vm_wait` 工具 Abort 和 `--session` 恢复；Guest 文件 SHA256 与任务一致。该结果证明集成机制，不代表真实模型准确率。
-- **真实模型 Computer Use 已跑通首个任务**：`pro` 经 WSL Model Broker 在 13.37 秒内完成截图、中文输入、回车和再次截图；Guest 文件 SHA256 完全一致。回读 Guest models.json 确认只含 mock/broker provider，不含上游 API Key。结果见 `PI-REAL-001`。
-- **真实任务集继续通过**：桌面 Home 图标双击打开 Thunar（25.14 秒，CUA-CLICK-002）；Mousepad 全选、输入多行文本并 Ctrl+S 保存（27.84 秒，CUA-FILE-006），文件 SHA256 精确匹配。WHPX 又在桌面 VM 并行运行时连续完成 3 轮 Go Provider 创建/启动/关机/快照回归（33.18/31.73/31.27 秒）。
-- **浏览器验证得到明确负面结果**：Epiphany 滚动到底部成功，但 HTML5 drag-and-drop 在 240 秒/38 次工具调用后未完成；xdotool 对照同样只能触发 dragstart，无法进入 drop 目标。该失败已记录为 CUA-SCROLL-005，不能隐藏。窗口标题栏拖拽由 Guest Agent 独立验证通过（CUA-DRAG-001）。
-- **Pi Adapter 已产品化为独立组件**：`packages/agent-runtime` 新增 `PiWorkerEngine` 和 LF 严格 JSONL RPC Client，支持受控工具暴露、事件映射、Prompt/Steer/Follow-up/Abort、归档和原生 Session Resume；假 Pi 单元测试与真实 Pi 二进制集成测试均通过。
-- **阶段 0 尚未完成**：真实模型长会话与取消、Hyper-V 备选路径、WHPX 长时稳定性、Wayland 和飞书/QQ 长连接仍需验证。验证期间出现过一次 Guest 内核 panic（init SIGSEGV），已作为环境稳定性事件记录；三轮生命周期回归通过不等于长时稳定。默认 Provider 尚未冻结；WHPX 下暂用 `-cpu qemu64`。
-- **下一步**：把 PiWorkerEngine 接入 Task/Lease/Worker Registry，并实现生产级 Model Broker；浏览器 HTML5 拖拽限制另行跟踪，不阻塞已验证的桌面主链路。
+- **阶段 0 主链路验证完成**：Windows Host + QEMU/WHPX 的 P0 路径、Linux 桌面、认证 Guest Agent、Pi Computer Use、真实模型任务、镜像下载原型和飞书/QQ 长连接框架均已有代码与实测证据。汇总见 [`tests/phase0/summary.md`](../tests/phase0/summary.md)。
+- **首版选型冻结**：Windows 默认 QEMU 11.1.3 + WHPX（`-cpu qemu64`）；Guest 默认 XFCE + LightDM + Xorg；Pi 1.5.1 RPC 直接承担 CUA Worker，不 Fork；宿主机 Model Broker 持有真实模型凭据；飞书使用官方 Node SDK，机器人平台 ID 可扩展。
+- **真实模型任务证据**：终端中文输入、桌面 Home 双击打开 Thunar、Mousepad 多行编辑保存均通过；Pi 图片回传、活跃工具 Abort、Session Resume 和真实 Pi Adapter 集成测试通过。
+- **WHPX 稳定性证据**：Provider 生命周期累计 9 次通过，桌面 10 分钟长稳 20/20 采样正常；Unicode VM 路径经短路径/ASCII junction 修复后，C:/D: 的真实创建/启动/停止/快照恢复均通过。
+- **保留的负面结果与外部门槛**：Epiphany HTML5 drag-and-drop 失败；出现过一次 Guest 内核 panic，需更长 soak；Hyper-V 需 Pro/Enterprise 环境；Wayland 首版不支持；真实飞书/QQ 凭据验收仍待测试应用；真实镜像 CDN 与断电恢复待补。
+- **下一步**：进入阶段 2～3 的产品化（Electron、本地服务、Storage Manager、Image Service、VM 生命周期），同时把 PiWorkerEngine 接入 Task Service、Per-VM Lease 和 Worker Registry。真实飞书/QQ 与长时稳定性作为发布前验收门槛持续跟踪。
 
 1. 先验证 Hypervisor、镜像、Pi Computer Use 和模型代理等高风险链路，再大规模开发 UI。
 2. 每个阶段形成可运行、可测试的纵向能力，避免一次性生成大量空模块。

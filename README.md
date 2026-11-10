@@ -139,6 +139,10 @@ SQLite 数据库位于数据根目录下的 `agent-in-box.sqlite`，使用 WAL �
 - Go `vm-supervisor.exe /api/v1/host` 在 Windows 上返回 `ready=true`、`recommendedProvider=qemu-whpx`
 - Go Guest Agent 以非特权用户在 X11 桌面运行：无令牌/错误令牌均返回 401，截图返回可解码 PNG，点击、ASCII 和中文 `你好` 输入通过 Guest 文件 SHA256 验证
 - Go Provider 真实集成测试在 Windows/WHPX 上 31.83 秒通过：创建、启动、登录、Provider 重启对账、重复 Start/Stop、优雅关机、快照恢复和删除
+- Pi 1.5.1 RPC + 脚本化模型 + 真实 Guest Agent 的工具循环通过：截图 PNG 回传、点击、中文输入、活跃工具 Abort、Session Resume
+- **真实模型 `pro` 经本地 Model Broker 完成首个 CUA 任务**：13.37 秒内完成截图、中文输入、回车和复核截图，Guest 文件 SHA256 一致；VM 内不含上游 API Key
+
+注意：Pi 验证同时使用本地脚本化模型和真实 `pro` 模型。首个真实任务已通过，但单次任务不能代表 Computer Use 成功率基线。验证中出现过一次 Guest 内核 panic，已记录为 WHPX 长稳风险，需重复复测。
 
 验证中确认的必要配置：桌面 VM 使用 `-vga none -device virtio-gpu-pci -device virtio-tablet-pci`；当前 WHPX 环境暂用 `-cpu qemu64`，`-cpu max` 的启动卡住问题尚未解决。
 

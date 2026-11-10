@@ -13,8 +13,10 @@
 - **Go 原型已落地**：`internal/qmp` 提供受控 QMP 客户端；`internal/vmprovider` 提供 QEMU 覆盖盘/启动/停止/状态对账/快照原型和 Host Inspect；`internal/guestagent` 提供认证 X11 截图、鼠标、键盘和 Unicode 输入。Windows amd64 `vm-supervisor.exe /api/v1/host` 已在本机返回 `ready=true`、`recommendedProvider=qemu-whpx`。
 - **Guest Agent 核心验证通过**：无令牌和错误令牌返回 401；X11 PNG 截图；点击、ASCII 与中文输入的 Guest 文件 SHA256 完全一致。当前仍使用静态测试令牌，未接入短期令牌撤销和 Per-VM Lease。
 - **Go Provider 真实生命周期验证通过**：`TestQemuProviderIntegration` 在 Windows/WHPX 上 31.83 秒完成创建、启动、登录、Provider 重启对账、重复 Start/Stop、优雅关机、快照恢复和删除；对应 VM-LIFE-002 与 VM-RECOV-004 结果已入库。`internal/guestagent` 同时提供带认证错误映射的 Host 侧 Go RPC Client。
-- **阶段 0 尚未完成**：Hyper-V 备选路径、WHPX 性能与长稳、Wayland、Pi Computer Use、Model Broker 和真实机器人长连接仍需验证。默认 Provider 尚未冻结；WHPX 下暂用 `-cpu qemu64`，`-cpu max` 的 SMP 启动卡住问题待查。
-- **下一步**：验证 Pi Worker 的截图/点击工具循环、取消和会话恢复，并补 WHPX 性能与长稳；不提前进入大规模 UI 开发。
+- **Pi Computer Use 机制验证通过**：`tests/phase0/pi/` 在 Guest 内用 Pi 1.5.1 RPC + 脚本化 OpenAI-compatible 模型 + 真实 Guest Agent 完成截图图片回传、点击、中文输入、活跃 `vm_wait` 工具 Abort 和 `--session` 恢复；Guest 文件 SHA256 与任务一致。该结果证明集成机制，不代表真实模型准确率。
+- **真实模型 Computer Use 已跑通首个任务**：`pro` 经 WSL Model Broker 在 13.37 秒内完成截图、中文输入、回车和再次截图；Guest 文件 SHA256 完全一致。回读 Guest models.json 确认只含 mock/broker provider，不含上游 API Key。结果见 `PI-REAL-001`。
+- **阶段 0 尚未完成**：完整真实任务集、真实模型长会话/取消、Hyper-V 备选路径、WHPX 性能与长稳、Wayland 和飞书/QQ 长连接仍需验证。验证期间出现过一次 Guest 内核 panic（init SIGSEGV），已作为环境稳定性事件记录，必须做重复启动和长任务复测。默认 Provider 尚未冻结；WHPX 下暂用 `-cpu qemu64`。
+- **下一步**：用同一真实模型链路运行更多桌面任务并做 WHPX 长稳测试，再将 Model Broker 和 Pi Adapter 从验证原型固化为产品组件；不提前进入大规模 UI 开发。
 
 1. 先验证 Hypervisor、镜像、Pi Computer Use 和模型代理等高风险链路，再大规模开发 UI。
 2. 每个阶段形成可运行、可测试的纵向能力，避免一次性生成大量空模块。

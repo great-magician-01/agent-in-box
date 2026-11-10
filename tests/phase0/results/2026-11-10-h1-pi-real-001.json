@@ -1,0 +1,36 @@
+{
+  "runId": "2026-11-10-h1-pi-real-model-pro-01",
+  "taskId": "PI-REAL-001",
+  "attempt": 1,
+  "status": "success",
+  "hostProfile": "H1",
+  "guestProfile": "G2",
+  "resourceProfile": "R2",
+  "provider": "qemu-whpx",
+  "engine": "pi-rpc",
+  "engineVersion": "@earendil-works/pi-coding-agent 1.5.1 + model pro via local broker",
+  "startedAt": "2026-11-10T09:36:28Z",
+  "finishedAt": "2026-11-10T09:36:41Z",
+  "durationSeconds": 13.37,
+  "completionEvidence": [
+    {
+      "type": "machine_check",
+      "description": "The real model selected through the WSL Model Broker settled normally and executed vm_screenshot, vm_type_text, vm_keypress and vm_screenshot in Pi RPC."
+    },
+    {
+      "type": "machine_check",
+      "description": "The guest file /tmp/aib-real-model-ok contained exactly '你好-real-model\\n'; both expected and actual SHA256 were 1e17f29a0ab082c3118dc545968ae5049274cb291e4324fe955487bf350768d0."
+    },
+    {
+      "type": "machine_check",
+      "description": "The final guest-agent screenshot visibly contains the executed Chinese command in XFCE Terminal.",
+      "artifactPath": "%LOCALAPPDATA%\\AgentInBox\\vms\\phase0-desktop\\real-model-validation.png",
+      "sha256": "ebebe7c732322f8f7341c490feeda57061ea3eb051debcb47de611379790af20"
+    },
+    {
+      "type": "machine_check",
+      "description": "The guest models.json was copied back and checked locally: it contains only mock and broker providers and does not contain the upstream any-llm API key. The VM used http://10.0.2.2:6719/v1 with a local broker token."
+    }
+  ],
+  "notes": "This is one real-model task, not a success-rate baseline. The full acceptance task set, cancellation under real model load, long sessions and repeated runs are still required before freezing Pi as the only CUA engine."
+}

@@ -696,6 +696,8 @@ Local Task Events → Outgoing Formatter → Platform REST API
 
 2026-11-10 验证记录：H1（Windows 11 家庭版 26200）上，MSYS2 QEMU 11.1.3 的 WHPX 加速器已实际启动 Ubuntu 24.04 Linux Guest，并通过 SSH、QMP 优雅关机和 qcow2 快照恢复验证；XFCE 桌面已通过 QMP 截图、分辨率切换、绝对鼠标和 ASCII 键盘输入验证。认证 Go Guest Agent 已在 X11 上完成 PNG 截图、鼠标、ASCII 与中文输入，未认证请求返回 401。Go `vm-supervisor.exe` 的 Host Inspect 在该宿主机返回 `ready=true` 和 `recommendedProvider=qemu-whpx`。全程普通用户权限，无需 Hyper-V 管理器或系统服务。该结果支持将 QEMU/WHPX 作为 Windows Host 的优先候选 Provider，但在 WHPX 性能与长稳、Guest RPC 短期令牌/Lease 强制接入、Wayland、Supervisor 崩溃接管和其他 Windows 版本验证完成前，第 1 项仍不冻结。桌面 QEMU 基线固定为 `-vga none -device virtio-gpu-pci -device virtio-tablet-pci`，WHPX 暂用 `-cpu qemu64`。证据见 `tests/phase0/results/`。
 
+同日 Pi 验证记录：`@earendil-works/pi-coding-agent` 1.5.1 在 Guest 内通过 RPC 与自定义 CUA 工具完成图片回传、工具循环、活跃工具 Abort 和 Session Resume，驱动真实 Guest Agent 写入预期中文文件。随后真实 `pro` 模型经 WSL Model Broker 完成一个真实 CUA 任务，且 Guest models.json 不含上游 API Key。这些结果支持继续采用 Pi SDK/RPC 而不 Fork，并证明本地 Model Broker 的流式/图片/工具协议可行；但“Pi 直接承担 CUA Worker 还是增加专用 Engine”必须在完整真实任务集、长会话和重复运行后冻结。
+
 ### 18.2 Windows VM 阶段必须冻结
 
 以下事项不在阶段 0 提前做可行性结论，等 Linux 全链路完整验收后，在本期后段 Windows VM 开发前形成结论：

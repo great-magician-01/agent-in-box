@@ -9,6 +9,7 @@
 - `result-schema.json`：单次任务运行的结果记录格式。
 - `runbook-windows-qemu.md`：Windows Host 上用国内镜像安装 QEMU/WHPX 并启动 Linux Guest 的步骤。
 - `scripts/`：实际执行过的 MSYS2/QEMU 安装、启动验证、QMP 控制和快照恢复脚本。
+- `pi/`：Pi RPC + 脚本化模型 + 真实 Guest Agent 的 Computer Use 工具循环验证 Harness。
 - `results/`：实际运行结果，小体积 JSON 入库；截图、控制台日志等大文件保存在数据目录，只在结果中引用路径与哈希。
 
 ## 结果状态

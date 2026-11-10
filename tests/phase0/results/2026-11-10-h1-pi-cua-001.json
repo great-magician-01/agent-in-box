@@ -1,0 +1,40 @@
+{
+  "runId": "2026-11-10-h1-pi-cua-mock-04",
+  "taskId": "PI-CUA-001",
+  "attempt": 4,
+  "status": "success",
+  "hostProfile": "H1",
+  "guestProfile": "G2",
+  "resourceProfile": "R2",
+  "provider": "qemu-whpx",
+  "engine": "pi-rpc",
+  "engineVersion": "@earendil-works/pi-coding-agent 1.5.1",
+  "startedAt": "2026-11-10T08:47:38Z",
+  "finishedAt": "2026-11-10T08:47:41Z",
+  "durationSeconds": 2.64,
+  "completionEvidence": [
+    {
+      "type": "machine_check",
+      "description": "Pi RPC selected mock/mock-cua, completed the screenshot -> click -> Chinese type -> enter tool loop and reached agent_settled."
+    },
+    {
+      "type": "machine_check",
+      "description": "The mock model log confirms the request after vm_screenshot contained the actual PNG base64 (iVBORw0KGgo), and every request exposed all five VM tools."
+    },
+    {
+      "type": "machine_check",
+      "description": "The guest file /tmp/aib-pi-cua-ok contained exactly '你好-pi\\n'; SHA256 0cbdd51e029eee5b0b9ae43a9c38e4b7c5dfed2f8b43dc00fa07f92378707a08."
+    },
+    {
+      "type": "machine_check",
+      "description": "A separate slow run entered vm_wait(30000); RPC abort completed and the session settled without waiting for the full tool timeout."
+    },
+    {
+      "type": "machine_check",
+      "description": "After closing Pi and restarting with --session <sessionFile>, get_messages returned 15 entries versus 11 before the slow/abort sequence; history was preserved.",
+      "artifactPath": "%LOCALAPPDATA%\\AgentInBox\\vms\\phase0-desktop\\pi-validation.png",
+      "sha256": "8b24c28bd6d26cfd92efd30cec7b9ed0b5ab5132e5f858082a0122b68b60c12f"
+    }
+  ],
+  "notes": "This uses a scripted OpenAI-compatible mock, not a real LLM. It proves Pi's RPC, image, tool, abort and session mechanisms with the real guest agent. Real-model Computer Use accuracy and long-task behavior still require a credentialed validation run."
+}

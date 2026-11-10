@@ -1,0 +1,18 @@
+{
+  "$schema": "https://pi.dev/schemas/models.schema.json",
+  "providers": {
+    "mock": {
+      "baseUrl": "http://127.0.0.1:4000/v1",
+      "api": "openai-completions",
+      "apiKey": "mock",
+      "models": [
+        {
+          "id": "mock-cua",
+          "name": "Scripted Computer Use Validator",
+          "input": ["text", "image"],
+          "reasoning": false
+        }
+      ]
+    }
+  }
+}

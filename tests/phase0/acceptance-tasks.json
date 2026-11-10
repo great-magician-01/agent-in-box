@@ -62,6 +62,32 @@
       "evidenceRequired": ["process-inventory", "qmp-responses"]
     },
     {
+      "id": "PI-REAL-001",
+      "title": "真实模型经 Model Broker 完成 Computer Use 任务",
+      "category": "worker_engine",
+      "level": "P0",
+      "preconditions": ["G2 桌面运行", "Guest Agent 认证可用", "Model Broker 持有上游凭据", "VM 仅持有本地 Broker 令牌"],
+      "steps": ["真实模型截图", "输入含中文的命令", "回车执行", "再次截图", "检查 Guest models.json"],
+      "completion": {
+        "mode": "machine",
+        "checks": ["任务文件 SHA256 与预期一致", "实际调用 vm_screenshot", "Guest 配置不包含上游 API Key"]
+      },
+      "evidenceRequired": ["real-model-result", "screenshot-sha256", "secret-scan-result"]
+    },
+    {
+      "id": "PI-CUA-001",
+      "title": "Pi RPC 的 Computer Use 工具循环、取消与恢复",
+      "category": "worker_engine",
+      "level": "P0",
+      "preconditions": ["G2 桌面运行", "Guest Agent 认证可用", "Pi 固定版本已安装", "脚本化模型仅用于协议验证"],
+      "steps": ["Pi RPC 建立会话", "截图并回传图片", "点击与中文输入", "Abort 活跃工具", "关闭并恢复 Session"],
+      "completion": {
+        "mode": "machine",
+        "checks": ["下一次模型请求包含截图 PNG", "Guest 文件 SHA256 与任务一致", "Abort 后达到 agent_settled", "恢复后消息数不减少"]
+      },
+      "evidenceRequired": ["rpc-events", "mock-model-log", "guest-file-sha256"]
+    },
+    {
       "id": "GA-CORE-001",
       "title": "认证 Guest Agent 的截图、输入与中文",
       "category": "computer_use",

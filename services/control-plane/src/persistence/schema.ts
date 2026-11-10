@@ -133,6 +133,32 @@ export interface SchemaMigrationsTable {
   applied_at: string;
 }
 
+export interface AppSettingsTable {
+  key: string;
+  value_json: string;
+  updated_at: string;
+}
+
+export interface LocalUsersTable {
+  id: string;
+  display_name: string;
+  role: string;
+  created_at: string;
+  last_active_at: string;
+}
+
+export interface StorageMigrationsTable {
+  id: string;
+  from_root: string;
+  to_root: string;
+  status: string;
+  started_at: string;
+  completed_at: string | null;
+  error: string | null;
+  files_copied: number;
+  bytes_copied: number;
+}
+
 export interface DatabaseSchema {
   schema_migrations: SchemaMigrationsTable;
   images: ImagesTable;
@@ -147,4 +173,7 @@ export interface DatabaseSchema {
   vm_leases: VmLeasesTable;
   processed_events: ProcessedEventsTable;
   idempotency_keys: IdempotencyKeysTable;
+  app_settings: AppSettingsTable;
+  local_users: LocalUsersTable;
+  storage_migrations: StorageMigrationsTable;
 }

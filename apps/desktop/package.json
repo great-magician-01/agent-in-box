@@ -6,9 +6,17 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "electron .",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "pack:dir": "electron-builder --dir --config electron-builder.yml",
+    "dist": "electron-builder --config electron-builder.yml",
+    "dist:win": "electron-builder --win nsis --config electron-builder.yml",
+    "dist:win:portable": "electron-builder --win portable --config electron-builder.yml",
+    "dist:linux": "electron-builder --linux --config electron-builder.yml"
   },
   "devDependencies": {
-    "electron": "45.2.3"
+    "@agent-in-box/protocol": "workspace:*",
+    "electron": "45.2.3",
+    "electron-builder": "26.18.0"
   }
 }

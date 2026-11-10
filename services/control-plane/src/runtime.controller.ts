@@ -1,19 +1,6 @@
 import { Controller, Get } from "@nestjs/common";
-import { defaultDataRoot, storageLayout } from "@agent-in-box/config";
+import type { RuntimeInfo } from "@agent-in-box/protocol";
 import { DatabaseService } from "./persistence/database.service";
-
-export interface RuntimeInfo {
-  platform: string;
-  architecture: string;
-  dataRoot: string;
-  databasePath: string;
-  storage: {
-    images: string;
-    vms: string;
-    snapshots: string;
-    archives: string;
-  };
-}
 
 @Controller("api/v1")
 export class RuntimeController {
@@ -21,17 +8,20 @@ export class RuntimeController {
 
   @Get("runtime")
   runtime(): RuntimeInfo {
-    const layout = storageLayout(defaultDataRoot());
     return {
       platform: process.platform,
       architecture: process.arch,
-      dataRoot: layout.root,
+      dataRoot: this.database.dataRoot,
+      dataRootSource: this.database.dataRootSource,
+      configPath: this.database.configPath,
       databasePath: this.database.filename,
       storage: {
-        images: layout.images,
-        vms: layout.vms,
-        snapshots: layout.snapshots,
-        archives: layout.archives,
+        images: this.database.layout.images,
+        downloads: this.database.layout.downloads,
+        vms: this.database.layout.vms,
+        snapshots: this.database.layout.snapshots,
+        artifacts: this.database.layout.artifacts,
+        archives: this.database.layout.archives,
       },
     };
   }

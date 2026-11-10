@@ -1,12 +1,24 @@
 # Agent-in-Box
 
-面向个人用户的本地 AI 虚拟机工作平台。当前仓库已完成 **开发计划阶段 1（工程骨架、协议和本地持久化）**：包含可构建的工程边界、共享协议、领域状态机、SQLite 持久化、任务/Worker/VM 仓储、Outbox、执行 Lease 和事件去重。尚未包含可用的 Hypervisor、Computer Use 或 Worker 功能。
+面向个人用户的本地 AI 虚拟机工作平台。当前仓库已完成 **开发计划阶段 1（工程骨架、协议和本地持久化）** 和 **阶段 2（Electron、本地服务与自定义存储）**：包含无特权 Electron 壳、控制平面进程监管、首次启动向导、宿主机检查、自定义数据目录、存储锁与迁移、系统安全存储中的模型凭据，以及可打包的本地服务。VM 生命周期、镜像服务、Computer Use 和 Worker 主链路仍属于后续阶段。
 
 完整方案见：
 
 - [产品方案](docs/01-product-solution.md)
 - [技术设计](docs/02-technical-design.md)
 - [开发计划](docs/03-development-plan.md)
+- [阶段 2 验收记录](tests/phase2/summary.md)
+
+## 阶段 2 已落地
+
+- **Electron 无特权壳**：`sandbox` + `contextIsolation`，Renderer 没有 `require`、Node `process` 或通用 IPC；只有白名单方法通过 preload 暴露。
+- **本地服务监管**：Electron Main 启动并监管 Control Plane，带健康检查、启动超时、异常退出自动重启上限、结构化日志、崩溃诊断、托盘和“关闭窗口后后台运行/退出”设置。
+- **首次启动向导**：检查操作系统、CPU 虚拟化、内存和磁盘；在首次下载前选择数据目录；设置 Host Reserve、自动启动策略、本机管理员和敏感操作审批。
+- **存储管理**：镜像、下载缓存、VM、快照、产物和归档统一由 Storage Manager 解析；路径可写/空间检查、存储锁、哈希校验迁移、SQLite 在线备份与完整性检查；迁移失败保留旧目录。
+- **模型凭据**：只在 Electron Main 中通过 `safeStorage`（Windows DPAPI、macOS Keychain、Linux Secret Service）加密保存；`basic_text` 等不安全后端会明确拒绝保存；凭据不经过普通配置或日志。
+- **打包**：electron-builder 配置、`pnpm deploy` 生成自包含 Control Plane、`runtime_modules` + `NODE_PATH` 解决 pnpm/extraResources 结构；Linux 打包 Smoke Test 和 Windows portable/win-unpacked 构建已实际执行。
+
+详细验收项、证据和未关闭门槛见 [`tests/phase2/summary.md`](tests/phase2/summary.md)。
 
 ## 环境要求
 
@@ -39,15 +51,41 @@ pnpm --filter @agent-in-box/web dev
 - 控制平面: http://127.0.0.1:3000
 - 健康检查: http://127.0.0.1:3000/api/v1/health
 
-Electron 开发需要先启动 Web，然后构建并启动桌面壳：
+桌面壳开发可以直接使用统一脚本（构建共享包、Web、Control Plane 和 Electron，并由 Control Plane 提供同源页面）：
 
 ```bash
-pnpm --filter @agent-in-box/web dev
-pnpm --filter @agent-in-box/desktop build
-pnpm --filter @agent-in-box/desktop start
+pnpm dev:desktop
 ```
 
-也可用 `AGENT_IN_BOX_WEB_URL` 指向其他本地 Web 地址。Electron 窗口只加载页面，不直接执行系统命令。
+也可分别启动 Vite 和 Electron；`AGENT_IN_BOX_WEB_URL` 可指向其他本地 Web 地址。Electron 窗口只加载页面，不直接执行系统命令。
+
+打包与 Smoke Test：
+
+```bash
+# 构建自包含 Control Plane + Web + Electron 并生成当前平台目录包
+pnpm package:desktop:dir
+
+# 生成 Windows portable exe（Linux/WSL 可构建，无需 wine）
+pnpm package:desktop:win:portable
+
+# 在 Windows 上生成 NSIS 安装包（需要 Windows 或可用的 wine）
+pnpm package:desktop:win
+
+# 控制平面首次启动/迁移/重启对账（不需要 Electron）
+pnpm smoke:phase2
+
+# 已打包桌面壳的 Renderer 隔离、preload IPC 和 UI 加载
+# 需先执行 pnpm package:desktop:dir；Linux/WSL 还需要 X/WSLg 和 Electron 系统库
+pnpm smoke:desktop
+```
+
+受限网络下下载 Electron/NSIS 依赖可设置镜像：
+
+```bash
+ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ \
+ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ \
+pnpm package:desktop:win:portable
+```
 
 ## 构建与检查
 
@@ -72,12 +110,13 @@ go run ./services/guest-agent/cmd/guest-agent
 
 ```text
 apps/
-  desktop/           Electron 无特权桌面壳
-  web/               React + Vite 本地 Web UI
+  desktop/           Electron 无特权桌面壳、Control Plane 监管、托盘与凭据存储
+  web/               React + Vite 本地 Web UI（首次向导、存储和设置页面）
 services/
-  control-plane/     NestJS 本地控制平面
+  control-plane/     NestJS 本地控制平面（宿主检查、存储管理、设置与持久化）
   vm-supervisor/     Go 宿主机 VM 管理服务（当前仅健康检查）
   guest-agent/       Go Guest Agent（当前仅健康检查）
+scripts/             打包、开发启动与阶段 Smoke Test
 packages/
   protocol/          跨进程协议与事件类型
   domain/            任务/Worker 状态机与绑定规则
@@ -88,18 +127,21 @@ packages/
   ui/                状态文案与样式辅助
 internal/health/     共享 Go 健康检查实现
 images/              后续 Linux/Windows 镜像构建
-tests/               后续集成与真实 VM 测试
+tests/               阶段验证记录与后续集成/真实 VM 测试
 docs/                产品、技术与开发计划
 ```
 
 ## 数据目录
 
-大体积文件不会写入仓库。默认数据根目录：
+小体积应用配置保存在 OS 配置目录，大文件全部位于用户选择的数据根目录：
 
-- Windows：`%LOCALAPPDATA%\AgentInBox`
-- Linux/macOS：`~/.local/share/agent-in-box`
+- 配置文件：Windows `%APPDATA%\AgentInBox\app-config.json`；Linux `~/.config/agent-in-box/app-config.json`；macOS `~/Library/Application Support/AgentInBox/app-config.json`
+- 默认数据根目录（首次启动向导会要求确认或改选）：Windows `%LOCALAPPDATA%\AgentInBox`；Linux/macOS 为 OS 数据目录
+- 存储布局：`images/`、`downloads/`、`vms/<vm-id>/`、`snapshots/<vm-id>/`、`artifacts/`、`archives/`
 
-可通过 `AGENT_IN_BOX_DATA_ROOT` 覆盖。控制平面的 `/api/v1/runtime` 会返回解析后的存储布局和数据库路径。
+`AGENT_IN_BOX_CONFIG_DIR` 可覆盖配置目录（桌面应用会自动传给 Control Plane）；`AGENT_IN_BOX_DATA_ROOT` 可强制指定数据根目录，此时向导和存储迁移会锁定该路径。控制平面的 `/api/v1/runtime` 会返回解析后的存储布局和数据库路径，`/api/v1/storage` 返回分类占用和存储锁状态。
+
+迁移会在存储锁保护下复制并逐个校验文件哈希，使用 SQLite 在线备份复制数据库并执行 `integrity_check`，全部成功后原子更新配置；失败时旧目录和旧配置保持可用。旧目录不会自动删除。
 
 SQLite 数据库位于数据根目录下的 `agent-in-box.sqlite`，使用 WAL 模式并启用外键约束。启动时执行内置 Migration Runner；迁移记录保存在 `schema_migrations` 表中，每条迁移在独立事务中应用。数据库包含：
 
@@ -107,6 +149,7 @@ SQLite 数据库位于数据根目录下的 `agent-in-box.sqlite`，使用 WAL �
 - `tasks`、`task_events`、`workers`、`idempotency_keys`
 - `outbox`、`vm_leases`、`processed_events`
 - `images`
+- `app_settings`、`local_users`、`storage_migrations`
 
 数据库备份通过 `AppDatabase.backup()` 使用 SQLite 在线备份能力，后续会接入本地备份与恢复流程。
 
@@ -115,13 +158,23 @@ SQLite 数据库位于数据根目录下的 `agent-in-box.sqlite`，使用 WAL �
 已在当前开发环境实际执行：
 
 - `pnpm install`：成功；pnpm 11 仅允许 `esbuild`、`electron`、`better-sqlite3` 构建脚本
-- `pnpm check`：lint、typecheck、33 个 Vitest 测试、Go test、全部构建均通过
+- `pnpm check`：lint、typecheck、123 个 Vitest 测试、Go test、全部构建均通过
 - 控制平面 `GET /api/v1/health`、`GET /api/v1/runtime` 返回正常
-- 控制平面启动时创建 SQLite 数据库并应用 `001_initial_schema`
+- 控制平面启动时创建 SQLite 数据库并应用 `001_initial_schema`、`002_phase2_settings`
 - SQLite 表、WAL 模式和迁移记录在真实运行中验证通过
 - Web 开发服务器可访问，`/api` 代理到控制平面正常
 - VM Supervisor 与 Guest Agent 的 `/healthz`、`/readyz` 正常
-- Electron TypeScript 构建通过，但 **Electron 二进制在当前网络环境下载失败**
+
+### 阶段 2 验证（2026-11-10）
+
+阶段 2 的验收记录、逐项状态和未关闭门槛见 [`tests/phase2/summary.md`](tests/phase2/summary.md)。当前环境实际执行：
+
+- `pnpm smoke:phase2`：首次启动状态、WSL 宿主机检查、Unicode/空格数据目录校验、首次向导完成、6 类存储目录迁移、SQLite 备份、旧目录保留、重启后数据根目录对账全部通过
+- `pnpm package:desktop:dir`：electron-builder 生成 Linux 目录包，Control Plane 依赖通过 `runtime_modules` + `NODE_PATH` 装入 resources
+- 已打包 Linux 桌面 Smoke Test：Control Plane 在 1 秒内 healthy；Renderer 中 `window.agentInBox` 可用、`require`/`process` 为 `undefined`；IPC 返回 `running`；页面实际渲染首次启动向导和宿主机检查结果
+- Windows 目标：`win-unpacked` 与 portable exe 构建成功；NSIS 安装包在 Linux/WSL 中因缺少 wine 无法完成，需在 Windows 或安装 wine 的构建机执行
+- 存储迁移失败回滚、锁竞争/陈旧锁、只读目录、符号链接、缓存清理不影响 VM/产物、凭据 `basic_text` 拒绝保存均有自动化测试
+- Electron 二进制通过 `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/` 下载；WSL 中运行还需系统提供 X/WSLg 以及 libnspr4/libnss3/libasound2
 
 ### 阶段 0 技术验证（2026-11-10）
 
@@ -151,15 +204,7 @@ SQLite 数据库位于数据根目录下的 `agent-in-box.sqlite`，使用 WAL �
 
 验证中确认的必要配置：桌面 VM 使用 `-vga none -device virtio-gpu-pci -device virtio-tablet-pci`；当前 WHPX 环境暂用 `-cpu qemu64`，`-cpu max` 的启动卡住问题尚未解决。
 
-测试矩阵、验收任务集和结果记录位于 [`tests/phase0/`](tests/phase0/README.md)。当前已完成 G1 Server 生命周期核心链路、G2 XFCE 桌面的 QMP 显示/输入验证，以及认证 Go Guest Agent 的 X11 截图和中文输入。WHPX 性能与长稳、Supervisor 崩溃接管、Pi Computer Use、Model Broker 和机器人长连接仍未验证，默认 VmProvider 尚未冻结。
-
-Electron 二进制的失败与代码无关。在网络可用的机器上重试：
-
-```bash
-pnpm --filter @agent-in-box/desktop exec install-electron
-```
-
-WSL 环境还需要可用的图形转发或 Windows 侧运行 Electron。桌面壳的实际窗口、打包和安装程序验证属于后续阶段，当前不要把“TypeScript 构建通过”当作“桌面应用已验证”。
+测试矩阵、验收任务集和结果记录位于 [`tests/phase0/`](tests/phase0/README.md)。阶段 0 的 Linux 高风险主链路已经完成，默认 VmProvider 与 Worker Engine 已冻结；真实飞书/QQ 凭据、更长稳定性、Hyper-V 环境和真实镜像 CDN 等外部门槛仍然保留，详见阶段 0 总结。
 
 ## 当前技术栈版本
 
@@ -193,9 +238,18 @@ WSL 环境还需要可用的图形转发或 Windows 侧运行 Electron。桌面�
 - Windows/Linux Host Inspect：WHPX/KVM、QEMU 加速器、内存和磁盘检查；Windows amd64 版本已在本机实际运行
 - Linux X11 Guest Agent：Bearer 认证、能力/桌面信息、PNG 截图、鼠标/键盘/Unicode 输入和动作日志
 - `PiWorkerEngine`：Pi RPC 子进程、受控工具暴露、事件映射、Prompt/Steer/Follow-up/Abort、会话归档与原生恢复；包含假 Pi 单元测试和真实 Pi 集成测试
+- Electron 无特权壳、Renderer 白名单 IPC、Control Plane 进程监管、健康检查超时、日志轮转和崩溃诊断
+- 首次启动向导、宿主机检查、数据目录选择、Host Reserve/自动启动策略、本机管理员和敏感操作审批
+- Storage Manager：分类路径、可写/空间检查、存储锁、哈希校验迁移、SQLite 在线备份与完整性检查、下载缓存清理
+- `safeStorage` 模型凭据存储（拒绝 Linux `basic_text`）、electron-builder 打包与自包含 Control Plane bundle
+- Linux 打包桌面 Smoke Test；Windows `win-unpacked` 与 portable exe 构建
 
-明确未实现：
+明确未实现或未在本环境验证：
 
+- Windows 干净环境中的 NSIS 安装、安装包运行和卸载验证；Linux/WSL 缺少 wine，当前只验证了 win-unpacked/portable 构建
+- 迁移后 qcow2 backing file 路径重写；当前会校验镜像并警告旧路径引用，依赖旧目录保留
+- 迁移进度流式事件；当前为单次请求并持有存储锁
+- 本地 API 管理员认证/CSRF 加固；当前为回环监听、Host 白名单与 CORS 限制，完整防护在阶段 11～12
 - 生产级 Image Service（分块续传、下载去重和版本管理）
 - Supervisor 的完整 VM 生命周期 HTTP API 与 ACL；当前仅 Host Inspect 和 Go Provider 原型
 - Guest RPC 的生产级传输、短期令牌签发/撤销和 Per-VM Lease 强制接入；当前验证使用静态测试令牌
@@ -204,4 +258,4 @@ WSL 环境还需要可用的图形转发或 Windows 侧运行 Electron。桌面�
 - Router、HTTP 任务 API、Worker 注册表查询接口和任务看板
 - 真实飞书/QQ 应用凭据验收；本地长连接框架和 mock 协议测试已完成
 
-阶段 1 与阶段 0 的高风险主链路验证已完成。下一步按 [开发计划](docs/03-development-plan.md) 进入阶段 2～3 的 Electron、Storage Manager、Image Service 和 VM 生命周期产品化，并把 PiWorkerEngine 接入 Task/Lease/Worker Registry。
+阶段 0～2 已完成。下一步按 [开发计划](docs/03-development-plan.md) 进入阶段 3：Image Service 的 Manifest/下载/续传/校验/版本管理，VM Supervisor 的完整生命周期 API 与 ACL，Linux Guest 创建启动、VM 管理 UI，并继续跟踪 Windows NSIS 安装包和干净环境 Smoke Test 门槛。

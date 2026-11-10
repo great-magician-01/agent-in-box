@@ -7,13 +7,15 @@
 
 - **阶段 1.1 完成**：单仓库 Monorepo、pnpm Workspace、TypeScript/Go 工具链、统一构建与检查。
 - **阶段 1.2 完成（初版）**：核心协议、分页/错误/幂等契约、任务与 Worker 状态机、VM 多对多绑定规则、Computer Use 动作、Guest RPC、VmProvider、Worker Engine 和 Bot Connector 接口均有类型与契约测试。
-- **阶段 1.3 完成**：SQLite WAL、外键、内置 Migration Runner、在线备份；项目/VM/会话/任务/Worker/Lease/Outbox/事件去重仓储；幂等任务创建、事务化状态迁移、任务事件与 Outbox 同事务写入；Per-VM Lease 与过期替换。33 个 Vitest 测试和 Go 测试通过。
+- **阶段 1.3 完成**：SQLite WAL、外键、内置 Migration Runner、在线备份；项目/VM/会话/任务/Worker/Lease/Outbox/事件去重仓储；幂等任务创建、事务化状态迁移、任务事件与 Outbox 同事务写入；Per-VM Lease 与过期替换。阶段 1 的 33 个 Vitest 测试和 Go 测试通过；当前仓库合计 123 个 Vitest 测试通过。
 - **阶段 0 主链路验证完成**：Windows Host + QEMU/WHPX 的 P0 路径、Linux 桌面、认证 Guest Agent、Pi Computer Use、真实模型任务、镜像下载原型和飞书/QQ 长连接框架均已有代码与实测证据。汇总见 [`tests/phase0/summary.md`](../tests/phase0/summary.md)。
+- **阶段 2 完成（产品化初版）**：无特权 Electron 壳与白名单 IPC、Control Plane 启动/健康检查/异常重启/托盘/关闭行为、JSONL 日志与崩溃诊断；首次启动向导（OS/CPU 虚拟化/内存/磁盘检查、数据目录、Host Reserve、自动启动、系统安全存储凭据、本机管理员与审批设置）；Storage Manager（分类路径、空间/权限检查、存储锁、哈希校验迁移、SQLite 在线备份与完整性检查、缓存清理）。验收记录见 [`tests/phase2/summary.md`](../tests/phase2/summary.md)。
+- **阶段 2 打包证据**：electron-builder + `pnpm deploy` 自包含 Control Plane；Linux 打包桌面 Smoke Test 通过（Control Plane healthy、Renderer 无 Node、preload IPC 可用、向导实际渲染）；Windows `win-unpacked` 与 portable exe 构建成功。**NSIS 安装包和干净 Windows 安装运行仍未验证**（Linux/WSL 缺少 wine），作为阶段 3 并行跟踪的外部验收门槛。
 - **首版选型冻结**：Windows 默认 QEMU 11.1.3 + WHPX（`-cpu qemu64`）；Guest 默认 XFCE + LightDM + Xorg；Pi 1.5.1 RPC 直接承担 CUA Worker，不 Fork；宿主机 Model Broker 持有真实模型凭据；飞书使用官方 Node SDK，机器人平台 ID 可扩展。
 - **真实模型任务证据**：终端中文输入、桌面 Home 双击打开 Thunar、Mousepad 多行编辑保存均通过；Pi 图片回传、活跃工具 Abort、Session Resume 和真实 Pi Adapter 集成测试通过。
 - **WHPX 稳定性证据**：Provider 生命周期累计 9 次通过，桌面 10 分钟长稳 20/20 采样正常；Unicode VM 路径经短路径/ASCII junction 修复后，C:/D: 的真实创建/启动/停止/快照恢复均通过。
 - **保留的负面结果与外部门槛**：Epiphany HTML5 drag-and-drop 失败；出现过一次 Guest 内核 panic，需更长 soak；Hyper-V 需 Pro/Enterprise 环境；Wayland 首版不支持；真实飞书/QQ 凭据验收仍待测试应用；真实镜像 CDN 与断电恢复待补。
-- **下一步**：进入阶段 2～3 的产品化（Electron、本地服务、Storage Manager、Image Service、VM 生命周期），同时把 PiWorkerEngine 接入 Task Service、Per-VM Lease 和 Worker Registry。真实飞书/QQ 与长时稳定性作为发布前验收门槛持续跟踪。
+- **下一步**：进入阶段 3（Image Service、VM Supervisor 完整生命周期 API/ACL、Linux Guest 创建启动、VM 管理 UI），同时把 PiWorkerEngine 接入 Task Service、Per-VM Lease 和 Worker Registry。Windows NSIS 安装包与干净 Windows Smoke Test、真实飞书/QQ 和长时稳定性作为发布前验收门槛持续跟踪。
 
 1. 先验证 Hypervisor、镜像、Pi Computer Use 和模型代理等高风险链路，再大规模开发 UI。
 2. 每个阶段形成可运行、可测试的纵向能力，避免一次性生成大量空模块。

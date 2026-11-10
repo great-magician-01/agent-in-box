@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "pnpm build:packages && pnpm -r --parallel --filter @agent-in-box/web --filter @agent-in-box/control-plane run dev",
-    "dev:desktop": "pnpm build:packages && pnpm --filter @agent-in-box/web build && pnpm --filter @agent-in-box/desktop build && pnpm --filter @agent-in-box/desktop start",
+    "dev:desktop": "node scripts/dev-desktop.mjs",
     "build:packages": "pnpm --filter \"./packages/**\" -r --if-present build",
     "build:go": "go build ./...",
     "build": "pnpm -r --if-present build && pnpm build:go",
@@ -19,7 +19,15 @@
     "lint": "eslint .",
     "format": "prettier --write \"**/*.{ts,tsx,js,mjs,json,css,html,yaml,yml}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,mjs,json,css,html,yaml,yml}\"",
-    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "package:control-plane": "node scripts/package-control-plane.mjs",
+    "package:prepare": "pnpm build:packages && pnpm --filter @agent-in-box/control-plane build && pnpm --filter @agent-in-box/web build && node scripts/package-control-plane.mjs && pnpm --filter @agent-in-box/desktop build",
+    "package:desktop": "pnpm package:prepare && pnpm --filter @agent-in-box/desktop dist",
+    "package:desktop:dir": "pnpm package:prepare && pnpm --filter @agent-in-box/desktop pack:dir",
+    "package:desktop:win": "pnpm package:prepare && pnpm --filter @agent-in-box/desktop dist:win",
+    "package:desktop:win:portable": "pnpm package:prepare && pnpm --filter @agent-in-box/desktop dist:win:portable",
+    "smoke:phase2": "pnpm build:packages && pnpm --filter @agent-in-box/control-plane build && pnpm --filter @agent-in-box/web build && node scripts/smoke-phase2.mjs",
+    "smoke:desktop": "node scripts/smoke-desktop-package.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

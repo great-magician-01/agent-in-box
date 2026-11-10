@@ -361,6 +361,275 @@ export interface VmProvider {
   attachConsole(vmId: Id): Promise<{ consoleUrl: string }>;
 }
 
+/* ------------------------------------------------------------------------- */
+/* Phase 2: host inspection, storage, onboarding and the Electron bridge.     */
+/* ------------------------------------------------------------------------- */
+
+export type HostCheckStatus = "ok" | "warning" | "error" | "unknown";
+
+export interface HostCheck {
+  id: string;
+  status: HostCheckStatus;
+  message: string;
+  details?: Record<string, string>;
+}
+
+export interface HostInspectionReport {
+  platform: string;
+  release: string;
+  architecture: string;
+  supported: boolean;
+  totalMemoryBytes: number;
+  freeMemoryBytes: number;
+  dataRoot: string;
+  freeDiskBytes: number;
+  ready: boolean;
+  recommendedProvider: "qemu-whpx" | "qemu-kvm" | "hyperv" | null;
+  checks: HostCheck[];
+  inspectedAt: IsoTimestamp;
+}
+
+export type AutoStartPolicy = "manual" | "when_needed";
+
+export interface ResourcePolicy {
+  /** Memory the host scheduler must keep available for the operating system. */
+  hostReserveBytes: number;
+  autoStartPolicy: AutoStartPolicy;
+}
+
+export interface SecuritySettings {
+  requireApprovalForSensitiveActions: boolean;
+}
+
+export type LocalUserRole = "admin";
+
+export interface LocalUserRecord {
+  id: Id;
+  displayName: string;
+  role: LocalUserRole;
+  createdAt: IsoTimestamp;
+  lastActiveAt: IsoTimestamp;
+}
+
+export type DataRootSource = "environment" | "config" | "default";
+
+export interface OnboardingState {
+  required: boolean;
+  completedAt: IsoTimestamp | null;
+  dataRoot: string;
+  dataRootSource: DataRootSource;
+  /** True when app-config.json points at a root this process has not opened yet. */
+  restartRequired: boolean;
+  configuredDataRoot: string | null;
+  resourcePolicy: ResourcePolicy;
+  security: SecuritySettings;
+  localUser: LocalUserRecord | null;
+  preferredModelProvider: string | null;
+  credentialsConfigured: boolean;
+}
+
+export interface OnboardingCompleteRequest {
+  dataRoot: string;
+  resourcePolicy: ResourcePolicy;
+  security: SecuritySettings;
+  displayName: string;
+  preferredModelProvider?: string | null;
+  /** Metadata only. The secret itself must live in OS secure storage. */
+  credentialsConfigured?: boolean;
+}
+
+export interface OnboardingCompleteResult {
+  state: OnboardingState;
+  restartRequired: boolean;
+  storageMigration: StorageMigrationResult | null;
+}
+
+export interface SettingsView {
+  resourcePolicy: ResourcePolicy;
+  security: SecuritySettings;
+  dataRoot: string;
+  dataRootSource: DataRootSource;
+  onboarding: OnboardingState;
+}
+
+export interface RuntimeInfo {
+  platform: string;
+  architecture: string;
+  dataRoot: string;
+  dataRootSource: DataRootSource;
+  configPath: string;
+  databasePath: string;
+  storage: {
+    images: string;
+    downloads: string;
+    vms: string;
+    snapshots: string;
+    artifacts: string;
+    archives: string;
+  };
+}
+
+export const STORAGE_CATEGORIES = [
+  "images",
+  "downloads",
+  "vms",
+  "snapshots",
+  "artifacts",
+  "archives",
+] as const;
+export type StorageCategory = (typeof STORAGE_CATEGORIES)[number];
+
+export interface StorageLayoutInfo {
+  root: string;
+  database: string;
+  images: string;
+  downloads: string;
+  vms: string;
+  snapshots: string;
+  artifacts: string;
+  archives: string;
+}
+
+export interface StorageValidation {
+  path: string;
+  resolvedPath: string;
+  exists: boolean;
+  directory: boolean;
+  writable: boolean;
+  freeBytes: number;
+  totalBytes: number;
+  layout: StorageLayoutInfo;
+  warnings: string[];
+  errors: string[];
+  ok: boolean;
+}
+
+export interface StorageCategoryUsage {
+  category: StorageCategory;
+  path: string;
+  bytes: number;
+  files: number;
+}
+
+export interface StorageLockInfo {
+  owner: string;
+  pid: number;
+  hostname: string;
+  acquiredAt: IsoTimestamp;
+  operation: string;
+}
+
+export interface StoragePendingMigration {
+  targetRoot: string;
+  startedAt: IsoTimestamp;
+  operation: string;
+}
+
+export interface StorageReport {
+  root: string;
+  databasePath: string;
+  databaseBytes: number;
+  totalBytes: number;
+  freeBytes: number;
+  categories: StorageCategoryUsage[];
+  lock: StorageLockInfo | null;
+  pendingMigration: StoragePendingMigration | null;
+}
+
+export interface StorageMigrationResult {
+  from: string;
+  to: string;
+  filesCopied: number;
+  bytesCopied: number;
+  durationMs: number;
+  verifiedFiles: number;
+  warnings: string[];
+  configUpdated: boolean;
+  restartRequired: boolean;
+  oldDataRetained: true;
+}
+
+export interface StorageCleanupResult {
+  path: string;
+  bytesFreed: number;
+  filesDeleted: number;
+}
+
+export type CloseBehavior = "keep_running" | "quit";
+
+export type ControlPlaneState =
+  "starting" | "running" | "external" | "stopping" | "stopped" | "failed";
+
+export interface ControlPlaneStatus {
+  state: ControlPlaneState;
+  pid: number | null;
+  port: number;
+  health: HealthResponse | null;
+  message: string | null;
+  lastExitCode: number | null;
+  restarts: number;
+}
+
+export interface DesktopAppStatus {
+  controlPlane: ControlPlaneStatus;
+  closeBehavior: CloseBehavior;
+  configDirectory: string;
+  logDirectory: string;
+  version: string;
+  platform: string;
+  arch: string;
+}
+
+export interface DesktopCredentialProvider {
+  providerId: string;
+  updatedAt: IsoTimestamp;
+}
+
+export interface DesktopCredentialStatus {
+  secureStorageAvailable: boolean;
+  storageBackend: string | null;
+  message: string | null;
+  providers: DesktopCredentialProvider[];
+}
+
+export interface CredentialSaveRequest {
+  providerId: string;
+  secret: string;
+}
+
+/**
+ * The only API the sandboxed renderer receives. Every method maps to one
+ * whitelisted IPC handler; there is no generic invoke or Node access.
+ */
+export interface DesktopBridge {
+  platform: string;
+  versions: {
+    electron: string;
+    chrome: string;
+    node: string;
+  };
+  app: {
+    status(): Promise<DesktopAppStatus>;
+    onStatus(listener: (status: DesktopAppStatus) => void): () => void;
+    restartControlPlane(): Promise<DesktopAppStatus>;
+    quit(): Promise<void>;
+    openLogs(): Promise<void>;
+  };
+  dialog: {
+    chooseDirectory(input?: { title?: string; defaultPath?: string }): Promise<string | null>;
+  };
+  config: {
+    getCloseBehavior(): Promise<CloseBehavior>;
+    setCloseBehavior(value: CloseBehavior): Promise<CloseBehavior>;
+  };
+  credentials: {
+    status(): Promise<DesktopCredentialStatus>;
+    save(request: CredentialSaveRequest): Promise<DesktopCredentialStatus>;
+    remove(providerId: string): Promise<DesktopCredentialStatus>;
+  };
+  log(level: "info" | "warn" | "error", message: string, data?: unknown): void;
+}
+
 export function isTaskStatus(value: unknown): value is TaskStatus {
   return typeof value === "string" && (TASK_STATUSES as readonly string[]).includes(value);
 }

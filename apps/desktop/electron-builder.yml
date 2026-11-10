@@ -1,0 +1,56 @@
+appId: com.agentinbox.desktop
+productName: Agent-in-Box
+copyright: Copyright © 2026 Agent-in-Box
+
+directories:
+  output: ../../release
+  buildResources: build
+
+files:
+  - dist/**/*
+  - static/**/*
+  - package.json
+
+extraResources:
+  - from: ../../release/control-plane
+    to: control-plane
+    filter:
+      - "**/*"
+  - from: ../web/dist
+    to: web
+    filter:
+      - "**/*"
+
+asar: true
+compression: normal
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: agent-in-box-${version}-${arch}.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  deleteAppDataOnUninstall: false
+  shortcutName: Agent-in-Box
+  # Per-user installs never elevate; this also removes the wine dependency when
+  # building the Windows installer from Linux CI.
+  packElevateHelper: false
+
+linux:
+  target:
+    - AppImage
+  category: Utility
+
+mac:
+  target:
+    - dmg
+  category: public.app-category.productivity
+
+publish: null

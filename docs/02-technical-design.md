@@ -109,6 +109,8 @@ pnpm 的链接结构必须在早期通过真实打包验证，不能只保证开
 - 打包后执行数据库打开、Migration、Pi 加载和本地 API 的 Smoke Test；
 - Windows 干净环境安装包不依赖开发机上的 pnpm Store。
 
+**阶段 2 实现状态（2026-11-10）**：Electron Main 以 `ELECTRON_RUN_AS_NODE=1` 启动独立 Control Plane 进程；`pnpm deploy --prod --legacy` 生成自包含目录，安装包内将 `node_modules` 重命名为 `runtime_modules` 并通过 `NODE_PATH` 解析，避开 electron-builder 对 extraResources 中 `node_modules` 的默认排除。better-sqlite3 13 的 N-API prebuild 因此在 Node/Electron Node 模式间复用。Linux 打包目录 Smoke Test 已通过；Windows `win-unpacked`/portable 构建通过，NSIS 安装包仍需 Windows 或 wine 验证。
+
 #### Go 与发布边界
 
 - VM Supervisor 和 Guest Agent 继续使用 Go Modules，不纳入 npm 包语义；
@@ -415,6 +417,8 @@ Linux Guest 的默认 Provider 在技术验证后确定，不在验证前写死�
 ```
 
 小体积应用配置可以位于 OS 标准配置目录，但所有大文件位置由 Storage Manager 统一解析，业务模块不能自行拼接默认系统盘路径。
+
+**阶段 2 实现状态（2026-11-10）**：数据根目录选择保存在 OS 配置目录的 `app-config.json`，`AGENT_IN_BOX_DATA_ROOT` 可强制覆盖并锁定迁移。Storage Manager 提供路径创建/可写探测/`statfs` 空间检查、基于 PID 的存储锁、逐文件 SHA256 迁移、SQLite 在线备份与 `integrity_check`、可选 `qemu-img check`、配置原子更新和失败回滚；迁移成功返回 `restartRequired`，由 Electron 重启 Control Plane。下载缓存与用户数据分开清理。窗口关闭行为和模型凭据状态也保存在本机配置/安全存储中，不属于大文件布局。
 
 ### 8.3 迁移与快照链
 

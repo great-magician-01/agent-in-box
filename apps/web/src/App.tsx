@@ -1,57 +1,175 @@
-import { useEffect, useState } from "react";
-import type { HealthResponse } from "@agent-in-box/protocol";
-import { cx } from "@agent-in-box/ui";
+/* eslint-disable react-hooks/set-state-in-effect -- initial data fetch effects intentionally set loading/result state */
+import { useCallback, useEffect, useState } from "react";
+import type {
+  HealthResponse,
+  OnboardingCompleteResult,
+  OnboardingState,
+  RuntimeInfo,
+} from "@agent-in-box/protocol";
+import { api } from "./api";
+import { Dashboard, type RestartRequest } from "./Dashboard";
+import { useDesktop } from "./desktop";
+import { CONTROL_PLANE_STATE_LABELS, formatDate } from "./format";
+import { OnboardingWizard } from "./OnboardingWizard";
 
 type Connection =
-  | { state: "checking" }
+  | { state: "loading" }
   | { state: "online"; health: HealthResponse }
   | { state: "offline"; message: string };
 
-const SCAFFOLD_ITEMS = [
-  "pnpm Monorepo 与共享 TypeScript 配置",
-  "协议、领域状态机、配置与 Computer Use 动作校验",
-  "NestJS 本地控制平面与健康检查",
-  "React 本地 Web 入口与 Electron 壳",
-  "Go VM Supervisor / Guest Agent 健康服务骨架",
-];
+interface PendingRestart {
+  targetRoot: string;
+  reason: string;
+  previousStartedAt: string;
+}
 
 export function App(): React.JSX.Element {
-  const [connection, setConnection] = useState<Connection>({ state: "checking" });
+  const { bridge, status: desktopStatus, error: desktopError } = useDesktop();
+  const [connection, setConnection] = useState<Connection>({ state: "loading" });
+  const [onboarding, setOnboarding] = useState<OnboardingState | null>(null);
+  const [runtime, setRuntime] = useState<RuntimeInfo | null>(null);
+  const [pendingRestart, setPendingRestart] = useState<PendingRestart | null>(null);
+  const [restartBusy, setRestartBusy] = useState(false);
+  const [restartMessage, setRestartMessage] = useState<string | null>(null);
+
+  const refresh = useCallback(async (silent = false): Promise<HealthResponse | null> => {
+    if (!silent) {
+      setConnection((current) => (current.state === "online" ? current : { state: "loading" }));
+    }
+    try {
+      const health = await api.health();
+      const [nextOnboarding, nextRuntime] = await Promise.all([api.onboarding(), api.runtime()]);
+      setConnection({ state: "online", health });
+      setOnboarding(nextOnboarding);
+      setRuntime(nextRuntime);
+      setPendingRestart((current) =>
+        current && health.startedAt !== current.previousStartedAt ? null : current,
+      );
+      return health;
+    } catch (error) {
+      setConnection({ state: "offline", message: errorMessage(error) });
+      return null;
+    }
+  }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    const controller = new AbortController();
+    void refresh();
+  }, [refresh]);
 
-    async function check(): Promise<void> {
+  useEffect(() => {
+    if (desktopStatus?.controlPlane.state === "running") {
+      void refresh(true);
+    }
+  }, [desktopStatus?.controlPlane.state, refresh]);
+
+  useEffect(() => {
+    if (!onboarding?.restartRequired || pendingRestart) {
+      return;
+    }
+    setPendingRestart({
+      targetRoot: onboarding.configuredDataRoot ?? onboarding.dataRoot,
+      reason: `配置已指向 ${
+        onboarding.configuredDataRoot ?? onboarding.dataRoot
+      }，但当前本地服务仍在使用 ${onboarding.dataRoot}。需要重启后才能完成切换。`,
+      previousStartedAt: connection.state === "online" ? connection.health.startedAt : "",
+    });
+  }, [onboarding, pendingRestart, connection]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (connection.state === "offline") {
+        void refresh(true);
+        return;
+      }
+      if (pendingRestart) {
+        void api
+          .health()
+          .then((health) => {
+            if (health.startedAt !== pendingRestart.previousStartedAt) {
+              setPendingRestart(null);
+              setRestartMessage(null);
+              void refresh(true);
+            }
+          })
+          .catch(() => undefined);
+      }
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [connection.state, pendingRestart, refresh]);
+
+  const completed = useCallback(
+    async (result: OnboardingCompleteResult) => {
+      setOnboarding(result.state);
+      if (!result.restartRequired) {
+        await refresh(true);
+        return;
+      }
+      const previousStartedAt = connection.state === "online" ? connection.health.startedAt : "";
+      setPendingRestart({
+        targetRoot: result.storageMigration?.to ?? result.state.dataRoot,
+        reason:
+          result.storageMigration !== null
+            ? `数据已迁移到 ${result.storageMigration.to}。本地服务必须重启后才能使用新目录。`
+            : "本地服务需要重启才能应用新的存储位置。",
+        previousStartedAt,
+      });
+      setRestartMessage(null);
+      if (bridge) {
+        setRestartBusy(true);
+        try {
+          await bridge.app.restartControlPlane();
+        } catch (error) {
+          setRestartMessage(errorMessage(error));
+        } finally {
+          setRestartBusy(false);
+        }
+      }
+    },
+    [bridge, connection, refresh],
+  );
+
+  const restartRequired = useCallback(
+    (request: RestartRequest) => {
+      const previousStartedAt = connection.state === "online" ? connection.health.startedAt : "";
+      setPendingRestart({
+        targetRoot: request.targetRoot,
+        reason: request.reason,
+        previousStartedAt,
+      });
+      setRestartMessage(null);
+      if (bridge) {
+        setRestartBusy(true);
+        void bridge.app
+          .restartControlPlane()
+          .catch((error: unknown) => setRestartMessage(errorMessage(error)))
+          .finally(() => setRestartBusy(false));
+      }
+    },
+    [bridge, connection],
+  );
+
+  async function retryControlPlane(): Promise<void> {
+    setRestartMessage(null);
+    if (bridge) {
+      setRestartBusy(true);
       try {
-        const response = await fetch("/api/v1/health", { signal: controller.signal });
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-        const health = (await response.json()) as HealthResponse;
-        if (!cancelled) {
-          setConnection({ state: "online", health });
-        }
+        await bridge.app.restartControlPlane();
       } catch (error) {
-        if (cancelled || (error instanceof DOMException && error.name === "AbortError")) {
-          return;
-        }
-        setConnection({
-          state: "offline",
-          message: error instanceof Error ? error.message : String(error),
-        });
+        setRestartMessage(errorMessage(error));
+      } finally {
+        setRestartBusy(false);
       }
     }
+    await refresh(true);
+  }
 
-    void check();
-    const timer = window.setInterval(() => void check(), 5000);
-
-    return () => {
-      cancelled = true;
-      controller.abort();
-      window.clearInterval(timer);
-    };
-  }, []);
+  const online = connection.state === "online" ? connection.health : null;
+  const statusLabel =
+    connection.state === "online"
+      ? `本地服务在线 · ${connection.health.protocolVersion}`
+      : connection.state === "offline"
+        ? "本地服务离线"
+        : "正在连接本地服务";
 
   return (
     <main className="shell">
@@ -59,82 +177,153 @@ export function App(): React.JSX.Element {
         <div>
           <p className="eyebrow">LOCAL-FIRST AI COMPUTER</p>
           <h1>Agent-in-Box</h1>
-          <p className="subtitle">Windows 宿主机运行 Linux VM 的应用骨架已经启动。</p>
+          <p className="subtitle">
+            在 Windows 宿主机上运行 Linux VM，由本机 Worker 接管受控桌面任务。
+            首次启动先完成环境、存储和安全设置。
+          </p>
+          <div className="top-badges">
+            <span className="badge">{bridge ? "桌面应用" : "本地 Web"}</span>
+            {desktopStatus && (
+              <span className="badge">
+                Electron {desktopStatus.version} · {desktopStatus.platform}/{desktopStatus.arch}
+              </span>
+            )}
+            {!bridge && <span className="badge">模型凭据需在桌面应用中配置</span>}
+          </div>
         </div>
-        <div className={cx("status", connection.state)}>
+        <div
+          className={`status ${connection.state === "online" ? "online" : connection.state === "offline" ? "offline" : "checking"}`}
+        >
           <span className="dot" />
-          {connection.state === "online"
-            ? `控制平面在线 · ${connection.health.protocolVersion}`
-            : connection.state === "offline"
-              ? "控制平面离线"
-              : "正在连接控制平面"}
+          {statusLabel}
         </div>
       </header>
 
-      {connection.state === "offline" && (
-        <section className="notice">
+      {desktopStatus && (
+        <div className="desktop-strip">
+          <span>
+            本地服务：{CONTROL_PLANE_STATE_LABELS[desktopStatus.controlPlane.state]}
+            {desktopStatus.controlPlane.pid ? ` · pid ${desktopStatus.controlPlane.pid}` : ""}
+          </span>
+          <span className="muted">配置目录：{desktopStatus.configDirectory}</span>
+          {desktopStatus.controlPlane.message && (
+            <span className="muted">{desktopStatus.controlPlane.message}</span>
+          )}
+        </div>
+      )}
+      {desktopError && <div className="notice">桌面桥接异常：{desktopError}</div>}
+
+      {pendingRestart ? (
+        <section className="panel restart-panel">
+          <p className="eyebrow">RESTART REQUIRED</p>
+          <h2>需要重启本地服务</h2>
+          <p className="muted">{pendingRestart.reason}</p>
+          <p className="muted small">新数据目录：{pendingRestart.targetRoot}</p>
+          {restartMessage && <div className="notice">{restartMessage}</div>}
+          <div className="action-row">
+            {bridge ? (
+              <button
+                type="button"
+                className="primary"
+                disabled={restartBusy}
+                onClick={() => void retryControlPlane()}
+              >
+                {restartBusy ? "正在重启…" : "重新启动本地服务"}
+              </button>
+            ) : (
+              <>
+                <code className="command">pnpm --filter @agent-in-box/control-plane start</code>
+                <button type="button" className="primary" onClick={() => void retryControlPlane()}>
+                  我已重启，重新连接
+                </button>
+              </>
+            )}
+            {bridge && (
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => void bridge.app.openLogs()}
+              >
+                打开日志目录
+              </button>
+            )}
+          </div>
+          <p className="muted small">
+            重启后如果仍停留在本页，请检查控制平面日志；旧数据目录会保留，不会自动删除。
+          </p>
+        </section>
+      ) : connection.state === "offline" ? (
+        <section className="notice offline-panel">
           <strong>无法连接本地控制平面。</strong>
           <span>{connection.message}</span>
-          <code>pnpm --filter @agent-in-box/control-plane dev</code>
+          {desktopStatus?.controlPlane.message && <span>{desktopStatus.controlPlane.message}</span>}
+          <div className="action-row">
+            <button type="button" className="primary" onClick={() => void retryControlPlane()}>
+              {bridge ? "重新启动本地服务" : "重试连接"}
+            </button>
+            {bridge && (
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => void bridge.app.openLogs()}
+              >
+                打开日志目录
+              </button>
+            )}
+          </div>
+          {!bridge && <code>pnpm --filter @agent-in-box/control-plane dev</code>}
+        </section>
+      ) : connection.state === "loading" ? (
+        <section className="panel loading-panel">
+          <span className="spinner" aria-hidden="true" />
+          <div>
+            <h2>正在连接本地服务</h2>
+            <p className="muted">
+              {desktopStatus?.controlPlane.message ??
+                "正在检查控制平面健康状态、首次启动配置和存储目录。"}
+            </p>
+          </div>
+        </section>
+      ) : onboarding && runtime && online ? (
+        onboarding.required ? (
+          <OnboardingWizard
+            initialState={onboarding}
+            bridge={bridge}
+            onCompleted={(result) => void completed(result)}
+          />
+        ) : (
+          <Dashboard
+            onboarding={onboarding}
+            runtime={runtime}
+            health={online}
+            bridge={bridge}
+            controlPlaneState={desktopStatus?.controlPlane.state ?? "running"}
+            onChanged={async () => {
+              await refresh(true);
+            }}
+            onRestartRequired={restartRequired}
+          />
+        )
+      ) : (
+        <section className="panel loading-panel">
+          <span className="spinner" aria-hidden="true" />
+          <div>
+            <h2>正在读取本地配置</h2>
+            <p className="muted">控制平面已连接，正在加载首次启动状态。</p>
+          </div>
         </section>
       )}
 
-      <section className="grid">
-        <article className="card">
-          <h2>本地控制平面</h2>
-          <p>承载项目、任务、Worker 注册表、调度和机器人连接。</p>
-          <dl>
-            <div>
-              <dt>地址</dt>
-              <dd>127.0.0.1:3000</dd>
-            </div>
-            <div>
-              <dt>协议版本</dt>
-              <dd>{connection.state === "online" ? connection.health.protocolVersion : "—"}</dd>
-            </div>
-            <div>
-              <dt>启动时间</dt>
-              <dd>
-                {connection.state === "online"
-                  ? new Date(connection.health.startedAt).toLocaleTimeString()
-                  : "—"}
-              </dd>
-            </div>
-          </dl>
-        </article>
-
-        <article className="card muted">
-          <h2>VM 运行时</h2>
-          <p>镜像下载、Linux VM 生命周期和 Guest Agent 尚未接入。</p>
-          <span className="tag">下一阶段</span>
-        </article>
-
-        <article className="card muted">
-          <h2>Worker 运行时</h2>
-          <p>Pi Worker 与 Computer Use 工具将在技术验证后接入。</p>
-          <span className="tag">下一阶段</span>
-        </article>
-      </section>
-
-      <section className="panel">
-        <div className="panel-heading">
-          <h2>脚手架已落地</h2>
-          <span>阶段 1.1 / 1.2</span>
-        </div>
-        <ul className="checklist">
-          {SCAFFOLD_ITEMS.map((item) => (
-            <li key={item}>
-              <span className="check">✓</span>
-              {item}
-            </li>
-          ))}
-        </ul>
-      </section>
-
       <footer className="footer">
-        <span>本页面不连接模型，也不操作任何 VM。</span>
-        <span>开发命令见 README.md</span>
+        <span>所有密钥只保存在系统安全存储中，不写入普通配置、日志或 VM。</span>
+        <span>
+          {online ? `控制平面启动于 ${formatDate(online.startedAt)}` : "本页面不连接模型。"}
+        </span>
       </footer>
     </main>
   );
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

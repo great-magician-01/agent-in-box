@@ -4,6 +4,7 @@ export class PersistenceError extends Error {
   constructor(
     readonly code: ApiErrorCode,
     message: string,
+    readonly details?: unknown,
   ) {
     super(message);
     this.name = this.constructor.name;

@@ -308,6 +308,51 @@ const migrations: Record<string, MigrationDefinition> = {
       }
     },
   },
+
+  "002_phase2_settings": {
+    async up(db: Kysely<DatabaseSchema>): Promise<void> {
+      await db.schema
+        .createTable("app_settings")
+        .addColumn("key", "text", (column) => column.primaryKey())
+        .addColumn("value_json", "text", (column) => column.notNull())
+        .addColumn("updated_at", "text", (column) => column.notNull())
+        .execute();
+
+      await db.schema
+        .createTable("local_users")
+        .addColumn("id", "text", (column) => column.primaryKey())
+        .addColumn("display_name", "text", (column) => column.notNull())
+        .addColumn("role", "text", (column) => column.notNull())
+        .addColumn("created_at", "text", (column) => column.notNull())
+        .addColumn("last_active_at", "text", (column) => column.notNull())
+        .execute();
+
+      await db.schema
+        .createTable("storage_migrations")
+        .addColumn("id", "text", (column) => column.primaryKey())
+        .addColumn("from_root", "text", (column) => column.notNull())
+        .addColumn("to_root", "text", (column) => column.notNull())
+        .addColumn("status", "text", (column) => column.notNull())
+        .addColumn("started_at", "text", (column) => column.notNull())
+        .addColumn("completed_at", "text")
+        .addColumn("error", "text")
+        .addColumn("files_copied", "integer", (column) => column.notNull().defaultTo(0))
+        .addColumn("bytes_copied", "integer", (column) => column.notNull().defaultTo(0))
+        .execute();
+
+      await db.schema
+        .createIndex("storage_migrations_started_idx")
+        .on("storage_migrations")
+        .column("started_at")
+        .execute();
+    },
+
+    async down(db: Kysely<DatabaseSchema>): Promise<void> {
+      for (const table of ["storage_migrations", "local_users", "app_settings"]) {
+        await db.schema.dropTable(table).ifExists().execute();
+      }
+    },
+  },
 };
 
 export async function migrateToLatest(db: Kysely<DatabaseSchema>): Promise<string[]> {

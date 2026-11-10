@@ -32,6 +32,9 @@ describe("database migrations", () => {
         "vm_leases",
         "processed_events",
         "idempotency_keys",
+        "app_settings",
+        "local_users",
+        "storage_migrations",
       ]),
     );
   });

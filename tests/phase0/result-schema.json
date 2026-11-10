@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-in-box.local/tests/phase0/result-schema.json",
+  "title": "Agent-in-Box phase-0 validation result",
+  "type": "object",
+  "required": [
+    "runId",
+    "taskId",
+    "status",
+    "hostProfile",
+    "guestProfile",
+    "provider",
+    "startedAt",
+    "finishedAt",
+    "completionEvidence"
+  ],
+  "properties": {
+    "runId": { "type": "string", "minLength": 1 },
+    "taskId": { "type": "string", "minLength": 1 },
+    "attempt": { "type": "integer", "minimum": 1 },
+    "status": {
+      "type": "string",
+      "enum": ["success", "failed", "human_takeover", "environment_error"]
+    },
+    "hostProfile": { "type": "string", "minLength": 1 },
+    "guestProfile": { "type": "string", "minLength": 1 },
+    "resourceProfile": { "type": "string" },
+    "provider": { "type": "string", "minLength": 1 },
+    "engine": { "type": "string" },
+    "engineVersion": { "type": "string" },
+    "startedAt": { "type": "string", "format": "date-time" },
+    "finishedAt": { "type": "string", "format": "date-time" },
+    "durationSeconds": { "type": "number", "minimum": 0 },
+    "completionEvidence": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["type", "description"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["machine_check", "human_review", "artifact_reference"]
+          },
+          "description": { "type": "string", "minLength": 1 },
+          "artifactPath": { "type": "string" },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        }
+      }
+    },
+    "error": {
+      "type": "object",
+      "properties": {
+        "code": { "type": "string" },
+        "message": { "type": "string" },
+        "stage": { "type": "string" }
+      }
+    },
+    "humanTakeoverReason": { "type": "string" },
+    "notes": { "type": "string" }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "status": { "const": "success" } }
+      },
+      "then": {
+        "properties": {
+          "completionEvidence": {
+            "contains": {
+              "properties": {
+                "type": { "enum": ["machine_check", "human_review"] }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

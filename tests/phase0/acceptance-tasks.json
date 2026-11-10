@@ -1,0 +1,189 @@
+{
+  "version": 1,
+  "description": "Agent-in-Box Linux phase-0 acceptance tasks. Model self-report is never a completion condition.",
+  "defaults": {
+    "guestProfile": "G2",
+    "resourceProfile": "R2",
+    "repeat": 2
+  },
+  "tasks": [
+    {
+      "id": "VM-BOOT-001",
+      "title": "创建覆盖盘并启动到登录界面",
+      "category": "lifecycle",
+      "level": "P0",
+      "guestProfile": "G1",
+      "resourceProfile": "R1",
+      "preconditions": ["Host Inspect 通过", "基础镜像 SHA256 校验通过"],
+      "steps": ["创建 qcow2 覆盖盘", "使用 WHPX 启动", "读取串口控制台"],
+      "completion": {
+        "mode": "machine",
+        "checks": ["控制台出现 login:", "cloud-init 写入启动标记", "SSH 能读取启动标记"]
+      },
+      "evidenceRequired": ["console-log", "ssh-command-output"]
+    },
+    {
+      "id": "VM-LIFE-002",
+      "title": "停止、重启与状态准确性",
+      "category": "lifecycle",
+      "level": "P0",
+      "preconditions": ["VM-BOOT-001 通过"],
+      "steps": ["ACPI 优雅停止", "再次启动", "重复发送 Start/Stop"],
+      "completion": {
+        "mode": "machine",
+        "checks": ["QEMU 进程退出", "重复请求幂等", "Power State 与 Guest Health 分开记录"]
+      },
+      "evidenceRequired": ["qmp-responses", "state-transitions"]
+    },
+    {
+      "id": "VM-SNAP-003",
+      "title": "快照创建、列出与恢复",
+      "category": "lifecycle",
+      "level": "P0",
+      "preconditions": ["VM-BOOT-001 通过"],
+      "steps": ["停止 VM", "创建内部快照", "写入标记文件", "恢复快照"],
+      "completion": {
+        "mode": "machine",
+        "checks": ["快照列表包含新快照", "恢复后标记文件回到快照时状态"]
+      },
+      "evidenceRequired": ["qemu-img-output", "guest-file-check"]
+    },
+    {
+      "id": "VM-RECOV-004",
+      "title": "Supervisor 崩溃后发现并接管已有 VM",
+      "category": "reliability",
+      "level": "P0",
+      "preconditions": ["VM 正在运行"],
+      "steps": ["终止 Supervisor", "重启 Supervisor", "查询 VM 状态并重新连接 QMP"],
+      "completion": {
+        "mode": "machine",
+        "checks": ["不重复启动第二个 QEMU 进程", "能重新获取运行状态", "Guest 会话保持"]
+      },
+      "evidenceRequired": ["process-inventory", "qmp-responses"]
+    },
+    {
+      "id": "CUA-SHOT-001",
+      "title": "截图与显示元数据",
+      "category": "computer_use",
+      "level": "P0",
+      "preconditions": ["G2 桌面已登录", "Guest Agent 已认证"],
+      "steps": ["请求截图", "读取分辨率与 DPI", "改变分辨率后再次截图"],
+      "completion": {
+        "mode": "machine",
+        "checks": ["PNG 可解码且非纯色", "截图尺寸与显示元数据一致", "动作 ID 与任务 ID 被记录"]
+      },
+      "evidenceRequired": ["screenshot-hash", "display-metadata"]
+    },
+    {
+      "id": "CUA-CLICK-002",
+      "title": "点击启动器并验证窗口",
+      "category": "computer_use",
+      "level": "P0",
+      "preconditions": ["CUA-SHOT-001 通过"],
+      "steps": ["截图定位终端图标", "单击或双击", "等待并重新截图"],
+      "completion": {
+        "mode": "machine",
+        "checks": ["Guest 内出现新终端窗口", "窗口标题可通过桌面状态接口读取"]
+      },
+      "evidenceRequired": ["before-after-screenshots", "window-list"]
+    },
+    {
+      "id": "CUA-TYPE-003",
+      "title": "ASCII 与中文输入",
+      "category": "computer_use",
+      "level": "P0",
+      "preconditions": ["已打开文本编辑器或终端"],
+      "steps": ["输入 ASCII 命令", "输入中文与标点", "保存到文件"],
+      "completion": {
+        "mode": "machine",
+        "checks": ["文件内容与输入逐字一致", "不依赖宿主剪贴板明文长期保存"]
+      },
+      "evidenceRequired": ["guest-file-sha256", "input-action-trace"]
+    },
+    {
+      "id": "CUA-KEY-004",
+      "title": "组合键与焦点切换",
+      "category": "computer_use",
+      "level": "P1",
+      "steps": ["发送 Ctrl+Alt+T", "发送 Alt+Tab", "发送 Ctrl+S"],
+      "completion": {
+        "mode": "machine",
+        "checks": ["目标快捷键行为发生", "焦点窗口变化被桌面状态确认"]
+      },
+      "evidenceRequired": ["window-list", "action-trace"]
+    },
+    {
+      "id": "CUA-SCROLL-005",
+      "title": "浏览器滚动与拖拽",
+      "category": "computer_use",
+      "level": "P1",
+      "preconditions": ["浏览器打开固定测试页面"],
+      "steps": ["滚动到页面底部", "拖拽指定元素", "等待渲染"],
+      "completion": {
+        "mode": "machine",
+        "checks": ["页面报告滚动位置到底部", "拖拽目标状态变化由页面脚本记录"]
+      },
+      "evidenceRequired": ["page-state-json", "after-screenshot"]
+    },
+    {
+      "id": "CUA-FILE-006",
+      "title": "编辑文件并保存",
+      "category": "computer_use",
+      "level": "P0",
+      "steps": ["打开指定项目文件", "通过 GUI 修改一行", "保存", "在 Guest 内读取文件"],
+      "completion": {
+        "mode": "machine",
+        "checks": ["文件 diff 只包含预期修改", "保存后无未保存标记"]
+      },
+      "evidenceRequired": ["file-diff", "after-screenshot"]
+    },
+    {
+      "id": "CUA-TERM-007",
+      "title": "终端执行构建并验证产物",
+      "category": "computer_use",
+      "level": "P1",
+      "steps": ["打开终端", "输入固定构建命令", "等待完成", "读取产物哈希"],
+      "completion": {
+        "mode": "machine",
+        "checks": ["命令退出码为 0", "预期产物存在且哈希非空"]
+      },
+      "evidenceRequired": ["command-exit-code", "artifact-sha256"]
+    },
+    {
+      "id": "CUA-CANCEL-008",
+      "title": "长任务取消与残留检查",
+      "category": "reliability",
+      "level": "P0",
+      "steps": ["启动持续输入/等待的长任务", "执行中发送 Abort", "观察 10 秒"],
+      "completion": {
+        "mode": "machine",
+        "checks": ["工具循环停止", "取消后无新的输入事件", "任务状态为 cancelled"]
+      },
+      "evidenceRequired": ["task-events", "guest-input-log"]
+    },
+    {
+      "id": "CUA-RESUME-009",
+      "title": "会话恢复与过期截图保护",
+      "category": "reliability",
+      "level": "P0",
+      "steps": ["执行部分任务", "归档 Worker", "恢复会话", "继续下一步输入"],
+      "completion": {
+        "mode": "machine",
+        "checks": ["恢复类型被明确记录", "继续输入前重新截图", "不使用归档前坐标盲输"]
+      },
+      "evidenceRequired": ["worker-events", "fresh-screenshot-ref"]
+    },
+    {
+      "id": "LEASE-001",
+      "title": "人工接管与 Per-VM 执行 Lease",
+      "category": "safety",
+      "level": "P0",
+      "steps": ["AI 持有 Lease 执行", "用户接管控制台", "AI 再发送点击"],
+      "completion": {
+        "mode": "machine",
+        "checks": ["人工接管后 AI 输入被拒绝或暂停", "Lease 事件完整", "恢复后重新观察屏幕"]
+      },
+      "evidenceRequired": ["lease-events", "rejected-action-result"]
+    }
+  ]
+}

@@ -123,6 +123,20 @@ SQLite 数据库位于数据根目录下的 `agent-in-box.sqlite`，使用 WAL �
 - VM Supervisor 与 Guest Agent 的 `/healthz`、`/readyz` 正常
 - Electron TypeScript 构建通过，但 **Electron 二进制在当前网络环境下载失败**
 
+### 阶段 0 P0 验证（2026-11-10）
+
+已在真实 Windows 11 家庭版宿主机上完成，而非仅在 WSL 中模拟：
+
+- WHPX API 探测：`WHvGetCapability` 返回 `S_OK` 且 `hypervisorPresent=True`
+- MSYS2 UCRT64 QEMU 11.1.3 安装到 `%LOCALAPPDATA%\AgentInBox\tools\msys64`，`-accel help` 包含 `whpx`
+- Ubuntu 24.04 cloud image 从 TUNA 镜像下载并通过 SHA256 校验
+- 使用 qcow2 覆盖盘启动 Linux Guest，冷启动到登录提示约 14 秒
+- cloud-init NoCloud 创建验证用户，SSH 经 `127.0.0.1:10022` 读取启动标记成功
+- QMP `system_powerdown` 优雅关机成功
+- qcow2 快照创建、列出和恢复成功，恢复后快照后写入的标记文件消失
+
+测试矩阵、验收任务集和结果记录位于 [`tests/phase0/`](tests/phase0/README.md)。当前只完成 G1 Server 的 Hypervisor 核心链路；桌面显示、输入、性能、Supervisor 崩溃接管、Pi Computer Use、Model Broker 和机器人长连接仍未验证，默认 VmProvider 尚未冻结。
+
 Electron 二进制的失败与代码无关。在网络可用的机器上重试：
 
 ```bash
@@ -167,4 +181,4 @@ WSL 环境还需要可用的图形转发或 Windows 侧运行 Electron。桌面�
 - Router、HTTP 任务 API、Worker 注册表查询接口和任务看板
 - 飞书/QQ 适配器
 
-阶段 1 已完成。下一步按 [开发计划](docs/03-development-plan.md) 执行阶段 0 的技术验证，再进入阶段 2～4 的 Electron、存储和 VM 生命周期。
+阶段 1 已完成；阶段 0 已开始，Windows Host + QEMU/WHPX 运行 Linux Guest 的核心 P0 链路已在本机验证。下一步按 [开发计划](docs/03-development-plan.md) 补齐 Linux 桌面 Golden Image、显示/输入、Supervisor 接管和 Pi Computer Use 验证，再进入阶段 2～4 的 Electron、存储和 VM 生命周期。

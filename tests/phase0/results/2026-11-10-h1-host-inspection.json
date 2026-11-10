@@ -1,0 +1,28 @@
+{
+  "recordedAt": "2026-11-10T06:35:00Z",
+  "hostProfile": "H1",
+  "os": "Microsoft Windows 11 家庭版 中文版 10.0.26200",
+  "cpu": "Intel(R) Core(TM) Ultra 5 225H",
+  "logicalProcessors": 14,
+  "physicalMemoryBytes": 33816190976,
+  "hypervisorPresent": true,
+  "whpx": {
+    "dll": "C:\\Windows\\System32\\WinHvPlatform.dll",
+    "probe": "WHvGetCapability(WHvCapabilityCodeHypervisorPresent)",
+    "hresult": "0x00000000",
+    "hypervisorPresent": true
+  },
+  "qemu": {
+    "version": "11.1.3",
+    "distribution": "MSYS2 mingw-w64-ucrt-x86_64-qemu 11.1.3-2",
+    "installRoot": "%LOCALAPPDATA%\\AgentInBox\\tools\\msys64",
+    "accelerators": ["tcg", "whpx"],
+    "requiresAdmin": false,
+    "systemServicesInstalled": false
+  },
+  "wsl2": {
+    "kernel": "6.6.114.1-microsoft-standard-WSL2",
+    "kvmDevice": true
+  },
+  "notes": "WHPX API is usable on this Windows 11 Home host; Hyper-V Manager is not required for the QEMU/WHPX path."
+}

@@ -8,8 +8,10 @@
 - **阶段 1.1 完成**：单仓库 Monorepo、pnpm Workspace、TypeScript/Go 工具链、统一构建与检查。
 - **阶段 1.2 完成（初版）**：核心协议、分页/错误/幂等契约、任务与 Worker 状态机、VM 多对多绑定规则、Computer Use 动作、Guest RPC、VmProvider、Worker Engine 和 Bot Connector 接口均有类型与契约测试。
 - **阶段 1.3 完成**：SQLite WAL、外键、内置 Migration Runner、在线备份；项目/VM/会话/任务/Worker/Lease/Outbox/事件去重仓储；幂等任务创建、事务化状态迁移、任务事件与 Outbox 同事务写入；Per-VM Lease 与过期替换。33 个 Vitest 测试和 Go 测试通过。
-- **阶段 0 尚未开始**：Hypervisor、镜像供给、Pi Computer Use、Model Broker 和真实机器人长连接仍需按测试矩阵验证。
-- **下一步**：执行阶段 0，先冻结 Windows Host 运行 Linux Guest 的 Provider，再进入阶段 2～4。
+- **阶段 0.1 完成**：`tests/phase0/` 已包含测试矩阵、14 项验收任务、结果 Schema 和 Windows QEMU/WHPX Runbook。
+- **阶段 0.2 部分通过**：H1（Windows 11 家庭版 26200）已用 MSYS2 QEMU 11.1.3 + WHPX 完成 Ubuntu 24.04 G1 的覆盖盘创建、启动（第三次冷启动 14.1 秒）、cloud-init、SSH、QMP 优雅关机和 qcow2 快照恢复；结果见 `tests/phase0/results/`。WHPX API 探测返回 `hypervisorPresent=True`，全程普通用户权限，未安装系统服务。
+- **阶段 0 尚未完成**：Hyper-V 备选路径、桌面显示/输入/性能、Supervisor 崩溃接管、Golden Image 构建、Pi Computer Use、Model Broker 和真实机器人长连接仍需验证。默认 Provider 尚未冻结。
+- **下一步**：构建带桌面的 Linux Golden Image，补齐显示/输入与 Supervisor 接管验证，再验证 Pi Computer Use；不提前进入大规模 UI 开发。
 
 1. 先验证 Hypervisor、镜像、Pi Computer Use 和模型代理等高风险链路，再大规模开发 UI。
 2. 每个阶段形成可运行、可测试的纵向能力，避免一次性生成大量空模块。

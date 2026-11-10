@@ -694,6 +694,8 @@ Local Task Events → Outgoing Formatter → Platform REST API
 5. Model Broker 对 Pi 和目标模型的具体协议适配；
 6. QQ 目标机器人类型的实际权限矩阵。
 
+2026-11-10 验证记录：H1（Windows 11 家庭版 26200）上，MSYS2 QEMU 11.1.3 的 WHPX 加速器已实际启动 Ubuntu 24.04 Linux Guest，并通过 SSH、QMP 优雅关机和 qcow2 快照恢复验证；全程普通用户权限，无需 Hyper-V 管理器或系统服务。该结果支持将 QEMU/WHPX 作为 Windows Host 的优先候选 Provider，但在桌面显示、输入、性能、Supervisor 崩溃接管和其他 Windows 版本验证完成前，第 1 项仍不冻结。证据见 `tests/phase0/results/`。
+
 ### 18.2 Windows VM 阶段必须冻结
 
 以下事项不在阶段 0 提前做可行性结论，等 Linux 全链路完整验收后，在本期后段 Windows VM 开发前形成结论：

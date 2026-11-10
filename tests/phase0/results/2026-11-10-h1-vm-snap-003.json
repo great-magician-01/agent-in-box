@@ -1,0 +1,29 @@
+{
+  "runId": "2026-11-10-h1-qemu-whpx-snap-01",
+  "taskId": "VM-SNAP-003",
+  "attempt": 1,
+  "status": "success",
+  "hostProfile": "H1",
+  "guestProfile": "G1",
+  "resourceProfile": "R1",
+  "provider": "qemu-whpx",
+  "startedAt": "2026-11-10T06:34:58Z",
+  "finishedAt": "2026-11-10T06:35:43Z",
+  "durationSeconds": 45.4,
+  "completionEvidence": [
+    {
+      "type": "machine_check",
+      "description": "Created internal qcow2 snapshot phase0-snap1 and confirmed it in qemu-img snapshot -l."
+    },
+    {
+      "type": "machine_check",
+      "description": "After snapshot, SSH created /var/lib/aib-after-snap; qemu-img snapshot -a phase0-snap1 then rebooted."
+    },
+    {
+      "type": "machine_check",
+      "description": "After restore, test ! -e /var/lib/aib-after-snap succeeded while the original cloud-init boot marker remained.",
+      "artifactPath": "%LOCALAPPDATA%\\AgentInBox\\vms\\phase0-linux\\snapshot-restore-result.json"
+    }
+  ],
+  "notes": "Snapshot was taken while the VM was stopped. Live snapshot and shared-VM multi-project impact are separate later tests."
+}

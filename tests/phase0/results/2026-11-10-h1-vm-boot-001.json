@@ -1,0 +1,35 @@
+{
+  "runId": "2026-11-10-h1-qemu-whpx-boot-03",
+  "taskId": "VM-BOOT-001",
+  "attempt": 3,
+  "status": "success",
+  "hostProfile": "H1",
+  "guestProfile": "G1",
+  "resourceProfile": "R1",
+  "provider": "qemu-whpx",
+  "startedAt": "2026-11-10T06:34:01Z",
+  "finishedAt": "2026-11-10T06:34:23Z",
+  "durationSeconds": 22.2,
+  "completionEvidence": [
+    {
+      "type": "machine_check",
+      "description": "QEMU 11.1.3 -accel help lists tcg and whpx; VM started with -accel whpx,kernel-irqchip=off."
+    },
+    {
+      "type": "machine_check",
+      "description": "Fresh console log reached login prompt 14.1 seconds after process start.",
+      "artifactPath": "%LOCALAPPDATA%\\AgentInBox\\vms\\phase0-linux\\console.log"
+    },
+    {
+      "type": "machine_check",
+      "description": "SSH through 127.0.0.1:10022 returned cloud-init marker 'boot-ok' and Linux kernel 6.8.0-147-generic.",
+      "artifactPath": "%LOCALAPPDATA%\\AgentInBox\\vms\\phase0-linux\\validation-result.json"
+    },
+    {
+      "type": "artifact_reference",
+      "description": "Ubuntu 24.04 noble-server-cloudimg-amd64.img SHA256 verified against mirror SHA256SUMS.",
+      "sha256": "04e8f2461a16a44e78a370284471f29616cdd9baf1893df25807b71f985b6c94"
+    }
+  ],
+  "notes": "Attempts 1-2 also booted and reached SSH; attempt 2 boot timing was discarded because the console log had not been rotated. QEMU prints non-fatal 'failed to get xsave state' warnings on this WHPX build."
+}

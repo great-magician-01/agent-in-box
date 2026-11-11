@@ -2,6 +2,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type {
   WorkerEngineEvent,
+  WorkerInput,
   WorkerSessionHandle,
   WorkerSessionSpec,
 } from "@agent-in-box/agent-runtime";
@@ -19,20 +20,26 @@ import type { GuestService } from "../vms/guest.service";
 import { LeaseRepository } from "../persistence/repositories/lease-repository";
 import { OutboxRepository } from "../persistence/repositories/outbox-repository";
 import { TaskRepository } from "../persistence/repositories/task-repository";
+import { WorkerArchiveRepository } from "../persistence/repositories/worker-archive-repository";
 import { WorkerRepository } from "../persistence/repositories/worker-repository";
 import { LeaseService } from "../persistence/services/lease-service";
 import { TaskService } from "../persistence/services/task-service";
 import { createTestContext, type TestContext } from "../persistence/testing/fixtures";
+import type { DatabaseService } from "../persistence/database.service";
 import type { SupervisorClient } from "../vms/supervisor.client";
+import { WorkerRegistryService } from "./worker-registry.service";
 import { WorkerRuntimeService, type WorkerGuestConnection } from "./worker-runtime.service";
 
 class FakeConnection implements WorkerGuestConnection {
   readonly prompts: string[] = [];
+  readonly promptImages: Array<WorkerInput["images"]> = [];
   readonly specs: WorkerSessionSpec[] = [];
   subscribedSessionId: string | null = null;
   abortCalls = 0;
   archiveCalls = 0;
+  startSessionCalls = 0;
   resumeCalls: string[] = [];
+  resumeError: Error | null = null;
   private listener: ((event: WorkerEngineEvent) => void) | null = null;
   private hold = false;
 
@@ -53,6 +60,7 @@ class FakeConnection implements WorkerGuestConnection {
   }
 
   async startSession(spec: WorkerSessionSpec): Promise<WorkerSessionHandle> {
+    this.startSessionCalls += 1;
     this.specs.push(spec);
     return {
       sessionId: this.sessionId,
@@ -65,18 +73,20 @@ class FakeConnection implements WorkerGuestConnection {
   async resume(archiveRef: string, spec: WorkerSessionSpec) {
     this.resumeCalls.push(archiveRef);
     this.specs.push(spec);
+    if (this.resumeError) throw this.resumeError;
     return {
       sessionId: "resumed-session",
       archiveRef: "/guest/sessions/resumed-session.jsonl",
       engineVersion: this.engineVersion,
       sessionVersion: this.sessionVersion,
-      mode: "native",
+      mode: "native" as const,
     };
   }
 
-  async prompt(_sessionId: string, input: { text: string }): Promise<void> {
+  async prompt(_sessionId: string, input: WorkerInput) {
     this.prompts.push(input.text);
-    this.hold = input.text.includes("[hold]");
+    this.promptImages.push(input.images);
+    this.hold = input.text.startsWith("[hold]");
     this.emit({ type: "text_delta", delta: "working" });
     this.emit({ type: "tool_started", toolName: "vm_screenshot", input: {} });
     if (!this.hold) {
@@ -130,10 +140,22 @@ interface Harness {
   tokens: ModelTokenService;
   connection: FakeConnection;
   storageRoot: string;
+  archives: WorkerArchiveRepository;
+  registry: WorkerRegistryService;
+  outbox: OutboxRepository;
 }
 
+const PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BGDs0ABwABf/9WlFTKAAAAAElFTkSuQmCC",
+  "base64",
+);
+
 async function createHarness(
-  options: { connection?: FakeConnection; ctx?: TestContext } = {},
+  options: {
+    connection?: FakeConnection;
+    ctx?: TestContext;
+    lifecyclePolicy?: { autoArchiveEnabled: boolean; idleTimeoutMs: number };
+  } = {},
 ): Promise<Harness> {
   const ctx = options.ctx ?? (await createTestContext());
   await ctx.app.db
@@ -194,10 +216,31 @@ async function createHarness(
   const cuaBroker = {
     guestBaseUrl: () => "http://10.0.2.2:6720",
   } as CuaBrokerService;
+  const outbox = new OutboxRepository(ctx.app.db);
+  const archives = new WorkerArchiveRepository(ctx.app.db);
+  const registry = new WorkerRegistryService(ctx.app.db, workers, archives, tasks, outbox);
+  const guest = {
+    observe: async () => ({
+      desktop: { width: 64, height: 48, dpi: 96, scaleFactor: 1 },
+      screenshot: {
+        actionId: "resume-shot",
+        width: 64,
+        height: 48,
+        capturedAt: new Date().toISOString(),
+        dataBase64: PNG.toString("base64"),
+      },
+    }),
+    desktop: async () => {
+      throw new Error("unexpected Guest desktop call in Worker runtime test");
+    },
+  } as unknown as GuestService;
+  const database = {
+    layout: { archives: path.join(ctx.dir, "archives") },
+  } as DatabaseService;
   const service = new WorkerRuntimeService(
     ctx.app.db,
     workers,
-    new OutboxRepository(ctx.app.db),
+    outbox,
     tasks,
     leases,
     leaseRepository,
@@ -208,14 +251,37 @@ async function createHarness(
     cuaTokens,
     cua,
     cuaBroker,
+    archives,
+    registry,
+    guest,
+    database,
+    settings,
     {
       connectorFactory: () => connection,
       tickIntervalMs: 300,
       heartbeatIntervalMs: 5000,
+      idleCheckIntervalMs: 1000,
+      workerLifecyclePolicy: options.lifecyclePolicy ?? {
+        autoArchiveEnabled: false,
+        idleTimeoutMs: 60_000,
+      },
+      resumeContextRoot: path.join(ctx.dir, "archives", "resume-contexts"),
     },
   );
   await service.onModuleInit();
-  return { ctx, service, tasks, leases, workers, tokens, connection, storageRoot };
+  return {
+    ctx,
+    service,
+    tasks,
+    leases,
+    workers,
+    tokens,
+    connection,
+    storageRoot,
+    archives,
+    registry,
+    outbox,
+  };
 }
 
 async function waitFor(predicate: () => Promise<boolean> | boolean, label: string): Promise<void> {
@@ -443,13 +509,143 @@ describe("WorkerRuntimeService", () => {
     const restarted = await createHarness({ connection: harness.connection, ctx: harness.ctx });
     active = restarted;
     const resumed = await restarted.service.resume(created.worker.id);
-    expect(resumed.runtime.connected).toBe(true);
+    expect(resumed.worker.runtime.connected).toBe(true);
+    expect(resumed.restoreMode).toBe("native");
+    expect(resumed.context.screenshot?.sha256 ?? "").toHaveLength(64);
     expect(restarted.connection.resumeCalls).toEqual(["/guest/sessions/fake-session.jsonl"]);
-    expect(resumed.worker.status).toBe("idle");
+    await waitFor(
+      async () => (await restarted.service.get(created.worker.id)).worker.status === "idle",
+      "resumed worker idle",
+    );
 
     const task = await harness.tasks.get(prompted.taskId);
     expect(task).toMatchObject({ status: "failed", errorCode: "worker_runtime_restarted" });
     const worker = await harness.workers.getWorker(created.worker.id);
     expect(worker?.agentSessionRef).toContain("resumed-session");
   });
+
+  it("archives an idle Worker into the registry without stopping the VM", async () => {
+    const harness = await createHarness();
+    active = harness;
+    const created = await harness.service.create({
+      projectId: harness.ctx.projectId,
+      vmId: harness.ctx.vmId,
+    });
+    const archived = await harness.service.archive(created.worker.id);
+    expect(archived.worker.status).toBe("archived");
+    expect(harness.connection.archiveCalls).toBe(1);
+
+    const records = await harness.archives.listForWorker(created.worker.id);
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ source: "manual", status: "available" });
+    expect(records[0]?.summary).toContain("archived");
+    await expect(harness.registry.activeRoster(harness.ctx.projectId)).resolves.toMatchObject({
+      workers: [],
+    });
+    const search = await harness.registry.searchArchives({ query: "archived" });
+    expect(search.items.map((item) => item.id)).toContain(records[0]?.id);
+
+    const vm = await harness.ctx.app.db
+      .selectFrom("vm_instances")
+      .select("power_state")
+      .where("id", "=", harness.ctx.vmId)
+      .executeTakeFirstOrThrow();
+    expect(vm.power_state).toBe("running");
+    const tokens = await harness.ctx.app.db.selectFrom("model_tokens").selectAll().execute();
+    expect(tokens.every((token) => token.revoked_at !== null)).toBe(true);
+  });
+
+  it("auto-archives an idle Worker after the configured timeout", async () => {
+    const harness = await createHarness({
+      lifecyclePolicy: { autoArchiveEnabled: true, idleTimeoutMs: 1 },
+    });
+    active = harness;
+    const created = await harness.service.create({
+      projectId: harness.ctx.projectId,
+      vmId: harness.ctx.vmId,
+    });
+    await waitFor(
+      async () => (await harness.workers.getWorker(created.worker.id))?.status === "archived",
+      "idle worker auto archive",
+    );
+    expect(harness.connection.archiveCalls).toBe(1);
+    const records = await harness.archives.listForWorker(created.worker.id);
+    expect(records[0]).toMatchObject({ source: "auto" });
+  }, 10_000);
+
+  it("does not auto-archive a Worker with queued follow-up input", async () => {
+    const harness = await createHarness({
+      lifecyclePolicy: { autoArchiveEnabled: true, idleTimeoutMs: 1 },
+    });
+    active = harness;
+    const created = await harness.service.create({
+      projectId: harness.ctx.projectId,
+      vmId: harness.ctx.vmId,
+    });
+    await harness.service.followUp(created.worker.id, { text: "do this next" });
+    await delay(1800);
+    const worker = await harness.workers.getWorker(created.worker.id);
+    expect(worker?.status).toBe("idle");
+    expect(harness.connection.archiveCalls).toBe(0);
+    const inputs = await harness.ctx.app.db
+      .selectFrom("worker_inputs")
+      .selectAll()
+      .where("worker_id", "=", created.worker.id)
+      .execute();
+    expect(inputs).toHaveLength(1);
+    expect(inputs[0]?.status).toBe("pending");
+  }, 10_000);
+
+  it("falls back to a labelled summary restore when native resume fails", async () => {
+    const harness = await createHarness();
+    active = harness;
+    const created = await harness.service.create({
+      projectId: harness.ctx.projectId,
+      vmId: harness.ctx.vmId,
+    });
+    await harness.service.archive(created.worker.id);
+    harness.connection.resumeError = new Error(
+      "Incompatible Worker Engine/Session version 1.5.1/1",
+    );
+    const startsBefore = harness.connection.startSessionCalls;
+    const resumed = await harness.service.resume(created.worker.id, { mode: "auto" });
+    expect(resumed.restoreMode).toBe("summary");
+    expect(resumed.notice).toContain("原生会话恢复失败");
+    expect(harness.connection.startSessionCalls).toBe(startsBefore + 1);
+    expect(harness.connection.specs.at(-1)?.systemPrompt).toContain(
+      "Archived Worker session summary",
+    );
+    await waitFor(
+      async () => (await harness.service.get(created.worker.id)).worker.status === "idle",
+      "summary-restored worker idle",
+    );
+  }, 10_000);
+
+  it("creates a new Worker from an archive summary with a fresh environment observation", async () => {
+    const harness = await createHarness();
+    active = harness;
+    const source = await harness.service.create({
+      projectId: harness.ctx.projectId,
+      vmId: harness.ctx.vmId,
+    });
+    await harness.service.archive(source.worker.id);
+    const archive = (await harness.archives.listForWorker(source.worker.id))[0]!;
+    const created = await harness.service.create({
+      projectId: harness.ctx.projectId,
+      vmId: harness.ctx.vmId,
+      restoreArchiveId: archive.id,
+    });
+    expect(created.worker.id).not.toBe(source.worker.id);
+    expect(created.runtime.restoreMode).toBe("summary");
+    expect(harness.connection.specs.at(-1)?.systemPrompt).toContain(
+      "Archived Worker session summary",
+    );
+    const contexts = await harness.ctx.app.db
+      .selectFrom("worker_resume_contexts")
+      .selectAll()
+      .where("worker_id", "=", created.worker.id)
+      .execute();
+    expect(contexts).toHaveLength(1);
+    expect(contexts[0]).toMatchObject({ restore_mode: "summary" });
+  }, 10_000);
 });

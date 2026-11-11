@@ -1,6 +1,6 @@
 # Agent-in-Box
 
-面向个人用户的本地 AI 虚拟机工作平台。当前仓库已完成 **开发计划阶段 1（工程骨架、协议和本地持久化）**、**阶段 2（Electron、本地服务与自定义存储）**、**阶段 3（镜像服务、VM 生命周期与管理 UI）**、**阶段 4（Guest Agent、noVNC 实时控制台与统一 Execution Lease）**、**阶段 5（项目、多 VM 绑定、持久任务队列与任务看板）**、**阶段 6（Pi Worker Runtime、Model Broker 与 Worker Engine Adapter）** 和 **阶段 7（完整 Computer Use 执行器、执行保护、Policy/Approval 与完成校验）**。包含无特权 Electron 壳、控制平面进程监管、首次启动向导、自定义数据目录、可续传镜像服务、受 ACL 保护的 Go VM Supervisor、QEMU/WHPX 生命周期、认证 Guest 管理通道、AI/人工互斥桌面输入、跨项目串行的 VM 任务内核、认证 Guest Worker RPC、短期模型令牌、流式 Broker、Worker 心跳/归档/恢复、Host 侧 Computer Use Broker、动作/截图 Trace、人工审批和独立完成证据校验。真实 QEMU/WHPX、Linux Golden Image、真实 Pi/模型任务评测和浏览器/Electron 人工交互验收仍按各阶段记录单独执行。
+面向个人用户的本地 AI 虚拟机工作平台。当前仓库已完成 **开发计划阶段 1（工程骨架、协议和本地持久化）**、**阶段 2（Electron、本地服务与自定义存储）**、**阶段 3（镜像服务、VM 生命周期与管理 UI）**、**阶段 4（Guest Agent、noVNC 实时控制台与统一 Execution Lease）**、**阶段 5（项目、多 VM 绑定、持久任务队列与任务看板）**、**阶段 6（Pi Worker Runtime、Model Broker 与 Worker Engine Adapter）**、**阶段 7（完整 Computer Use 执行器、执行保护、Policy/Approval 与完成校验）** 和 **阶段 8（Router、Worker Registry 与归档）**。包含无特权 Electron 壳、控制平面进程监管、首次启动向导、自定义数据目录、可续传镜像服务、受 ACL 保护的 Go VM Supervisor、QEMU/WHPX 生命周期、认证 Guest 管理通道、AI/人工互斥桌面输入、跨项目串行的 VM 任务内核、认证 Guest Worker RPC、短期模型令牌、流式 Broker、Worker 心跳/归档/恢复、Host 侧 Computer Use Broker、动作/截图 Trace、人工审批、独立完成证据校验、可重建 Active Roster、可搜索 Archive Registry、自动空闲归档、原生/摘要恢复和只持有结构化工具的本地 Router。真实 QEMU/WHPX、Linux Golden Image、真实 Pi/模型任务评测和浏览器/Electron 人工交互验收仍按各阶段记录单独执行。
 
 完整方案见：
 
@@ -13,7 +13,18 @@
 - [阶段 5 验收记录](tests/phase5/summary.md)
 - [阶段 6 验收记录](tests/phase6/summary.md)
 - [阶段 7 验收记录](tests/phase7/summary.md)
+- [阶段 8 验收记录](tests/phase8/summary.md)
 - [Linux Guest Worker 安装资产](images/linux/README.md)
+
+## 阶段 8 已落地
+
+- **Worker Registry**：持久化 Worker/Agent Session/项目/VM/来源会话绑定；Active Roster 从数据库实时重建，包含当前/最近任务、VM 队列深度、待审批和排队消息计数；Archive Registry 保存归档引用、恢复点、摘要和产物引用，支持按项目与关键词检索。
+- **Router Runtime**：Host 侧独立 Pi Router 会话（模型请求经宿主短期 Router 令牌走 Model Broker），只在回环 Router Tool Broker 暴露项目、任务、Worker、看板与归档工具；每次工具调用持久化审计；没有任何 VM 输入、Shell 或 Supervisor 工具。
+- **Worker 自动归档**：空闲超时、自动/手动归档、运行任务/待审批/排队消息/Lease 阻塞条件；归档停止 Worker 会话但不停 VM。归档事件进入 Outbox，看板和 Roster 自动更新。
+- **Worker 恢复**：同版本 Native Resume；版本不兼容或恢复失败时显式降级为新的摘要 Agent Session；恢复前捕获最新截图和离开期间项目/VM 变化并注入首回合，后续桌面动作仍必须先重新观察。
+- **验证边界**：`pnpm smoke:phase8` 使用真实控制平面、SQLite、Router Tool Broker HTTP、Worker RPC 和伪造 Guest Agent/Router Pi 验证 10 项主链路；未执行真实 QEMU/WHPX、真实 Pi/模型 Router 决策质量评估和浏览器/Electron 人工 UI 验收。
+
+详见 [`tests/phase8/summary.md`](tests/phase8/summary.md)。
 
 ## 阶段 7 已落地
 
@@ -154,6 +165,9 @@ pnpm smoke:phase6
 # Computer Use Broker/Lease/截图 Trace + 审批 + 执行保护 + 完成证据校验
 pnpm smoke:phase7
 
+# Router Tool Broker + Worker Registry/Archive + 自动/手动归档 + 原生/摘要恢复 + 重启对账
+pnpm smoke:phase8
+
 # 生成 Guest Worker Runtime 自包含 tar.gz 与 SHA-256
 pnpm package:worker-runtime
 
@@ -201,6 +215,8 @@ go run ./services/guest-agent/cmd/guest-agent
 
 阶段 6 的 Guest Worker RPC 监听 `0.0.0.0:7612`，由 QEMU 仅转发到宿主机回环端口；宿主读取 `<vm-storage-root>/worker-rpc.token`（开发环境可用 `AGENT_IN_BOX_WORKER_TOKEN_FILE`）。该令牌与 Guest Agent token、模型 Broker 短期令牌相互独立。模型 Broker 默认监听 `127.0.0.1:6719`，Guest 通过 QEMU user networking 的 `10.0.2.2:6719` 访问；长期 Provider Key 由 Electron `safeStorage` 解密，经 `credential-bridge.json`（0600）和进程内 Bearer 桥交给控制平面。Worker Runtime 安装与固定版本见 [`images/linux/README.md`](images/linux/README.md)。
 
+阶段 8 的 Router Tool Broker 默认监听 `127.0.0.1:6721`（`AGENT_IN_BOX_ROUTER_BROKER_PORT`），只接受宿主 Router 进程的短期工具令牌。Router 的模型请求使用 `router_model_tokens` 经 Model Broker 转发；Router Pi 进程由 `AGENT_IN_BOX_ROUTER_PI_BINARY` / `AGENT_IN_BOX_ROUTER_PI_ARGS` 配置，扩展文件写入数据目录 `router/`。Router 工具面不包含 VM 输入、Shell 或 Supervisor 接口。
+
 ## 目录结构
 
 ```text
@@ -208,7 +224,7 @@ apps/
   desktop/           Electron 无特权桌面壳、Control Plane 监管、托盘与凭据存储
   web/               React + Vite 本地 Web UI（首次向导、存储和设置页面）
 services/
-  control-plane/     NestJS 本地控制平面（宿主检查、存储管理、设置与持久化）
+  control-plane/     NestJS 本地控制平面（宿主检查、存储、任务、Worker Registry、Router 与持久化）
   vm-supervisor/     Go 宿主机 VM 管理服务（ACL、QEMU 生命周期与状态对账）
   guest-agent/       Go Guest Agent（认证管理、桌面输入/截图、心跳与更新暂存）
 scripts/             打包、开发启动与阶段 Smoke Test
@@ -254,12 +270,18 @@ SQLite 数据库位于数据根目录下的 `agent-in-box.sqlite`，使用 WAL �
 已在当前开发环境实际执行：
 
 - `pnpm install`：成功；pnpm 11 仅允许 `esbuild`、`electron`、`better-sqlite3` 构建脚本
-- `pnpm check`：lint、typecheck、212 个 Vitest 测试、Go test、全部构建均通过；1 个环境依赖测试显式跳过
+- `pnpm check`：lint、typecheck、235 个 Vitest 测试、Go test、全部构建均通过；1 个环境依赖测试显式跳过
 - 控制平面 `GET /api/v1/health`、`GET /api/v1/runtime` 返回正常
-- 控制平面启动时创建 SQLite 数据库并应用 `001_initial_schema`、`002_phase2_settings`、`003_phase3_images`、`004_phase5_projects_tasks`、`005_phase6_workers_models`、`006_phase7_computer_use`
+- 控制平面启动时创建 SQLite 数据库并应用 `001_initial_schema`、`002_phase2_settings`、`003_phase3_images`、`004_phase5_projects_tasks`、`005_phase6_workers_models`、`006_phase7_computer_use`、`007_phase8_router_archive`
 - SQLite 表、WAL 模式和迁移记录在真实运行中验证通过
 - Web 开发服务器可访问，`/api` 代理到控制平面正常
 - VM Supervisor 与 Guest Agent 的 `/healthz`、`/readyz` 正常
+
+### 阶段 8 验证（2026-11-11）
+
+- `pnpm smoke:phase8`：真实控制平面/SQLite、HTTP Router Tool Broker、Worker RPC 和伪造 Guest Agent/Router Pi，10 项检查通过：阶段 8 迁移、Router 工具面、Router 查询已有 Worker 后分派、取消→Abort、归档/Active Roster/Archive Registry、同版本 Native Resume 与截图注入、归档后 Router 检索并创建后续任务、重启后 Router 会话恢复与任务分配查询、Outbox/恢复上下文持久化。
+- Router Pi 与 Guest Agent 是协议测试替身；`realRouterPi=false`、`realGuestAgent=false`、`realPiProcess=false`、`realModel=false`、`realQemuWxpx=false`、`browserElectronUi=false`。
+- 自动归档、阻塞条件、摘要降级恢复和新 Worker 从归档摘要是自动化测试覆盖；真实模型 Router 决策质量与人工 UI 仍需真实环境验收。详细证据见 [`tests/phase8/summary.md`](tests/phase8/summary.md)。
 
 ### 阶段 7 验证（2026-11-11）
 
@@ -376,6 +398,9 @@ SQLite 数据库位于数据根目录下的 `agent-in-box.sqlite`，使用 WAL �
 - Storage Manager：分类路径、可写/空间检查、存储锁、哈希校验迁移、SQLite 在线备份与完整性检查、下载缓存清理
 - `safeStorage` 模型凭据存储（拒绝 Linux `basic_text`）、electron-builder 打包与自包含 Control Plane bundle
 - Linux 打包桌面 Smoke Test；Windows `win-unpacked` 与 portable exe 构建
+- Worker Registry/Active Roster、Archive Registry 检索、自动空闲归档和阻塞条件
+- Router 主会话：宿主 Pi、短期 Router 模型/工具令牌、结构化任务/Worker/看板/归档工具与工具调用审计
+- 原生会话恢复、版本不兼容时的摘要语义恢复、恢复截图/环境变化注入和归档后新建 Worker
 
 明确未实现或未在本环境验证：
 
@@ -388,8 +413,7 @@ SQLite 数据库位于数据根目录下的 `agent-in-box.sqlite`，使用 WAL �
 - Guest Agent 更新的服务管理器激活/回滚、发布签名和新镜像令牌自动 provision；当前已实现认证、令牌轮换/撤销与安全暂存
 - 真实 QEMU/WHPX + X11 的动态分辨率/DPI、noVNC 浏览器/Electron 人工接管回归；合成 RFB Smoke 不替代此验收
 - Wayland 与 Windows Guest 的截图/输入路径
-- Pi Worker 与 Task/Lease/Router 的控制平面接入、生产级 Model Broker 服务
-- Router、HTTP 任务 API、Worker 注册表查询接口和任务看板
+- 真实 Router Pi 模型决策质量、长会话压缩和真实 Provider 工具调用回归；当前 Smoke 使用测试 Router Pi
 - 真实飞书/QQ 应用凭据验收；本地长连接框架和 mock 协议测试已完成
 
-阶段 0～4 的代码主链路已完成。下一步按 [开发计划](docs/03-development-plan.md) 进入阶段 5：项目/VM 绑定、Task Service 和任务看板；同时继续跟踪阶段 4 的真实桌面交互与更新激活、真实 QEMU/WHPX 回归、Windows NSIS 安装包和干净环境 Smoke Test 门槛。
+阶段 0～8 的代码主链路已完成。下一步按 [开发计划](docs/03-development-plan.md) 进入阶段 9：多 VM 资源调度、共享环境完善和多端状态同步；同时继续跟踪真实 QEMU/WHPX + noVNC 回归、真实 Pi/模型 Computer Use 与 Router 评测、Windows NSIS 干净安装和长时稳定性门槛。

@@ -1,4 +1,6 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
 import {
   Inject,
   Injectable,
@@ -18,16 +20,33 @@ import {
   type WorkerSessionSpec,
 } from "@agent-in-box/agent-runtime";
 import type {
+  ActiveTaskCard,
   ConversationMessageRecord,
+  GuestHealthState,
+  VmPowerState,
+  WorkerArchiveArtifactRef,
+  WorkerArchiveRecord,
+  WorkerArchiveSource,
+  WorkerRestorePoint,
   WorkerCreateRequest,
+  WorkerLifecyclePolicy,
   WorkerPromptRequest,
   WorkerRecord,
+  WorkerRestoreMode,
+  WorkerResumeContextRecord,
+  WorkerResumeEnvironment,
+  WorkerResumeMode,
+  WorkerResumeRequest,
+  WorkerResumeResult,
   WorkerRuntimeView,
   WorkerSteerResult,
   WorkerView,
 } from "@agent-in-box/protocol";
+import { isTaskStatus } from "@agent-in-box/protocol";
 import { PersistenceError } from "../persistence/errors";
+import { DatabaseService } from "../persistence/database.service";
 import { OutboxRepository } from "../persistence/repositories/outbox-repository";
+import { WorkerArchiveRepository } from "../persistence/repositories/worker-archive-repository";
 import { WorkerRepository } from "../persistence/repositories/worker-repository";
 import type { DatabaseSchema } from "../persistence/schema";
 import { nowIso } from "../persistence/time";
@@ -41,7 +60,10 @@ import { CuaTokenService } from "../computer-use/cua-token.service";
 import { LeaseRepository } from "../persistence/repositories/lease-repository";
 import { LeaseService } from "../persistence/services/lease-service";
 import { TaskService } from "../persistence/services/task-service";
+import { SettingsService } from "../settings/settings.service";
 import { SupervisorClient } from "../vms/supervisor.client";
+import { GuestService } from "../vms/guest.service";
+import { WorkerRegistryService } from "./worker-registry.service";
 
 export const WORKER_RUNTIME_OPTIONS = Symbol("AGENT_IN_BOX_WORKER_RUNTIME_OPTIONS");
 
@@ -83,6 +105,9 @@ export interface WorkerRuntimeOptions {
   cuaBrokerBaseUrl?: string;
   systemPrompt?: string;
   now?: () => Date;
+  workerLifecyclePolicy?: WorkerLifecyclePolicy;
+  idleCheckIntervalMs?: number;
+  resumeContextRoot?: string;
 }
 
 interface ActiveWorker {
@@ -97,11 +122,20 @@ interface ActiveWorker {
   taskId: string | null;
   textBuffer: string;
   aborting: boolean;
+  contextInjection: boolean;
+  restoreMode: WorkerRestoreMode | null;
+  restoredAt: string | null;
   heartbeatFailures: number;
   lastHeartbeatAt: number;
   lastRenewAt: number;
   lastLeaseRenewAt: number;
   completedTaskAt: number | null;
+}
+
+interface CapturedResumeContext {
+  record: WorkerResumeContextRecord;
+  imageBase64: string | null;
+  injected: boolean;
 }
 
 const DEFAULT_SYSTEM_PROMPT = [
@@ -124,9 +158,13 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
   private readonly systemPrompt: string;
   private readonly brokerBaseUrlOverride?: string;
   private readonly cuaBrokerBaseUrlOverride?: string;
+  private readonly lifecyclePolicyOverride?: WorkerLifecyclePolicy;
+  private readonly idleCheckIntervalMs: number;
+  private readonly resumeContextRoot: string;
   private timer: NodeJS.Timeout | null = null;
   private ticking = false;
   private stopped = false;
+  private lastIdleCheckAt = 0;
 
   constructor(
     @Inject(KYSELY) private readonly db: Kysely<DatabaseSchema>,
@@ -142,6 +180,11 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     private readonly cuaTokens: CuaTokenService,
     private readonly cua: CuaExecutionService,
     private readonly cuaBrokerService: CuaBrokerService,
+    private readonly archives: WorkerArchiveRepository,
+    private readonly registry: WorkerRegistryService,
+    private readonly guest: GuestService,
+    private readonly database: DatabaseService,
+    private readonly settings: SettingsService,
     @Optional() @Inject(WORKER_RUNTIME_OPTIONS) options: WorkerRuntimeOptions = {},
   ) {
     this.tickIntervalMs = Math.max(250, options.tickIntervalMs ?? 750);
@@ -149,6 +192,10 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     this.heartbeatFailureThreshold = Math.max(1, options.heartbeatFailureThreshold ?? 3);
     this.systemPrompt = options.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
     this.now = options.now ?? (() => new Date());
+    this.idleCheckIntervalMs = Math.max(1000, options.idleCheckIntervalMs ?? 10_000);
+    if (options.workerLifecyclePolicy) this.lifecyclePolicyOverride = options.workerLifecyclePolicy;
+    this.resumeContextRoot =
+      options.resumeContextRoot ?? path.join(database.layout.archives, "resume-contexts");
     if (options.brokerBaseUrl) this.brokerBaseUrlOverride = options.brokerBaseUrl;
     if (options.cuaBrokerBaseUrl) this.cuaBrokerBaseUrlOverride = options.cuaBrokerBaseUrl;
     if (options.connectorFactory) {
@@ -198,16 +245,25 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     if (vm.powerState !== "running") {
       throw new PersistenceError("conflict", "只有运行中的 VM 可以启动 Worker");
     }
-    const conversationId = await this.resolveConversation(input);
-    const existing = await this.workers.findReusable(input.projectId, input.vmId, conversationId);
-    if (existing) {
-      if (!this.active.has(existing.id)) {
-        throw new PersistenceError(
-          "conflict",
-          `Worker ${existing.id} 已存在（${existing.status}）；请恢复或归档后重试`,
-        );
+    const archive = input.restoreArchiveId
+      ? await this.requireArchiveForRestore(input.restoreArchiveId, input.projectId, input.vmId)
+      : undefined;
+    const conversationInput =
+      archive && !input.conversationId
+        ? { ...input, conversationId: archive.conversationId }
+        : input;
+    const conversationId = await this.resolveConversation(conversationInput);
+    if (!archive) {
+      const existing = await this.workers.findReusable(input.projectId, input.vmId, conversationId);
+      if (existing) {
+        if (!this.active.has(existing.id)) {
+          throw new PersistenceError(
+            "conflict",
+            `Worker ${existing.id} 已存在（${existing.status}）；请恢复或归档后重试`,
+          );
+        }
+        return this.view(existing);
       }
-      return this.view(existing);
     }
     const model = await this.providers.resolve(input.providerId, input.model);
     const runtime = await this.supervisor.get(input.vmId);
@@ -273,7 +329,9 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
         engineType: "pi-rpc",
         engineVersion: PI_ENGINE_VERSION,
         sessionVersion: PI_SESSION_FORMAT_VERSION,
-        systemPrompt: this.systemPrompt,
+        systemPrompt: archive
+          ? summarySystemPrompt(this.systemPrompt, archive.summary)
+          : this.systemPrompt,
         capabilities: ["computer_use"],
         provider: model.provider.id,
         model: model.model.id,
@@ -306,9 +364,15 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
         modelId: model.model.id,
       });
       this.attach(worker.id, connection, handle, token.context.id, cuaToken.context.id);
+      if (archive) {
+        await this.restoreContext(worker, binding.guest_workspace_path, archive, "summary", null);
+        this.scheduleTick();
+        return this.get(worker.id);
+      }
       this.scheduleTick();
       return this.view(updated ?? worker);
     } catch (error) {
+      this.detachActive(worker.id);
       await Promise.all([
         this.tokens.revoke(token.context.id, "worker_start_failed"),
         this.cuaTokens.revoke(cuaToken.context.id, "worker_start_failed"),
@@ -374,6 +438,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     }
     const text = validatePromptText(input?.text);
     const disposition = await active.connection.steer(active.sessionId, { text });
+    await this.recordInput(workerId, "steer", text, disposition);
     await this.appendMessage(worker, active.taskId, "user", "steer", text);
     await this.tasks.recordWorkerEvent(active.taskId, "worker.steer", { disposition });
     return { disposition, taskId: active.taskId };
@@ -385,6 +450,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     if (!active) throw new PersistenceError("conflict", "Worker 会话未连接");
     const text = validatePromptText(input?.text);
     const disposition = await active.connection.followUp(active.sessionId, { text });
+    await this.recordInput(workerId, "follow_up", text, disposition);
     await this.appendMessage(worker, active.taskId, "user", "follow_up", text);
     if (active.taskId) {
       await this.tasks.recordWorkerEvent(active.taskId, "worker.follow_up", { disposition });
@@ -400,12 +466,47 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     return this.get(workerId);
   }
 
-  async archive(workerId: string): Promise<WorkerView> {
+  async archive(
+    workerId: string,
+    options: { source?: WorkerArchiveSource; reason?: string } = {},
+  ): Promise<WorkerView> {
     const worker = await this.requireWorker(workerId);
     const active = this.active.get(workerId);
-    if (active?.taskId) throw new PersistenceError("conflict", "Worker 仍有运行任务，不能归档");
     if (!active) throw new PersistenceError("conflict", "Worker 会话未连接，无法安全归档");
-    const archived = await active.connection.archive(active.sessionId);
+    if (active.taskId) throw new PersistenceError("conflict", "Worker 仍有运行任务，不能归档");
+    if (active.leaseId) {
+      throw new PersistenceError("conflict", "Worker 仍持有 Execution Lease，不能归档");
+    }
+    if (active.contextInjection) {
+      throw new PersistenceError("conflict", "Worker 正在注入恢复上下文，不能归档");
+    }
+    const blockers = await this.registry.archiveBlockers(workerId);
+    if (blockers.blocked) {
+      throw new PersistenceError("conflict", `Worker 归档被阻止：${blockers.reasons.join("；")}`);
+    }
+    const binding = await this.db
+      .selectFrom("project_vm_bindings")
+      .select(["guest_workspace_path"])
+      .where("project_id", "=", worker.projectId)
+      .where("vm_id", "=", worker.vmId)
+      .executeTakeFirst();
+    const restorePoint = await this.buildRestorePoint(
+      worker,
+      binding?.guest_workspace_path ?? null,
+    );
+    const artifacts = await this.collectArtifacts(workerId);
+    await this.workers.updateRuntime(workerId, { status: "archiving", currentTaskId: null });
+    let archived: { archiveRef: string; summary: string };
+    try {
+      archived = await active.connection.archive(active.sessionId);
+    } catch (error) {
+      await this.workers.updateRuntime(workerId, { status: "idle", currentTaskId: null });
+      throw new PersistenceError(
+        "unavailable",
+        `Worker 会话归档失败，未修改归档状态：${errorMessage(error)}`,
+      );
+    }
+    const summary = await this.combineArchiveSummary(worker, archived.summary, restorePoint);
     active.unsubscribe();
     this.active.delete(workerId);
     await Promise.all([
@@ -413,35 +514,102 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
       this.cuaTokens.revoke(active.cuaTokenId, "worker_archived"),
     ]);
     if (active.leaseId) await this.leases.release(worker.vmId, active.leaseId);
-    const updated = await this.workers.updateRuntime(workerId, {
-      status: "archived",
-      currentTaskId: null,
-      agentSessionRef: archived.archiveRef,
-      archiveSummary: archived.summary,
-      lastHeartbeatAt: null,
-      brokerTokenId: null,
-    });
-    await this.db
-      .updateTable("workers")
-      .set({ archived_at: nowIso() })
-      .where("id", "=", workerId)
-      .execute();
-    await this.outbox.append(
-      "worker.archived",
-      { workerId, summaryRef: archived.archiveRef },
-      nowIso(),
-    );
+    let updated: WorkerRecord | undefined;
+    try {
+      const archive = await this.archives.create({
+        workerId,
+        projectId: worker.projectId,
+        vmId: worker.vmId,
+        conversationId: worker.conversationId,
+        archiveRef: archived.archiveRef,
+        engineType: worker.engineType,
+        engineVersion: worker.engineVersion,
+        sessionVersion: worker.sessionVersion ?? PI_SESSION_FORMAT_VERSION,
+        summary,
+        restorePoint,
+        artifacts,
+        source: options.source ?? "manual",
+      });
+      updated = await this.workers.updateRuntime(workerId, {
+        status: "archived",
+        currentTaskId: null,
+        agentSessionRef: archived.archiveRef,
+        archiveSummary: summary,
+        lastHeartbeatAt: null,
+        brokerTokenId: null,
+      });
+      await this.db
+        .updateTable("workers")
+        .set({ archived_at: nowIso() })
+        .where("id", "=", workerId)
+        .execute();
+      await this.outbox.append(
+        "worker.archived",
+        {
+          workerId,
+          summaryRef: archived.archiveRef,
+          archiveId: archive.id,
+          source: archive.source,
+        },
+        nowIso(),
+      );
+    } catch (error) {
+      // The Guest session is already stopped. Persist an explicit failure instead
+      // of leaving the Worker stuck in "archiving" with no live session.
+      await this.workers.updateRuntime(workerId, {
+        status: "failed",
+        currentTaskId: null,
+        lastErrorCode: "worker_archive_persist_failed",
+        lastErrorMessage: errorMessage(error),
+      });
+      throw new PersistenceError(
+        "unavailable",
+        `Worker 已停止但归档记录写入失败：${errorMessage(error)}`,
+      );
+    }
     return this.view(updated ?? worker);
   }
 
-  async resume(workerId: string): Promise<WorkerView> {
+  async resume(workerId: string, request: WorkerResumeRequest = {}): Promise<WorkerResumeResult> {
     const worker = await this.requireWorker(workerId);
     if (this.active.has(workerId)) throw new PersistenceError("conflict", "Worker 已经连接");
-    if (!worker.agentSessionRef) {
-      throw new PersistenceError("conflict", "Worker 没有可恢复的会话归档");
-    }
     if (worker.status !== "archived" && worker.status !== "failed") {
       throw new PersistenceError("conflict", `Worker 状态 ${worker.status} 不能恢复`);
+    }
+    const mode = normalizeResumeMode(request.mode);
+    const archive = await this.archives.latestForWorker(workerId, "available");
+    const nativeRef = worker.agentSessionRef ?? archive?.archiveRef ?? null;
+    const summaryText = archive?.summary ?? worker.archiveSummary ?? null;
+    const nativeCompatible =
+      worker.engineType === "pi-rpc" &&
+      worker.engineVersion === PI_ENGINE_VERSION &&
+      (worker.sessionVersion === null || worker.sessionVersion === PI_SESSION_FORMAT_VERSION) &&
+      (!archive ||
+        (archive.engineVersion === PI_ENGINE_VERSION &&
+          archive.sessionVersion === PI_SESSION_FORMAT_VERSION));
+    let restoreMode: WorkerRestoreMode;
+    let notice: string | null = null;
+    if (mode === "native") {
+      if (!nativeRef) throw new PersistenceError("conflict", "Worker 没有可恢复的原生会话");
+      if (!nativeCompatible) {
+        throw new PersistenceError(
+          "conflict",
+          `原生会话版本不兼容：要求 Pi ${PI_ENGINE_VERSION} / Session ${PI_SESSION_FORMAT_VERSION}`,
+        );
+      }
+      restoreMode = "native";
+    } else if (mode === "summary") {
+      if (!summaryText) throw new PersistenceError("conflict", "Worker 没有可用的归档摘要");
+      restoreMode = "summary";
+    } else if (nativeRef && nativeCompatible) {
+      restoreMode = "native";
+    } else if (summaryText) {
+      restoreMode = "summary";
+      notice = nativeRef
+        ? `原生会话版本不兼容（engine=${worker.engineVersion}, session=${worker.sessionVersion ?? "未知"}），已按归档摘要创建新的 Agent Session`
+        : "Worker 没有可恢复的原生会话，已按归档摘要创建新的 Agent Session";
+    } else {
+      throw new PersistenceError("conflict", "Worker 没有可恢复的会话引用或摘要");
     }
     const [binding, vm, model] = await Promise.all([
       this.db
@@ -456,14 +624,22 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     if (!binding) throw new PersistenceError("conflict", "目标 VM 已解绑，不能恢复 Worker");
     if (vm.powerState !== "running") throw new PersistenceError("conflict", "目标 VM 未运行");
     const runtime = await this.supervisor.get(worker.vmId);
-    if (!runtime.workerHostPort)
+    if (!runtime.workerHostPort) {
       throw new PersistenceError("unavailable", "VM 没有 Worker RPC 端口");
-    const connection = this.connectorFactory({
+    }
+    await this.workers.updateRuntime(workerId, {
+      status: worker.status === "failed" ? "starting" : "restoring",
+      currentTaskId: null,
+      lastErrorCode: null,
+      lastErrorMessage: null,
+    });
+    const target: WorkerGuestTarget = {
       workerId,
       vmId: worker.vmId,
       hostPort: runtime.workerHostPort,
       storageRoot: vm.storageRoot,
-    });
+    };
+    let connection = this.connectorFactory(target);
     const token = await this.tokens.issue({
       workerId,
       vmId: worker.vmId,
@@ -479,7 +655,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
       taskId: null,
     });
     try {
-      const spec = this.sessionSpec(
+      const baseSpec = this.sessionSpec(
         worker,
         binding.guest_workspace_path,
         model.provider.id,
@@ -488,16 +664,35 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
         cuaToken.token,
         model.provider.api,
         model.model.reasoning === true,
+        restoreMode === "summary" && summaryText
+          ? summarySystemPrompt(this.systemPrompt, summaryText)
+          : undefined,
       );
-      const handle = await connection.resume(worker.agentSessionRef, spec);
+      let handle: WorkerSessionHandle;
+      if (restoreMode === "native" && nativeRef) {
+        try {
+          handle = await connection.resume(nativeRef, baseSpec);
+        } catch (error) {
+          if (mode !== "auto" || !summaryText) throw error;
+          restoreMode = "summary";
+          notice = `原生会话恢复失败（${errorMessage(error)}），已按归档摘要创建新的 Agent Session`;
+          connection = this.connectorFactory(target);
+          handle = await connection.startSession({
+            ...baseSpec,
+            systemPrompt: summarySystemPrompt(this.systemPrompt, summaryText),
+          });
+        }
+      } else {
+        handle = await connection.startSession(baseSpec);
+      }
       await Promise.all([
         this.tokens.bindSession(token.context.id, handle.sessionId),
         this.cuaTokens.bindSession(cuaToken.context.id, handle.sessionId),
       ]);
-      const updated = await this.workers.updateRuntime(workerId, {
+      await this.workers.updateRuntime(workerId, {
         status: "idle",
         currentTaskId: null,
-        agentSessionRef: handle.archiveRef ?? worker.agentSessionRef,
+        agentSessionRef: handle.archiveRef ?? nativeRef,
         sessionVersion: handle.sessionVersion ?? worker.sessionVersion,
         lastHeartbeatAt: nowIso(),
         lastErrorCode: null,
@@ -510,14 +705,39 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
         .where("id", "=", workerId)
         .execute();
       this.attach(workerId, connection, handle, token.context.id, cuaToken.context.id);
+      const context = await this.restoreContext(
+        worker,
+        binding.guest_workspace_path,
+        archive ?? null,
+        restoreMode,
+        notice,
+      );
+      if (archive) await this.archives.markRestored(archive.id);
+      if (!context.injected) {
+        notice = `${notice ? `${notice}；` : ""}恢复环境注入失败，请在下一回合先调用 vm_screenshot 重新观察`;
+      }
+      this.logger.log(
+        `Worker ${workerId} restored with ${restoreMode} session${notice ? `: ${notice}` : ""}`,
+      );
       await this.outbox.append(
         "worker.resumed",
-        { workerId, restoreMode: handle.mode === "summary" ? "summary" : "native" },
+        {
+          workerId,
+          restoreMode,
+          archiveId: archive?.id ?? null,
+          notice,
+        },
         nowIso(),
       );
       this.scheduleTick();
-      return this.view(updated ?? worker);
+      return {
+        worker: await this.get(workerId),
+        restoreMode,
+        context: context.record,
+        notice,
+      };
     } catch (error) {
+      this.detachActive(workerId);
       await Promise.all([
         this.tokens.revoke(token.context.id, "worker_resume_failed"),
         this.cuaTokens.revoke(cuaToken.context.id, "worker_resume_failed"),
@@ -529,6 +749,13 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
       });
       throw new PersistenceError("unavailable", `Worker 会话恢复失败：${errorMessage(error)}`);
     }
+  }
+
+  private detachActive(workerId: string): void {
+    const active = this.active.get(workerId);
+    if (!active) return;
+    active.unsubscribe();
+    this.active.delete(workerId);
   }
 
   async messages(workerId: string, limit = 100): Promise<ConversationMessageRecord[]> {
@@ -554,6 +781,321 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     }));
   }
 
+  private async requireArchiveForRestore(
+    archiveId: string,
+    projectId: string,
+    vmId: string,
+  ): Promise<WorkerArchiveRecord> {
+    const archive = await this.archives.get(archiveId);
+    if (!archive) throw new PersistenceError("not_found", `归档不存在：${archiveId}`);
+    if (archive.projectId !== projectId || archive.vmId !== vmId) {
+      throw new PersistenceError("validation_failed", "归档不属于目标项目或 VM");
+    }
+    return archive;
+  }
+
+  private async restoreContext(
+    worker: WorkerRecord,
+    workspacePath: string,
+    archive: WorkerArchiveRecord | null,
+    restoreMode: WorkerRestoreMode,
+    notice: string | null,
+  ): Promise<CapturedResumeContext> {
+    const environment = await this.buildResumeEnvironment(worker, workspacePath, archive);
+    const contextId = randomUUID();
+    const createdAt = nowIso();
+    let imageBase64: string | null = null;
+    let screenshot: WorkerResumeContextRecord["screenshot"] = null;
+    let screenshotPath: string | null = null;
+    try {
+      const observed = await this.guest.observe(worker.vmId);
+      const bytes = Buffer.from(observed.screenshot.dataBase64, "base64");
+      if (bytes.byteLength > 0) {
+        const hash = createHash("sha256").update(bytes).digest("hex");
+        // Keep the base64 payload well below the 16 MiB Worker RPC body cap.
+        if (bytes.byteLength <= 8 * 1024 * 1024) {
+          await mkdir(this.resumeContextRoot, { recursive: true, mode: 0o700 });
+          const file = path.join(
+            this.resumeContextRoot,
+            `${worker.id}-${Date.now()}-${randomUUID()}.png`,
+          );
+          await writeFile(file, bytes, { mode: 0o600, flag: "wx" });
+          screenshotPath = file;
+          imageBase64 = observed.screenshot.dataBase64;
+        }
+        screenshot = {
+          width: observed.screenshot.width,
+          height: observed.screenshot.height,
+          sha256: hash,
+          capturedAt: observed.screenshot.capturedAt,
+        };
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Worker resume screenshot unavailable for ${worker.id}: ${errorMessage(error)}`,
+      );
+    }
+    await this.db
+      .insertInto("worker_resume_contexts")
+      .values({
+        id: contextId,
+        worker_id: worker.id,
+        archive_id: archive?.id ?? null,
+        restore_mode: restoreMode,
+        screenshot_path: screenshotPath,
+        screenshot_sha256: screenshot?.sha256 ?? null,
+        screenshot_width: screenshot?.width ?? null,
+        screenshot_height: screenshot?.height ?? null,
+        environment_json: JSON.stringify(environment),
+        created_at: createdAt,
+      })
+      .execute();
+    const record: WorkerResumeContextRecord = {
+      id: contextId,
+      workerId: worker.id,
+      archiveId: archive?.id ?? null,
+      restoreMode,
+      screenshot,
+      environment,
+      createdAt,
+    };
+    const active = this.active.get(worker.id);
+    if (!active) {
+      return { record, imageBase64, injected: false };
+    }
+    active.restoreMode = restoreMode;
+    active.restoredAt = record.createdAt;
+    active.contextInjection = true;
+    try {
+      await this.workers.updateRuntime(
+        worker.id,
+        {
+          status: "running",
+          currentTaskId: null,
+        },
+        record.createdAt,
+      );
+      await active.connection.prompt(active.sessionId, {
+        text: resumeBrief(restoreMode, environment, notice),
+        ...(imageBase64 ? { images: [{ mimeType: "image/png" as const, data: imageBase64 }] } : {}),
+      });
+      return { record, imageBase64, injected: true };
+    } catch (error) {
+      this.logger.warn(`Worker resume context injection failed: ${errorMessage(error)}`);
+      try {
+        await active.connection.abort(active.sessionId);
+      } catch {
+        // The RPC may already be down; idle state still requires a fresh observation.
+      }
+      active.contextInjection = false;
+      await this.workers.updateRuntime(worker.id, { status: "idle", currentTaskId: null });
+      return { record, imageBase64, injected: false };
+    }
+  }
+
+  private async buildResumeEnvironment(
+    worker: WorkerRecord,
+    workspacePath: string,
+    archive: WorkerArchiveRecord | null,
+  ): Promise<WorkerResumeEnvironment> {
+    const archivedAt = archive?.createdAt ?? worker.archivedAt;
+    const [vm, tasks] = await Promise.all([
+      this.db
+        .selectFrom("vm_instances")
+        .select(["name", "power_state", "guest_health"])
+        .where("id", "=", worker.vmId)
+        .executeTakeFirstOrThrow(),
+      this.db
+        .selectFrom("tasks")
+        .selectAll()
+        .where("project_id", "=", worker.projectId)
+        .where("vm_id", "=", worker.vmId)
+        .orderBy("updated_at", "desc")
+        .limit(10)
+        .execute(),
+    ]);
+    const activeTaskIds = tasks
+      .filter((task) => ["running", "waiting_approval", "blocked"].includes(task.status))
+      .map((task) => task.id);
+    return {
+      vmId: worker.vmId,
+      vmName: vm.name,
+      powerState: vm.power_state as VmPowerState,
+      guestHealth: vm.guest_health as GuestHealthState,
+      workspacePath,
+      activeTaskIds,
+      recentTasks: tasks.map((task) => ({
+        id: task.id,
+        objective: task.objective.slice(0, 500),
+        status: (isTaskStatus(task.status) ? task.status : "blocked") as ActiveTaskCard["status"],
+        latestSummary: task.latest_summary ? task.latest_summary.slice(0, 500) : null,
+        updatedAt: task.updated_at,
+      })),
+      archivedAt,
+      archivedForMs: archivedAt
+        ? Math.max(0, this.now().getTime() - new Date(archivedAt).getTime())
+        : null,
+      capturedAt: nowIso(),
+    };
+  }
+
+  private async buildRestorePoint(
+    worker: WorkerRecord,
+    workspacePath: string | null,
+  ): Promise<WorkerRestorePoint | null> {
+    const [vm, tasks, lastMessage] = await Promise.all([
+      this.db
+        .selectFrom("vm_instances")
+        .select(["power_state", "guest_health"])
+        .where("id", "=", worker.vmId)
+        .executeTakeFirst(),
+      this.db
+        .selectFrom("tasks")
+        .select(["id", "status"])
+        .where("assigned_worker_id", "=", worker.id)
+        .orderBy("updated_at", "desc")
+        .limit(100)
+        .execute(),
+      this.db
+        .selectFrom("conversation_messages")
+        .select("created_at")
+        .where("worker_id", "=", worker.id)
+        .orderBy("created_at", "desc")
+        .limit(1)
+        .executeTakeFirst(),
+    ]);
+    if (!vm) return null;
+    const latest = tasks[0];
+    return {
+      vmPowerState: vm.power_state as VmPowerState,
+      guestHealth: vm.guest_health as GuestHealthState,
+      workspacePath: workspacePath ?? "",
+      taskIds: tasks.map((task) => task.id),
+      taskCount: tasks.length,
+      latestTaskStatus: latest && isTaskStatus(latest.status) ? latest.status : null,
+      lastMessageAt: lastMessage?.created_at ?? null,
+      capturedAt: nowIso(),
+    };
+  }
+
+  private async collectArtifacts(workerId: string): Promise<WorkerArchiveArtifactRef[]> {
+    const rows = await this.db
+      .selectFrom("task_artifacts")
+      .innerJoin("tasks", "tasks.id", "task_artifacts.task_id")
+      .select([
+        "task_artifacts.task_id as task_id",
+        "task_artifacts.name as name",
+        "task_artifacts.relative_path as relative_path",
+        "task_artifacts.sha256 as sha256",
+        "task_artifacts.size_bytes as size_bytes",
+      ])
+      .where("tasks.assigned_worker_id", "=", workerId)
+      .orderBy("task_artifacts.created_at", "desc")
+      .limit(100)
+      .execute();
+    return rows.map((row) => ({
+      taskId: row.task_id,
+      name: row.name,
+      relativePath: row.relative_path,
+      sha256: row.sha256,
+      sizeBytes: row.size_bytes,
+    }));
+  }
+
+  private async combineArchiveSummary(
+    worker: WorkerRecord,
+    guestSummary: string,
+    restorePoint: WorkerRestorePoint | null,
+  ): Promise<string> {
+    const [messages, tasks] = await Promise.all([
+      this.db
+        .selectFrom("conversation_messages")
+        .select(["role", "content"])
+        .where("worker_id", "=", worker.id)
+        .orderBy("created_at", "desc")
+        .orderBy("id", "desc")
+        .limit(12)
+        .execute(),
+      this.db
+        .selectFrom("tasks")
+        .select(["objective", "status", "latest_summary"])
+        .where("assigned_worker_id", "=", worker.id)
+        .orderBy("updated_at", "desc")
+        .limit(5)
+        .execute(),
+    ]);
+    const recent = messages.reverse().map((message) => {
+      const role = message.role === "user" ? "User" : "Worker";
+      return `${role}: ${message.content.slice(0, 300)}`;
+    });
+    const taskLines = tasks.map(
+      (task) =>
+        `- [${task.status}] ${task.objective.slice(0, 200)}${
+          task.latest_summary ? ` — ${task.latest_summary.slice(0, 300)}` : ""
+        }`,
+    );
+    const parts = [
+      guestSummary.trim(),
+      restorePoint
+        ? `Environment: VM ${restorePoint.vmPowerState}, tasks=${restorePoint.taskCount}, workspace=${restorePoint.workspacePath || "unknown"}`
+        : "",
+      taskLines.length > 0 ? `Recent tasks:\n${taskLines.join("\n")}` : "",
+      recent.length > 0 ? `Recent conversation:\n${recent.join("\n")}` : "",
+    ].filter(Boolean);
+    return parts.join("\n\n").slice(0, 4000);
+  }
+
+  private async recordInput(
+    workerId: string,
+    kind: "steer" | "follow_up",
+    content: string,
+    disposition: "queued" | "handled",
+  ): Promise<void> {
+    const now = nowIso();
+    await this.db
+      .insertInto("worker_inputs")
+      .values({
+        id: randomUUID(),
+        worker_id: workerId,
+        kind,
+        content: content.slice(0, 100_000),
+        status: disposition === "handled" ? "delivered" : "pending",
+        created_at: now,
+        delivered_at: disposition === "handled" ? now : null,
+      })
+      .execute();
+  }
+
+  private async markInputs(workerId: string, status: "delivered" | "cancelled"): Promise<void> {
+    await this.db
+      .updateTable("worker_inputs")
+      .set({ status, delivered_at: status === "delivered" ? nowIso() : null })
+      .where("worker_id", "=", workerId)
+      .where("status", "=", "pending")
+      .execute();
+  }
+
+  private async autoArchiveIdle(): Promise<void> {
+    const now = this.now().getTime();
+    if (now - this.lastIdleCheckAt < this.idleCheckIntervalMs) return;
+    this.lastIdleCheckAt = now;
+    const policy = this.lifecyclePolicyOverride ?? (await this.settings.workerLifecyclePolicy());
+    if (!policy.autoArchiveEnabled) return;
+    const workers = await this.workers.listActive(undefined, 200);
+    for (const worker of workers) {
+      if (worker.status !== "idle") continue;
+      const active = this.active.get(worker.id);
+      if (!active || active.taskId || active.leaseId || active.contextInjection) continue;
+      const lastActive = Date.parse(worker.lastActiveAt);
+      if (!Number.isFinite(lastActive) || now - lastActive < policy.idleTimeoutMs) continue;
+      try {
+        await this.archive(worker.id, { source: "auto", reason: "idle_timeout" });
+      } catch (error) {
+        this.logger.debug(`Worker ${worker.id} was not auto-archived: ${errorMessage(error)}`);
+      }
+    }
+  }
+
   private view(worker: WorkerRecord): WorkerView {
     const active = this.active.get(worker.id);
     const runtime: WorkerRuntimeView = {
@@ -562,6 +1104,8 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
       engineVersion: worker.engineVersion || null,
       sessionVersion: worker.sessionVersion,
       lastError: worker.lastErrorMessage,
+      restoreMode: active?.restoreMode ?? null,
+      restoredAt: active?.restoredAt ?? null,
     };
     return { worker, runtime };
   }
@@ -644,6 +1188,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     cuaToken: string,
     providerApi: "openai-completions" | "anthropic-messages" = "openai-completions",
     reasoning = false,
+    systemPrompt?: string,
   ): WorkerSessionSpec {
     return {
       workerId: worker.id,
@@ -653,7 +1198,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
       engineType: "pi-rpc",
       engineVersion: PI_ENGINE_VERSION,
       sessionVersion: PI_SESSION_FORMAT_VERSION,
-      systemPrompt: this.systemPrompt,
+      systemPrompt: systemPrompt ?? this.systemPrompt,
       capabilities: ["computer_use"],
       provider: providerId,
       model: modelId,
@@ -690,6 +1235,9 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
       taskId: null,
       textBuffer: "",
       aborting: false,
+      contextInjection: false,
+      restoreMode: null,
+      restoredAt: null,
       heartbeatFailures: 0,
       lastHeartbeatAt: Date.now(),
       lastRenewAt: Date.now(),
@@ -767,6 +1315,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     const taskId = active.taskId;
     const summary = active.textBuffer.trim().slice(0, 4000);
     active.textBuffer = "";
+    active.contextInjection = false;
     if (summary) {
       await this.appendMessage(worker, taskId, "assistant", "event", summary);
     }
@@ -778,6 +1327,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     if (active.cuaTokenId) await this.cuaTokens.bindTask(active.cuaTokenId, null);
     active.taskId = null;
     active.completedTaskAt = null;
+    await this.markInputs(workerId, "delivered");
     await this.workers.updateRuntime(workerId, {
       status: "idle",
       currentTaskId: null,
@@ -817,6 +1367,8 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     const partial = active.textBuffer.trim().slice(0, 4000);
     active.textBuffer = "";
     active.aborting = true;
+    active.contextInjection = false;
+    await this.markInputs(worker.id, "cancelled");
     try {
       await active.connection.abort(active.sessionId);
     } catch (error) {
@@ -867,6 +1419,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     if (!worker) return;
     active.unsubscribe();
     this.active.delete(workerId);
+    await this.markInputs(workerId, "cancelled");
     if (active.leaseId) await this.leases.release(worker.vmId, active.leaseId);
     if (active.tokenId) await this.tokens.revoke(active.tokenId, code);
     await this.cuaTokens.revoke(active.cuaTokenId, code);
@@ -911,6 +1464,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
         lastErrorMessage: "控制平面重启；Guest Pi 进程状态未知，绑定已保留，可显式恢复会话",
       });
       await this.cuaTokens.revokeWorker(row.id, "control_plane_restarted");
+      await this.markInputs(row.id, "cancelled");
       const taskId = row.current_task_id;
       if (taskId) {
         const task = await this.tasks.get(taskId);
@@ -950,6 +1504,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
         if (worker.status !== "idle" || this.active.get(worker.id)?.taskId) continue;
         await this.claimAndRun(worker);
       }
+      await this.autoArchiveIdle();
     } catch (error) {
       this.logger.error(`Worker tick failed: ${errorMessage(error)}`);
     } finally {
@@ -1017,7 +1572,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
         await active.connection.session(active.sessionId);
         active.heartbeatFailures = 0;
         active.lastHeartbeatAt = now;
-        await this.workers.updateRuntime(worker.id, { lastHeartbeatAt: nowIso() });
+        await this.workers.updateHeartbeat(worker.id, nowIso());
         if (!active.aborting && now - active.lastRenewAt >= 30_000) {
           await Promise.all([
             this.tokens.renew(active.tokenId),
@@ -1155,6 +1710,52 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     });
     await this.outbox.append("worker.message", { workerId: worker.id, taskId, role }, now);
   }
+}
+
+function normalizeResumeMode(value: unknown): WorkerResumeMode {
+  if (value === undefined || value === null) return "auto";
+  if (value === "auto" || value === "native" || value === "summary") return value;
+  throw new PersistenceError("validation_failed", "恢复模式必须是 auto、native 或 summary");
+}
+
+function summarySystemPrompt(base: string, summary: string): string {
+  return [
+    base,
+    "",
+    "## Archived Worker session summary",
+    summary.slice(0, 4000),
+    "",
+    "This is a semantic restore into a new Agent Session, not a lossless native resume.",
+    "The VM environment may have changed since the archive. Do not assume old screenshots or UI state.",
+    "Call vm_screenshot before performing any desktop action.",
+  ].join("\n");
+}
+
+function resumeBrief(
+  restoreMode: WorkerRestoreMode,
+  environment: WorkerResumeEnvironment,
+  notice: string | null,
+): string {
+  const tasks = environment.recentTasks
+    .map((task) => `- [${task.status}] ${task.objective}`)
+    .join("\n");
+  return [
+    `[Agent-in-Box resume context: ${restoreMode}]`,
+    notice ?? "",
+    `VM: ${environment.vmName} (${environment.vmId}) power=${environment.powerState} health=${environment.guestHealth}`,
+    `Workspace: ${environment.workspacePath}`,
+    environment.archivedForMs !== null
+      ? `Archived for ${Math.round(environment.archivedForMs / 60000)} minutes.`
+      : "",
+    `Active tasks: ${environment.activeTaskIds.length > 0 ? environment.activeTaskIds.join(", ") : "none"}`,
+    tasks ? `Recent tasks:\n${tasks}` : "",
+    "The attached image is the host's latest observation; it may already be stale.",
+    "Do not start or continue any desktop work yet. Call vm_screenshot before any future input,",
+    "then reply with one short paragraph acknowledging the restored context.",
+  ]
+    .filter(Boolean)
+    .join("\n")
+    .slice(0, 6000);
 }
 
 function validatePromptText(value: unknown): string {

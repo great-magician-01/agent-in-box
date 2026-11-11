@@ -27,6 +27,7 @@ export class OnboardingController {
     return {
       resourcePolicy: onboarding.resourcePolicy,
       security: onboarding.security,
+      workerLifecycle: await this.onboarding.workerLifecyclePolicy(),
       dataRoot: onboarding.dataRoot,
       dataRootSource: onboarding.dataRootSource,
       onboarding,
@@ -39,6 +40,7 @@ export class OnboardingController {
     return {
       resourcePolicy: onboarding.resourcePolicy,
       security: onboarding.security,
+      workerLifecycle: await this.onboarding.workerLifecyclePolicy(),
       dataRoot: onboarding.dataRoot,
       dataRootSource: onboarding.dataRootSource,
       onboarding,

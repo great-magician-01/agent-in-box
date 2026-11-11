@@ -3,6 +3,7 @@ import { DatabaseService } from "./database.service";
 import { KYSELY } from "./tokens";
 import { CatalogRepository } from "./repositories/catalog-repository";
 import { TaskRepository } from "./repositories/task-repository";
+import { WorkerArchiveRepository } from "./repositories/worker-archive-repository";
 import { WorkerRepository } from "./repositories/worker-repository";
 import { LeaseRepository } from "./repositories/lease-repository";
 import { OutboxRepository } from "./repositories/outbox-repository";
@@ -23,6 +24,7 @@ const kyselyProvider: Provider = {
     CatalogRepository,
     TaskRepository,
     WorkerRepository,
+    WorkerArchiveRepository,
     LeaseRepository,
     OutboxRepository,
     EventDedupRepository,
@@ -40,6 +42,7 @@ const kyselyProvider: Provider = {
     CatalogRepository,
     TaskRepository,
     WorkerRepository,
+    WorkerArchiveRepository,
     LeaseRepository,
     OutboxRepository,
     EventDedupRepository,

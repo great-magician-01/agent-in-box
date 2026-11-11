@@ -1,4 +1,8 @@
-import type { ResourcePolicy, SecuritySettings } from "@agent-in-box/protocol";
+import type {
+  ResourcePolicy,
+  SecuritySettings,
+  WorkerLifecyclePolicy,
+} from "@agent-in-box/protocol";
 
 export const GIB = 1024 * 1024 * 1024;
 
@@ -15,4 +19,12 @@ export function defaultResourcePolicy(totalMemoryBytes: number): ResourcePolicy 
 
 export const DEFAULT_SECURITY_SETTINGS: SecuritySettings = {
   requireApprovalForSensitiveActions: true,
+};
+
+export const MIN_WORKER_IDLE_TIMEOUT_MS = 60_000;
+export const MAX_WORKER_IDLE_TIMEOUT_MS = 24 * 60 * 60_000;
+
+export const DEFAULT_WORKER_LIFECYCLE_POLICY: WorkerLifecyclePolicy = {
+  autoArchiveEnabled: true,
+  idleTimeoutMs: 30 * 60_000,
 };

@@ -5,6 +5,7 @@ import type {
   OnboardingState,
   ResourcePolicy,
   SecuritySettings,
+  WorkerLifecyclePolicy,
 } from "@agent-in-box/protocol";
 import { nowIso } from "../persistence/time";
 import { PersistenceError } from "../persistence/errors";
@@ -13,7 +14,10 @@ import type { DatabaseExecutor } from "../persistence/executor";
 import type { DatabaseSchema } from "../persistence/schema";
 import {
   DEFAULT_SECURITY_SETTINGS,
+  DEFAULT_WORKER_LIFECYCLE_POLICY,
+  MAX_WORKER_IDLE_TIMEOUT_MS,
   MIN_HOST_RESERVE_BYTES,
+  MIN_WORKER_IDLE_TIMEOUT_MS,
   defaultResourcePolicy,
 } from "./defaults";
 
@@ -21,6 +25,7 @@ export const SETTINGS_KEYS = {
   onboarding: "onboarding",
   resourcePolicy: "resourcePolicy",
   security: "security",
+  workerLifecycle: "workerLifecycle",
   preferredModelProvider: "preferredModelProvider",
   credentialsConfigured: "credentialsConfigured",
 } as const;
@@ -37,6 +42,7 @@ export interface SettingsSnapshot {
   onboarding: OnboardingSettings | null;
   resourcePolicy: ResourcePolicy;
   security: SecuritySettings;
+  workerLifecycle: WorkerLifecyclePolicy;
   preferredModelProvider: string | null;
   credentialsConfigured: boolean;
   localUser: LocalUserRecord | null;
@@ -116,6 +122,31 @@ export function normalizeSecuritySettings(raw: unknown): SecuritySettings {
   };
 }
 
+export function normalizeWorkerLifecyclePolicy(raw: unknown): WorkerLifecyclePolicy {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    throw new PersistenceError("validation_failed", "Worker 空闲归档策略缺失");
+  }
+  const input = raw as Record<string, unknown>;
+  if (typeof input.autoArchiveEnabled !== "boolean") {
+    throw new PersistenceError("validation_failed", "Worker 自动归档开关无效");
+  }
+  if (
+    typeof input.idleTimeoutMs !== "number" ||
+    !Number.isInteger(input.idleTimeoutMs) ||
+    input.idleTimeoutMs < MIN_WORKER_IDLE_TIMEOUT_MS ||
+    input.idleTimeoutMs > MAX_WORKER_IDLE_TIMEOUT_MS
+  ) {
+    throw new PersistenceError(
+      "validation_failed",
+      `Worker 空闲超时必须为 ${MIN_WORKER_IDLE_TIMEOUT_MS}～${MAX_WORKER_IDLE_TIMEOUT_MS} ms 的整数`,
+    );
+  }
+  return {
+    autoArchiveEnabled: input.autoArchiveEnabled,
+    idleTimeoutMs: input.idleTimeoutMs,
+  };
+}
+
 @Injectable()
 export class SettingsService {
   constructor(@Inject(KYSELY) private readonly db: Kysely<DatabaseSchema>) {}
@@ -153,23 +184,38 @@ export class SettingsService {
   }
 
   async snapshot(totalMemoryBytes: number): Promise<SettingsSnapshot> {
-    const [onboarding, resourcePolicy, security, preferredModelProvider, credentialsConfigured] =
-      await Promise.all([
-        this.getJson<OnboardingSettings>(SETTINGS_KEYS.onboarding),
-        this.getJson<ResourcePolicy>(SETTINGS_KEYS.resourcePolicy),
-        this.getJson<SecuritySettings>(SETTINGS_KEYS.security),
-        this.getJson<string>(SETTINGS_KEYS.preferredModelProvider),
-        this.getJson<boolean>(SETTINGS_KEYS.credentialsConfigured),
-      ]);
+    const [
+      onboarding,
+      resourcePolicy,
+      security,
+      workerLifecycle,
+      preferredModelProvider,
+      credentialsConfigured,
+    ] = await Promise.all([
+      this.getJson<OnboardingSettings>(SETTINGS_KEYS.onboarding),
+      this.getJson<ResourcePolicy>(SETTINGS_KEYS.resourcePolicy),
+      this.getJson<SecuritySettings>(SETTINGS_KEYS.security),
+      this.getJson<WorkerLifecyclePolicy>(SETTINGS_KEYS.workerLifecycle),
+      this.getJson<string>(SETTINGS_KEYS.preferredModelProvider),
+      this.getJson<boolean>(SETTINGS_KEYS.credentialsConfigured),
+    ]);
 
     return {
       onboarding: onboarding ?? null,
       resourcePolicy: resourcePolicy ?? defaultResourcePolicy(totalMemoryBytes),
       security: security ?? DEFAULT_SECURITY_SETTINGS,
+      workerLifecycle: workerLifecycle ?? DEFAULT_WORKER_LIFECYCLE_POLICY,
       preferredModelProvider: preferredModelProvider ?? null,
       credentialsConfigured: credentialsConfigured ?? false,
       localUser: await this.getLocalAdmin(),
     };
+  }
+
+  async workerLifecyclePolicy(): Promise<WorkerLifecyclePolicy> {
+    return (
+      (await this.getJson<WorkerLifecyclePolicy>(SETTINGS_KEYS.workerLifecycle)) ??
+      DEFAULT_WORKER_LIFECYCLE_POLICY
+    );
   }
 
   async getLocalAdmin(executor: DatabaseExecutor = this.db): Promise<LocalUserRecord | null> {
@@ -287,6 +333,7 @@ export class SettingsService {
   async updatePreferences(input: {
     resourcePolicy?: ResourcePolicy;
     security?: SecuritySettings;
+    workerLifecycle?: WorkerLifecyclePolicy;
   }): Promise<void> {
     await this.db.transaction().execute(async (trx) => {
       if (input.resourcePolicy) {
@@ -294,6 +341,9 @@ export class SettingsService {
       }
       if (input.security) {
         await this.setJson(SETTINGS_KEYS.security, input.security, trx);
+      }
+      if (input.workerLifecycle) {
+        await this.setJson(SETTINGS_KEYS.workerLifecycle, input.workerLifecycle, trx);
       }
     });
   }

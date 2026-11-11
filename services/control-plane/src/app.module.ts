@@ -14,6 +14,7 @@ import { EventsModule } from "./events/events.module";
 import { ModelsModule } from "./models/models.module";
 import { ComputerUseModule } from "./computer-use/computer-use.module";
 import { WorkerModule } from "./workers/worker.module";
+import { RouterModule } from "./router/router.module";
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { WorkerModule } from "./workers/worker.module";
     ModelsModule,
     ComputerUseModule,
     WorkerModule,
+    RouterModule,
   ],
   controllers: [HealthController, RuntimeController],
 })

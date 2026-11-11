@@ -7,6 +7,7 @@ import {
   PI_SESSION_FORMAT_VERSION,
   type WorkerEngine,
   type WorkerEngineEvent,
+  type WorkerInlineImage,
   type WorkerInput,
   type WorkerSessionHandle,
   type WorkerSessionSpec,
@@ -267,7 +268,7 @@ export class PiWorkerEngine implements WorkerEngine {
     const session = this.getSession(sessionId);
     await session.process.command("prompt", {
       message: input.text,
-      ...(await this.readImages(input.attachments)),
+      ...(await this.readImages(input.attachments, input.images)),
     });
   }
 
@@ -275,7 +276,7 @@ export class PiWorkerEngine implements WorkerEngine {
     const session = this.getSession(sessionId);
     const data = await session.process.command<{ disposition?: string }>("steer", {
       message: input.text,
-      ...(await this.readImages(input.attachments)),
+      ...(await this.readImages(input.attachments, input.images)),
     });
     return data.disposition === "handled" ? "handled" : "queued";
   }
@@ -284,7 +285,7 @@ export class PiWorkerEngine implements WorkerEngine {
     const session = this.getSession(sessionId);
     const data = await session.process.command<{ disposition?: string }>("follow_up", {
       message: input.text,
-      ...(await this.readImages(input.attachments)),
+      ...(await this.readImages(input.attachments, input.images)),
     });
     return data.disposition === "handled" ? "handled" : "queued";
   }
@@ -455,10 +456,12 @@ export class PiWorkerEngine implements WorkerEngine {
     this.sessions.clear();
   }
 
-  private async readImages(attachments?: readonly string[]): Promise<Record<string, unknown>> {
-    if (!attachments || attachments.length === 0) return {};
-    const images = [];
-    for (const attachment of attachments) {
+  private async readImages(
+    attachments?: readonly string[],
+    inline?: readonly WorkerInlineImage[],
+  ): Promise<Record<string, unknown>> {
+    const images: Array<{ type: "image"; data: string; mimeType: string }> = [];
+    for (const attachment of attachments ?? []) {
       if (typeof attachment !== "string" || !path.isAbsolute(attachment)) {
         throw new Error("Worker image attachments must be absolute guest-local paths");
       }
@@ -472,7 +475,17 @@ export class PiWorkerEngine implements WorkerEngine {
       }
       images.push({ type: "image", data: data.toString("base64"), mimeType });
     }
-    return { images };
+    for (const image of inline ?? []) {
+      if (!["image/png", "image/jpeg", "image/webp"].includes(image.mimeType)) {
+        throw new Error(`Unsupported inline image type: ${image.mimeType}`);
+      }
+      const bytes = Buffer.from(image.data, "base64");
+      if (bytes.byteLength === 0 || bytes.byteLength > 12 * 1024 * 1024) {
+        throw new Error("Inline Worker image must be between 1 byte and 12 MiB");
+      }
+      images.push({ type: "image", data: image.data, mimeType: image.mimeType });
+    }
+    return images.length > 0 ? { images } : {};
   }
 }
 

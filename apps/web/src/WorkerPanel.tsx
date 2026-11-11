@@ -27,6 +27,7 @@ export function WorkerPanel({ project, revision, onChanged }: WorkerPanelProps):
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [resumeNotice, setResumeNotice] = useState<string | null>(null);
   const [providers, setProviders] = useState<ModelProviderView[]>([]);
   const [providerBusy, setProviderBusy] = useState(false);
   const [providerSaved, setProviderSaved] = useState<string | null>(null);
@@ -154,6 +155,28 @@ export function WorkerPanel({ project, revision, onChanged }: WorkerPanelProps):
     });
   }
 
+  async function resumeWorker(
+    workerId: string,
+    mode: "auto" | "native" | "summary",
+  ): Promise<void> {
+    setBusy(true);
+    setError(null);
+    setResumeNotice(null);
+    try {
+      const result = await api.workerResume(workerId, { mode });
+      setResumeNotice(
+        `恢复方式：${result.restoreMode === "native" ? "原生会话" : "归档摘要语义恢复"}${
+          result.notice ? ` — ${result.notice}` : ""
+        }`,
+      );
+      onChanged();
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function submit(mode: "prompt" | "steer" | "follow_up"): Promise<void> {
     if (!selected || !text.trim()) return;
     await run(async () => {
@@ -180,6 +203,7 @@ export function WorkerPanel({ project, revision, onChanged }: WorkerPanelProps):
         的独立完成校验，不以模型自称完成作为成功标准。
       </p>
       {error && <div className="notice">{error}</div>}
+      {resumeNotice && <div className="validation-box ok">{resumeNotice}</div>}
       <details className="provider-config">
         <summary>
           模型 Provider 配置（{providers.length === 0 ? "尚未配置" : `${providers.length} 个已配置`}
@@ -309,6 +333,9 @@ export function WorkerPanel({ project, revision, onChanged }: WorkerPanelProps):
                 </span>
                 <span className="muted small">
                   归档：{selected.worker.agentSessionRef ? "已保存引用" : "无"}
+                  {selected.runtime.restoreMode
+                    ? ` · 恢复方式：${selected.runtime.restoreMode === "native" ? "原生" : "摘要"}`
+                    : ""}
                 </span>
               </div>
             )}
@@ -381,14 +408,24 @@ export function WorkerPanel({ project, revision, onChanged }: WorkerPanelProps):
                 归档
               </button>
               {canResume && (
-                <button
-                  type="button"
-                  className="secondary"
-                  disabled={busy}
-                  onClick={() => void run(() => api.workerResume(selected?.worker.id ?? ""))}
-                >
-                  恢复会话
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={busy}
+                    onClick={() => void resumeWorker(selected?.worker.id ?? "", "auto")}
+                  >
+                    恢复会话（自动）
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={busy}
+                    onClick={() => void resumeWorker(selected?.worker.id ?? "", "summary")}
+                  >
+                    按摘要恢复
+                  </button>
+                </>
               )}
             </div>
             <p className="muted small">

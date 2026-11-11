@@ -1,0 +1,65 @@
+{
+  "name": "agent-in-box-phase8-smoke",
+  "startedAt": "2026-11-11T12:26:32.285Z",
+  "finishedAt": "2026-11-11T12:26:35.934Z",
+  "status": "passed",
+  "checks": [
+    {
+      "name": "真实控制平面应用阶段 8 迁移并启动 Router Tool Broker",
+      "passed": true
+    },
+    {
+      "name": "创建项目 Worker 并保持 Guest RPC 连接",
+      "passed": true,
+      "detail": "worker=443be652-9f48-4f56-9db7-31b519861bc7"
+    },
+    {
+      "name": "Router 只暴露项目、任务、Worker、看板与归档工具",
+      "passed": true
+    },
+    {
+      "name": "Router 查询已有 Worker 后向该 Worker 分派任务",
+      "passed": true,
+      "detail": "task=e931c6c4-9ce0-4f6a-91b2-531c08da3cf1"
+    },
+    {
+      "name": "取消任务后 Worker 停止回合并回到 idle",
+      "passed": true
+    },
+    {
+      "name": "归档写入 Archive Registry，Active Roster 可重建且不再包含归档 Worker",
+      "passed": true
+    },
+    {
+      "name": "同版本原生恢复并注入最新截图与环境摘要，归档标记 restored",
+      "passed": true
+    },
+    {
+      "name": "归档后 Router 检索归档并创建后续任务",
+      "passed": true,
+      "detail": "task=ac0199e1-ae9d-4ddc-9c38-41144ed8d027"
+    },
+    {
+      "name": "Router 重启后恢复会话并继续读取持久化任务分配",
+      "passed": true,
+      "detail": "messages=6"
+    },
+    {
+      "name": "Outbox、归档表、恢复上下文与截图文件均已持久化",
+      "passed": true
+    }
+  ],
+  "boundaries": {
+    "realChildProcess": true,
+    "realControlPlane": true,
+    "realSqlite": true,
+    "realRouterToolBrokerHttp": true,
+    "realWorkerRpc": true,
+    "realGuestAgent": false,
+    "realQemuWxpx": false,
+    "realPiProcess": false,
+    "realRouterPi": false,
+    "realModel": false,
+    "browserElectronUi": false
+  }
+}

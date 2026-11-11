@@ -45,9 +45,17 @@ export interface WorkerSessionSpec {
   computerUse?: WorkerComputerUseSpec;
 }
 
+export interface WorkerInlineImage {
+  mimeType: "image/png" | "image/jpeg" | "image/webp";
+  data: string;
+}
+
 export interface WorkerInput {
   text: string;
+  /** Guest-local absolute image paths. */
   attachments?: readonly string[];
+  /** Host-captured images sent inline for resume/environment injection. */
+  images?: readonly WorkerInlineImage[];
 }
 
 export type WorkerEngineEvent =
@@ -81,6 +89,8 @@ export interface WorkerEngine {
     archiveRef: string,
     spec?: WorkerSessionSpec,
   ): Promise<WorkerSessionHandle & { mode: "native" | "summary" }>;
+  /** Release engine-owned processes/files. Optional for remote engine adapters. */
+  dispose?(): Promise<void>;
 }
 
 export interface WorkerEngineRegistry {

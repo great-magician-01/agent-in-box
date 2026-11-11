@@ -650,6 +650,7 @@ steer_task(...)
 follow_up_task(...)
 reprioritize_task(...)
 pause_task / cancel_task / retry_task
+resume_worker / archive_worker
 ```
 
 每次分派前从数据库读取候选 Worker。语义相关性只用于建议，项目、VM、权限和状态由确定性规则过滤。
@@ -663,6 +664,40 @@ Router 不默认加载全部 Worker 历史和截图。归档后从投影移除�
 ### 12.3 看板实时更新
 
 控制平面事务提交 Task 和 Outbox，发布 `task.*`、`worker.*`、`vm.*` 事件。React 前端通过 WebSocket 更新，Router 在相关里程碑收到通知。普通鼠标动作不逐条推送给 Router，只进入任务 Trace。
+
+### 12.4 阶段 8 实现（2026-11-11）
+
+Migration `007_phase8_router_archive` 增加 `worker_archives`、`worker_resume_contexts`、`worker_inputs`、`router_sessions`、`router_messages`、`router_tool_calls`、`router_model_tokens`：
+
+- `worker_archives` 每个归档保存会话引用、引擎/Session 版本、摘要、恢复点、产物引用和 `manual`/`auto` 来源；同一 Worker 新归档会把旧记录标记 `superseded`，恢复历史仍可检索。
+- `worker_inputs` 记录 Steer/Follow-up 是否已被 Pi 处理；`pending` 是归档阻塞条件之一。
+- `router_sessions` 保存 Router 会话引用、状态、模型供应商/模型和工具令牌哈希；`router_messages` 保存 Router 主会话文本；`router_tool_calls` 审计每次工具调用，并通过 Outbox `router.tool_call` 通知 UI 刷新；Router 回合有最大时长保护，超时会 Abort 并进入 failed。
+- `router_model_tokens` 是宿主 Router 专用的短期 Model Broker 令牌，与 VM Worker 令牌分离；控制平面重启撤销全部旧令牌。
+
+Worker Registry 是纯数据库读模型：Active Roster 每次重建，不缓存 Router 专属状态；摘要卡片包含项目、VM、能力、状态、当前/最近任务、VM 队列深度、待审批和排队消息数。`find_related_worker` 只允许同项目候选，状态和项目是硬过滤，文本相似度只影响排序。
+
+Router Runtime 在宿主启动独立 Pi 进程（`--no-builtin-tools`），通过生成的扩展只访问回环 Router Tool Broker（默认 `6721`）。工具面为 `list_projects`、`list_active_workers`、`list_tasks`、`get_task`、`get_board_summary`、`get_worker_summary`、`find_related_worker`、`search_worker_archive`、`create_task`、`assign_task`、`steer_task`、`follow_up_task`、`reprioritize_task`、`cancel_task`、`retry_task`、`resume_worker`、`archive_worker`，没有 VM 输入、Shell 或 Supervisor 工具。Router 模型请求经 Model Broker，使用绑定 Router 会话的短期令牌；扩展与模型令牌都不会进入 VM。
+
+归档由 Worker Runtime 执行：运行任务、待审批动作、排队消息、Lease、恢复上下文注入和运行状态均为阻塞条件；归档只停止 Worker Pi 会话，不停止 VM。恢复优先级为同版本 Native Resume，其次为显式标注的摘要语义恢复；恢复前捕获 Guest 最新截图和项目/VM/任务变化，保存到 `worker_resume_contexts` 并通过 Worker RPC 的首个注入回合（可携带内联 PNG）送入 Worker。任何后续桌面动作仍必须重新观察。
+
+主要路由：
+
+```text
+GET                   /api/v1/workers/:id/blockers
+GET                   /api/v1/workers/:id/archives
+POST                  /api/v1/workers/:id/resume        { mode: auto|native|summary }
+GET                   /api/v1/registry/workers
+GET                   /api/v1/registry/workers/:id/summary
+GET                   /api/v1/registry/workers/:id/archives
+GET                   /api/v1/registry/archives
+GET                   /api/v1/registry/find-related
+GET                   /api/v1/router
+GET/POST              /api/v1/router/messages
+POST                  /api/v1/router/abort
+GET                   /api/v1/router/tools
+GET                   /api/v1/router/tool-calls
+GET/POST              /v1/tools[/:name]                  (Router Tool Broker, 短期令牌)
+```
 
 ## 13. 飞书和 QQ 本地连接
 

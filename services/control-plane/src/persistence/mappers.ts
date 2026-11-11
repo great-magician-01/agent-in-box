@@ -7,10 +7,12 @@ import type {
   ProjectActivityRecord,
   ProjectRecord,
   ProjectVmBindingRecord,
+  RouterMessageRecord,
   TaskArtifactRecord,
   TaskRecord,
   VmInstanceRecord,
   VmPowerState,
+  WorkerArchiveRecord,
   WorkerRecord,
 } from "@agent-in-box/protocol";
 import { isTaskStatus, isVmPowerState, isWorkerStatus, OS_FAMILIES } from "@agent-in-box/protocol";
@@ -19,10 +21,12 @@ import type {
   ImagesTable,
   ProjectVmBindingsTable,
   ProjectsTable,
+  RouterMessagesTable,
   TaskArtifactsTable,
   ProjectActivitiesTable,
   TasksTable,
   VmInstancesTable,
+  WorkerArchivesTable,
   WorkersTable,
 } from "./schema";
 
@@ -226,5 +230,44 @@ export function toWorkerRecord(row: Selectable<WorkersTable>): WorkerRecord {
     lastErrorMessage: row.last_error_message,
     providerId: row.provider_id,
     modelId: row.model_id,
+  };
+}
+
+export function toWorkerArchiveRecord(row: Selectable<WorkerArchivesTable>): WorkerArchiveRecord {
+  const restorePoint = parseJson(row.restore_point_json);
+  const artifacts = parseJson(row.artifacts_json);
+  return {
+    id: row.id,
+    workerId: row.worker_id,
+    projectId: row.project_id,
+    vmId: row.vm_id,
+    conversationId: row.conversation_id,
+    archiveRef: row.archive_ref,
+    engineType: row.engine_type,
+    engineVersion: row.engine_version,
+    sessionVersion: row.session_version,
+    summary: row.summary,
+    restorePoint:
+      restorePoint !== null && typeof restorePoint === "object"
+        ? (restorePoint as WorkerArchiveRecord["restorePoint"])
+        : null,
+    artifacts: Array.isArray(artifacts) ? (artifacts as WorkerArchiveRecord["artifacts"]) : [],
+    source: row.source === "auto" ? "auto" : "manual",
+    status:
+      row.status === "restored" || row.status === "superseded"
+        ? row.status
+        : ("available" as const),
+    createdAt: row.created_at,
+    restoredAt: row.restored_at,
+  };
+}
+
+export function toRouterMessageRecord(row: Selectable<RouterMessagesTable>): RouterMessageRecord {
+  return {
+    id: row.id,
+    conversationId: row.conversation_id,
+    role: row.role === "assistant" ? "assistant" : "user",
+    content: row.content,
+    createdAt: row.created_at,
   };
 }

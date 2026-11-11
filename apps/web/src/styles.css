@@ -2157,6 +2157,91 @@ button.danger:disabled {
   align-items: end;
 }
 
+.pill.live {
+  background: rgba(47, 122, 86, 0.16);
+  color: #236241;
+}
+
+.router-panel,
+.registry-panel {
+  display: grid;
+  gap: 0.8rem;
+  margin-top: 1rem;
+}
+
+.router-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: #626b64;
+}
+
+.router-layout,
+.registry-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(16rem, 0.8fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.router-conversation,
+.router-side,
+.registry-summary {
+  display: grid;
+  gap: 0.7rem;
+  min-width: 0;
+}
+
+.registry-heading {
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+}
+
+.registry-cards,
+.archive-list {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.registry-card,
+.archive-card {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.7rem 0.8rem;
+  text-align: left;
+  border: 1px solid rgba(24, 32, 28, 0.12);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.45);
+  color: inherit;
+}
+
+.registry-card.selected {
+  border-color: rgba(47, 122, 86, 0.45);
+  background: rgba(47, 122, 86, 0.1);
+}
+
+.archive-card p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.registry-layout > div {
+  min-width: 0;
+}
+
+@media (max-width: 960px) {
+  .router-layout,
+  .registry-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .provider-form button {
   justify-self: start;
 }

@@ -59,7 +59,7 @@ process.stdin.on("data", (chunk) => {
         });
         break;
       case "prompt": {
-        const hold = String(command.message ?? "").includes("[hold]");
+        const hold = String(command.message ?? "").startsWith("[hold]");
         response(command.id, "prompt", { disposition: "started" });
         setImmediate(() => {
           write({

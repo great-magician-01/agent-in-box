@@ -64,6 +64,8 @@ export function Dashboard({
     onboarding.resourcePolicy.autoStartPolicy,
   );
   const [approval, setApproval] = useState(onboarding.security.requireApprovalForSensitiveActions);
+  const [autoArchive, setAutoArchive] = useState(true);
+  const [idleMinutes, setIdleMinutes] = useState("30");
   const [policyMessage, setPolicyMessage] = useState<string | null>(null);
 
   const [cleanupMessage, setCleanupMessage] = useState<string | null>(null);
@@ -89,6 +91,8 @@ export function Dashboard({
       setReserveGb(formatGb(nextSettings.resourcePolicy.hostReserveBytes));
       setAutoStart(nextSettings.resourcePolicy.autoStartPolicy);
       setApproval(nextSettings.security.requireApprovalForSensitiveActions);
+      setAutoArchive(nextSettings.workerLifecycle.autoArchiveEnabled);
+      setIdleMinutes(String(Math.round(nextSettings.workerLifecycle.idleTimeoutMs / 60_000)));
     } catch (error) {
       setLoadError(errorMessage(error));
     }
@@ -114,12 +118,21 @@ export function Dashboard({
       setPolicyMessage("Host Reserve 必须是有效数字");
       return;
     }
+    const minutes = Number(idleMinutes);
+    if (!Number.isFinite(minutes) || minutes < 1 || minutes > 1440) {
+      setPolicyMessage("Worker 空闲归档时间必须为 1～1440 分钟");
+      return;
+    }
     setBusy(true);
     setPolicyMessage(null);
     try {
       const next = await api.updateSettings({
         resourcePolicy: { hostReserveBytes: bytes, autoStartPolicy: autoStart },
         security: { requireApprovalForSensitiveActions: approval },
+        workerLifecycle: {
+          autoArchiveEnabled: autoArchive,
+          idleTimeoutMs: Math.round(minutes * 60_000),
+        },
       });
       setSettings(next);
       setPolicyMessage("资源与安全设置已保存");
@@ -525,7 +538,31 @@ export function Dashboard({
             />
             <span>敏感操作需要审批</span>
           </label>
+          <label className="toggle policy-toggle">
+            <input
+              type="checkbox"
+              checked={autoArchive}
+              onChange={(event) => setAutoArchive(event.target.checked)}
+            />
+            <span>Worker 空闲后自动归档</span>
+          </label>
+          <label className="field">
+            <span>Worker 空闲归档（分钟）</span>
+            <input
+              type="number"
+              min="1"
+              max="1440"
+              step="1"
+              value={idleMinutes}
+              onChange={(event) => setIdleMinutes(event.target.value)}
+              disabled={!autoArchive}
+            />
+          </label>
         </div>
+        <p className="muted small">
+          有运行任务、待审批、排队消息或 Execution Lease 的 Worker 不会被归档；归档只停止 Worker
+          会话，不停止 VM。
+        </p>
         <div className="action-row">
           <button
             type="button"

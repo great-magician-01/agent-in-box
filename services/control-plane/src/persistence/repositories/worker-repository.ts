@@ -220,4 +220,13 @@ export class WorkerRepository {
       .where("id", "=", workerId)
       .execute();
   }
+
+  /** Heartbeats prove liveness only; they must not reset the idle-archive timer. */
+  async updateHeartbeat(workerId: string, at: string = nowIso()): Promise<void> {
+    await this.db
+      .updateTable("workers")
+      .set({ last_heartbeat_at: at })
+      .where("id", "=", workerId)
+      .execute();
+  }
 }

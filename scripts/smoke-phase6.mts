@@ -12,6 +12,7 @@ import type {
   ConversationMessageRecord,
   ModelRequestRecord,
   TaskDetail,
+  WorkerResumeResult,
   WorkerView,
 } from "@agent-in-box/protocol";
 import type { Kysely } from "kysely";
@@ -466,17 +467,19 @@ try {
   assert.notEqual((await worker()).worker.agentSessionRef, null);
   passed("控制平面重启不重复执行，Worker 绑定与会话引用保留");
 
-  const resumedWorker = await api<WorkerView>(`/api/v1/workers/${workerId}/resume`, { method: "POST" });
-  assert.equal(resumedWorker.runtime.connected, true);
-  assert.equal(resumedWorker.worker.status, "idle");
-  assert.ok(resumedWorker.worker.agentSessionRef);
+  const resumedWorker = await api<WorkerResumeResult>(`/api/v1/workers/${workerId}/resume`, { method: "POST" });
+  assert.equal(resumedWorker.restoreMode, "native");
+  assert.equal(resumedWorker.worker.runtime.connected, true);
+  await waitFor(async () => (await worker()).worker.status === "idle", "resumed worker idle");
+  assert.ok(resumedWorker.worker.worker.agentSessionRef);
   passed("Worker 通过持久会话引用 Native Resume 恢复");
 
   const archived = await api<WorkerView>(`/api/v1/workers/${workerId}/archive`, { method: "POST" });
   assert.equal(archived.worker.status, "archived");
-  const restored = await api<WorkerView>(`/api/v1/workers/${workerId}/resume`, { method: "POST" });
-  assert.equal(restored.worker.status, "idle");
-  assert.equal(restored.runtime.connected, true);
+  const restored = await api<WorkerResumeResult>(`/api/v1/workers/${workerId}/resume`, { method: "POST" });
+  assert.equal(restored.restoreMode, "native");
+  await waitFor(async () => (await worker()).worker.status === "idle", "restored worker idle");
+  assert.equal(restored.worker.runtime.connected, true);
   passed("Worker 会话归档与从归档恢复入口可用");
 
   const postResume = await api<{ taskId: string }>(`/api/v1/workers/${workerId}/prompt`, {

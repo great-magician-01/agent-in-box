@@ -882,6 +882,238 @@ const migrations: Record<string, MigrationDefinition> = {
       }
     },
   },
+
+  "007_phase8_router_archive": {
+    async up(db: Kysely<DatabaseSchema>): Promise<void> {
+      await db.schema
+        .createTable("worker_archives")
+        .addColumn("id", "text", (column) => column.primaryKey())
+        .addColumn("worker_id", "text", (column) => column.notNull())
+        .addColumn("project_id", "text", (column) => column.notNull())
+        .addColumn("vm_id", "text", (column) => column.notNull())
+        .addColumn("conversation_id", "text", (column) => column.notNull())
+        .addColumn("archive_ref", "text", (column) => column.notNull())
+        .addColumn("engine_type", "text", (column) => column.notNull())
+        .addColumn("engine_version", "text", (column) => column.notNull())
+        .addColumn("session_version", "text", (column) => column.notNull())
+        .addColumn("summary", "text", (column) => column.notNull())
+        .addColumn("restore_point_json", "text")
+        .addColumn("artifacts_json", "text", (column) => column.notNull().defaultTo("[]"))
+        .addColumn("source", "text", (column) => column.notNull())
+        .addColumn("status", "text", (column) => column.notNull())
+        .addColumn("created_at", "text", (column) => column.notNull())
+        .addColumn("restored_at", "text")
+        .addForeignKeyConstraint(
+          "worker_archives_worker_fk",
+          ["worker_id"],
+          "workers",
+          ["id"],
+          (c) => c.onDelete("cascade"),
+        )
+        .addForeignKeyConstraint(
+          "worker_archives_project_fk",
+          ["project_id"],
+          "projects",
+          ["id"],
+          (c) => c.onDelete("restrict"),
+        )
+        .addForeignKeyConstraint("worker_archives_vm_fk", ["vm_id"], "vm_instances", ["id"], (c) =>
+          c.onDelete("restrict"),
+        )
+        .addForeignKeyConstraint(
+          "worker_archives_conversation_fk",
+          ["conversation_id"],
+          "conversations",
+          ["id"],
+          (c) => c.onDelete("cascade"),
+        )
+        .execute();
+      await db.schema
+        .createIndex("worker_archives_worker_idx")
+        .on("worker_archives")
+        .columns(["worker_id", "created_at"])
+        .execute();
+      await db.schema
+        .createIndex("worker_archives_project_idx")
+        .on("worker_archives")
+        .columns(["project_id", "created_at"])
+        .execute();
+      await db.schema
+        .createIndex("worker_archives_status_idx")
+        .on("worker_archives")
+        .columns(["status", "created_at"])
+        .execute();
+
+      await db.schema
+        .createTable("worker_resume_contexts")
+        .addColumn("id", "text", (column) => column.primaryKey())
+        .addColumn("worker_id", "text", (column) => column.notNull())
+        .addColumn("archive_id", "text")
+        .addColumn("restore_mode", "text", (column) => column.notNull())
+        .addColumn("screenshot_path", "text")
+        .addColumn("screenshot_sha256", "text")
+        .addColumn("screenshot_width", "integer")
+        .addColumn("screenshot_height", "integer")
+        .addColumn("environment_json", "text", (column) => column.notNull())
+        .addColumn("created_at", "text", (column) => column.notNull())
+        .addForeignKeyConstraint(
+          "worker_resume_contexts_worker_fk",
+          ["worker_id"],
+          "workers",
+          ["id"],
+          (c) => c.onDelete("cascade"),
+        )
+        .addForeignKeyConstraint(
+          "worker_resume_contexts_archive_fk",
+          ["archive_id"],
+          "worker_archives",
+          ["id"],
+          (c) => c.onDelete("set null"),
+        )
+        .execute();
+      await db.schema
+        .createIndex("worker_resume_contexts_worker_idx")
+        .on("worker_resume_contexts")
+        .columns(["worker_id", "created_at"])
+        .execute();
+
+      await db.schema
+        .createTable("worker_inputs")
+        .addColumn("id", "text", (column) => column.primaryKey())
+        .addColumn("worker_id", "text", (column) => column.notNull())
+        .addColumn("kind", "text", (column) => column.notNull())
+        .addColumn("content", "text", (column) => column.notNull())
+        .addColumn("status", "text", (column) => column.notNull())
+        .addColumn("created_at", "text", (column) => column.notNull())
+        .addColumn("delivered_at", "text")
+        .addForeignKeyConstraint("worker_inputs_worker_fk", ["worker_id"], "workers", ["id"], (c) =>
+          c.onDelete("cascade"),
+        )
+        .execute();
+      await db.schema
+        .createIndex("worker_inputs_worker_idx")
+        .on("worker_inputs")
+        .columns(["worker_id", "status", "created_at"])
+        .execute();
+
+      await db.schema
+        .createTable("router_sessions")
+        .addColumn("conversation_id", "text", (column) => column.primaryKey())
+        .addColumn("status", "text", (column) => column.notNull())
+        .addColumn("session_ref", "text")
+        .addColumn("engine_type", "text", (column) => column.notNull())
+        .addColumn("engine_version", "text", (column) => column.notNull())
+        .addColumn("session_version", "text", (column) => column.notNull())
+        .addColumn("provider_id", "text")
+        .addColumn("model_id", "text")
+        .addColumn("tool_token_hash", "text")
+        .addColumn("tool_token_expires_at", "text")
+        .addColumn("last_active_at", "text", (column) => column.notNull())
+        .addColumn("last_error", "text")
+        .addColumn("created_at", "text", (column) => column.notNull())
+        .addColumn("updated_at", "text", (column) => column.notNull())
+        .addForeignKeyConstraint(
+          "router_sessions_conversation_fk",
+          ["conversation_id"],
+          "conversations",
+          ["id"],
+          (c) => c.onDelete("cascade"),
+        )
+        .execute();
+      await db.schema
+        .createIndex("router_sessions_status_idx")
+        .on("router_sessions")
+        .columns(["status", "last_active_at"])
+        .execute();
+
+      await db.schema
+        .createTable("router_messages")
+        .addColumn("id", "text", (column) => column.primaryKey())
+        .addColumn("conversation_id", "text", (column) => column.notNull())
+        .addColumn("role", "text", (column) => column.notNull())
+        .addColumn("content", "text", (column) => column.notNull())
+        .addColumn("created_at", "text", (column) => column.notNull())
+        .addForeignKeyConstraint(
+          "router_messages_conversation_fk",
+          ["conversation_id"],
+          "conversations",
+          ["id"],
+          (c) => c.onDelete("cascade"),
+        )
+        .execute();
+      await db.schema
+        .createIndex("router_messages_conversation_idx")
+        .on("router_messages")
+        .columns(["conversation_id", "created_at", "id"])
+        .execute();
+
+      await db.schema
+        .createTable("router_tool_calls")
+        .addColumn("id", "text", (column) => column.primaryKey())
+        .addColumn("conversation_id", "text", (column) => column.notNull())
+        .addColumn("tool_name", "text", (column) => column.notNull())
+        .addColumn("args_json", "text", (column) => column.notNull())
+        .addColumn("result_json", "text")
+        .addColumn("status", "text", (column) => column.notNull())
+        .addColumn("error_code", "text")
+        .addColumn("error_message", "text")
+        .addColumn("duration_ms", "integer", (column) => column.notNull())
+        .addColumn("created_at", "text", (column) => column.notNull())
+        .addForeignKeyConstraint(
+          "router_tool_calls_conversation_fk",
+          ["conversation_id"],
+          "conversations",
+          ["id"],
+          (c) => c.onDelete("cascade"),
+        )
+        .execute();
+      await db.schema
+        .createIndex("router_tool_calls_conversation_idx")
+        .on("router_tool_calls")
+        .columns(["conversation_id", "created_at", "id"])
+        .execute();
+
+      await db.schema
+        .createTable("router_model_tokens")
+        .addColumn("id", "text", (column) => column.primaryKey())
+        .addColumn("token_hash", "text", (column) => column.notNull().unique())
+        .addColumn("conversation_id", "text", (column) => column.notNull())
+        .addColumn("provider_id", "text", (column) => column.notNull())
+        .addColumn("model", "text", (column) => column.notNull())
+        .addColumn("expires_at", "text", (column) => column.notNull())
+        .addColumn("revoked_at", "text")
+        .addColumn("revoke_reason", "text")
+        .addColumn("created_at", "text", (column) => column.notNull())
+        .addColumn("last_used_at", "text")
+        .addForeignKeyConstraint(
+          "router_model_tokens_conversation_fk",
+          ["conversation_id"],
+          "conversations",
+          ["id"],
+          (c) => c.onDelete("cascade"),
+        )
+        .execute();
+      await db.schema
+        .createIndex("router_model_tokens_conversation_idx")
+        .on("router_model_tokens")
+        .columns(["conversation_id", "created_at"])
+        .execute();
+    },
+
+    async down(db: Kysely<DatabaseSchema>): Promise<void> {
+      for (const table of [
+        "router_model_tokens",
+        "router_tool_calls",
+        "router_messages",
+        "router_sessions",
+        "worker_inputs",
+        "worker_resume_contexts",
+        "worker_archives",
+      ]) {
+        await db.schema.dropTable(table).ifExists().execute();
+      }
+    },
+  },
 };
 
 export async function migrateToLatest(db: Kysely<DatabaseSchema>): Promise<string[]> {

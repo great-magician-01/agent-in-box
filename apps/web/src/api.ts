@@ -46,9 +46,22 @@ import type {
   ConversationMessageRecord,
   ModelProviderUpsert,
   ModelProviderView,
+  ActiveRosterView,
+  RouterMessageRecord,
+  RouterSendResult,
+  RouterToolCallRecord,
+  RouterToolDefinition,
+  RouterView,
+  WorkerArchiveBlockers,
+  WorkerArchiveRecord,
+  WorkerArchiveSearchResult,
   WorkerCreateRequest,
   WorkerPromptRequest,
+  WorkerRelationView,
+  WorkerResumeRequest,
+  WorkerResumeResult,
   WorkerSteerResult,
+  WorkerSummaryView,
   WorkerView,
 } from "@agent-in-box/protocol";
 
@@ -249,7 +262,11 @@ export const api = {
       body: JSON.stringify(body),
     }),
   settings: () => apiFetch<SettingsView>("/api/v1/settings"),
-  updateSettings: (body: { resourcePolicy?: ResourcePolicy; security?: SecuritySettings }) =>
+  updateSettings: (body: {
+    resourcePolicy?: ResourcePolicy;
+    security?: SecuritySettings;
+    workerLifecycle?: { autoArchiveEnabled: boolean; idleTimeoutMs: number };
+  }) =>
     apiFetch<SettingsView>("/api/v1/settings", {
       method: "PATCH",
       body: JSON.stringify(body),
@@ -354,10 +371,53 @@ export const api = {
     apiFetch<WorkerView>(`/api/v1/workers/${encodeURIComponent(id)}/archive`, {
       method: "POST",
     }),
-  workerResume: (id: string) =>
-    apiFetch<WorkerView>(`/api/v1/workers/${encodeURIComponent(id)}/resume`, {
+  workerResume: (id: string, body: WorkerResumeRequest = {}) =>
+    apiFetch<WorkerResumeResult>(`/api/v1/workers/${encodeURIComponent(id)}/resume`, {
       method: "POST",
+      body: JSON.stringify(body),
     }),
+  workerBlockers: (id: string) =>
+    apiFetch<WorkerArchiveBlockers>(`/api/v1/workers/${encodeURIComponent(id)}/blockers`),
+  workerArchives: (id: string) =>
+    apiFetch<WorkerArchiveRecord[]>(`/api/v1/workers/${encodeURIComponent(id)}/archives`),
+  workerSummary: (id: string) =>
+    apiFetch<WorkerSummaryView>(`/api/v1/registry/workers/${encodeURIComponent(id)}/summary`),
+  activeRoster: (projectId?: string) =>
+    apiFetch<ActiveRosterView>(
+      `/api/v1/registry/workers${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ""}`,
+    ),
+  searchWorkerArchives: (input: { projectId?: string; query?: string; limit?: number } = {}) => {
+    const query = new URLSearchParams();
+    if (input.projectId) query.set("projectId", input.projectId);
+    if (input.query) query.set("query", input.query);
+    if (input.limit !== undefined) query.set("limit", String(input.limit));
+    const encoded = query.toString();
+    return apiFetch<WorkerArchiveSearchResult>(
+      `/api/v1/registry/archives${encoded ? `?${encoded}` : ""}`,
+    );
+  },
+  findRelatedWorkers: (input: {
+    conversationId: string;
+    objective: string;
+    projectId?: string;
+  }) => {
+    const query = new URLSearchParams({ conversationId: input.conversationId });
+    query.set("objective", input.objective);
+    if (input.projectId) query.set("projectId", input.projectId);
+    return apiFetch<WorkerRelationView>(`/api/v1/registry/find-related?${query.toString()}`);
+  },
+  router: () => apiFetch<RouterView>("/api/v1/router"),
+  routerMessages: (limit = 100) =>
+    apiFetch<RouterMessageRecord[]>(`/api/v1/router/messages?limit=${limit}`),
+  routerSend: (text: string) =>
+    apiFetch<RouterSendResult>("/api/v1/router/messages", {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    }),
+  routerAbort: () => apiFetch<RouterView>("/api/v1/router/abort", { method: "POST" }),
+  routerTools: () => apiFetch<RouterToolDefinition[]>("/api/v1/router/tools"),
+  routerToolCalls: (limit = 50) =>
+    apiFetch<RouterToolCallRecord[]>(`/api/v1/router/tool-calls?limit=${limit}`),
   taskBoard: (filters: TaskListFilters = {}) =>
     apiFetch<TaskBoardSnapshot>(`/api/v1/tasks/board${taskBoardQuery(filters)}`),
   taskDetail: (id: string) => apiFetch<TaskDetail>(`/api/v1/tasks/${encodeURIComponent(id)}`),

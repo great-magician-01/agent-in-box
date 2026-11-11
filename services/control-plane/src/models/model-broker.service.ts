@@ -19,7 +19,11 @@ import { KYSELY } from "../persistence/tokens";
 import type { ModelCredentialProvider } from "./credential-provider";
 import { MODEL_CREDENTIAL_PROVIDER } from "./tokens";
 import { ModelProviderService } from "./model-provider.service";
-import { ModelTokenService, type ModelTokenContext } from "./model-token.service";
+import {
+  ModelTokenService,
+  type BrokerTokenContext,
+  type ModelTokenContext,
+} from "./model-token.service";
 
 export const MODEL_BROKER_OPTIONS = Symbol("AGENT_IN_BOX_MODEL_BROKER_OPTIONS");
 
@@ -34,7 +38,7 @@ export interface ModelBrokerOptions {
 
 interface RequestState {
   id: string;
-  token: ModelTokenContext;
+  token: BrokerTokenContext;
   startedAt: number;
   attempts: number;
   upstreamStatus: number | null;
@@ -155,7 +159,7 @@ export class ModelBrokerService implements OnModuleInit, OnModuleDestroy {
       this.json(response, 404, errorBody("not_found", "Model Broker route not found"));
       return;
     }
-    const token = await this.tokens.authenticate(bearer(request.headers.authorization));
+    const token = await this.tokens.authenticateBroker(bearer(request.headers.authorization));
     this.checkRateLimit(token.id);
     const active = (this.activeByToken.get(token.id) ?? 0) + 1;
     if (active > 2) {
@@ -173,7 +177,7 @@ export class ModelBrokerService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async proxy(
-    token: ModelTokenContext,
+    token: BrokerTokenContext,
     endpoint: "chat/completions" | "messages",
     request: IncomingMessage,
     response: ServerResponse,
@@ -190,7 +194,7 @@ export class ModelBrokerService implements OnModuleInit, OnModuleDestroy {
     ) {
       throw new PersistenceError("bad_request", "Provider API 与请求端点不匹配");
     }
-    if (token.taskId) await this.assertTaskActive(token);
+    if (token.kind === "worker" && token.taskId) await this.assertTaskActive(token);
     const secret = await this.credentials.getSecret(provider.credentialProviderId);
     const state: RequestState = {
       id: randomUUID(),
@@ -204,7 +208,7 @@ export class ModelBrokerService implements OnModuleInit, OnModuleDestroy {
       .insertInto("model_requests")
       .values({
         id: state.id,
-        token_id: token.id,
+        token_id: token.kind === "worker" ? token.id : null,
         provider_id: provider.id,
         model: token.model,
         worker_id: token.workerId,

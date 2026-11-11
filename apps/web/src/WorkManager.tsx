@@ -9,8 +9,10 @@ import type {
 } from "@agent-in-box/protocol";
 import { api, subscribeTaskEvents } from "./api";
 import { ProjectManager } from "./ProjectManager";
+import { RouterPanel } from "./RouterPanel";
 import { TaskBoard } from "./TaskBoard";
 import { WorkerPanel } from "./WorkerPanel";
+import { WorkerRegistryPanel } from "./WorkerRegistryPanel";
 
 export function WorkManager(): React.JSX.Element {
   const [projects, setProjects] = useState<ProjectView[]>([]);
@@ -155,6 +157,7 @@ export function WorkManager(): React.JSX.Element {
         <p className="muted">正在读取项目与任务快照…</p>
       ) : (
         <>
+          <RouterPanel revision={revision} onChanged={() => load(true)} />
           <ProjectManager
             projects={projects}
             vms={board?.vms ?? []}
@@ -181,6 +184,7 @@ export function WorkManager(): React.JSX.Element {
             onOpenConversation={openConversation}
             onChanged={() => load(true)}
           />
+          <WorkerRegistryPanel revision={revision} onChanged={() => load(true)} />
         </>
       )}
     </section>

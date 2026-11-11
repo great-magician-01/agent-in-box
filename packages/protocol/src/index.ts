@@ -199,8 +199,33 @@ export interface DomainEventPayloads {
   "task.status_changed": { taskId: Id; from: TaskStatus; to: TaskStatus };
   "task.priority_changed": { taskId: Id; from: number; to: number };
   "project.changed": { projectId: Id; action: string };
-  "worker.archived": { workerId: Id; summaryRef: string | null };
-  "worker.resumed": { workerId: Id; restoreMode: "native" | "summary" };
+  "worker.archived": {
+    workerId: Id;
+    summaryRef: string | null;
+    archiveId?: Id;
+    source?: WorkerArchiveSource;
+  };
+  "worker.resumed": {
+    workerId: Id;
+    restoreMode: "native" | "summary";
+    archiveId?: Id;
+    notice?: string | null;
+  };
+  "router.status_changed": {
+    conversationId: Id;
+    status: RouterStatus;
+    error?: string | null;
+  };
+  "router.message": {
+    conversationId: Id;
+    messageId: Id;
+    role: "user" | "assistant";
+  };
+  "router.tool_call": {
+    conversationId: Id;
+    toolName: string;
+    status: "ok" | "error";
+  };
   "vm.power_changed": { vmId: Id; from: VmPowerState; to: VmPowerState };
   "vm.control_changed": {
     vmId: Id;
@@ -444,6 +469,15 @@ export interface SecuritySettings {
   requireApprovalForSensitiveActions: boolean;
 }
 
+/**
+ * Idle Worker archiving. The policy is a host-wide setting; a Worker is only
+ * archived after the idle timeout and only when no execution blocker exists.
+ */
+export interface WorkerLifecyclePolicy {
+  autoArchiveEnabled: boolean;
+  idleTimeoutMs: number;
+}
+
 export type LocalUserRole = "admin";
 
 export interface LocalUserRecord {
@@ -490,6 +524,7 @@ export interface OnboardingCompleteResult {
 export interface SettingsView {
   resourcePolicy: ResourcePolicy;
   security: SecuritySettings;
+  workerLifecycle: WorkerLifecyclePolicy;
   dataRoot: string;
   dataRootSource: DataRootSource;
   onboarding: OnboardingState;
@@ -1236,7 +1271,12 @@ export interface WorkerCreateRequest {
   conversationId?: Id;
   providerId?: string;
   model?: string;
+  /** Create a fresh Worker from a searchable archive summary instead of reusing a session. */
+  restoreArchiveId?: Id;
 }
+
+export type WorkerRestoreMode = "native" | "summary";
+export type WorkerResumeMode = "auto" | WorkerRestoreMode;
 
 export interface WorkerRuntimeView {
   connected: boolean;
@@ -1244,6 +1284,8 @@ export interface WorkerRuntimeView {
   engineVersion: string | null;
   sessionVersion: string | null;
   lastError: string | null;
+  restoreMode: WorkerRestoreMode | null;
+  restoredAt: IsoTimestamp | null;
 }
 
 export interface WorkerView {
@@ -1271,6 +1313,218 @@ export interface ConversationMessageRecord {
   mode: "prompt" | "steer" | "follow_up" | "event";
   content: string;
   createdAt: IsoTimestamp;
+}
+
+/* Phase 8: Worker Registry, archives, restore contexts and the local Router. */
+
+export type WorkerArchiveStatus = "available" | "restored" | "superseded";
+export type WorkerArchiveSource = "manual" | "auto";
+
+export interface WorkerArchiveArtifactRef {
+  taskId: Id;
+  name: string;
+  relativePath: string;
+  sha256: string;
+  sizeBytes: number;
+}
+
+export interface WorkerRestorePoint {
+  vmPowerState: VmPowerState;
+  guestHealth: GuestHealthState;
+  workspacePath: string;
+  taskIds: Id[];
+  taskCount: number;
+  latestTaskStatus: TaskStatus | null;
+  lastMessageAt: IsoTimestamp | null;
+  capturedAt: IsoTimestamp;
+}
+
+export interface WorkerArchiveRecord {
+  id: Id;
+  workerId: Id;
+  projectId: Id;
+  vmId: Id;
+  conversationId: Id;
+  archiveRef: string;
+  engineType: string;
+  engineVersion: string;
+  sessionVersion: string;
+  summary: string;
+  restorePoint: WorkerRestorePoint | null;
+  artifacts: WorkerArchiveArtifactRef[];
+  source: WorkerArchiveSource;
+  status: WorkerArchiveStatus;
+  createdAt: IsoTimestamp;
+  restoredAt: IsoTimestamp | null;
+}
+
+export interface WorkerArchiveSearchResult {
+  items: WorkerArchiveRecord[];
+  query: string;
+  projectId: Id | null;
+  searchedAt: IsoTimestamp;
+}
+
+export interface ActiveTaskCard {
+  id: Id;
+  objective: string;
+  status: TaskStatus;
+  latestSummary: string | null;
+  updatedAt: IsoTimestamp;
+}
+
+/** Compact, rebuildable read model for the Router. It never contains screenshots or full history. */
+export interface ActiveWorkerCard {
+  workerId: Id;
+  projectId: Id;
+  projectName: string;
+  vmId: Id;
+  vmName: string;
+  vmPowerState: VmPowerState;
+  conversationId: Id;
+  status: WorkerStatus;
+  engineType: string;
+  engineVersion: string;
+  sessionVersion: string | null;
+  capabilities: string[];
+  currentTask: ActiveTaskCard | null;
+  recentTask: ActiveTaskCard | null;
+  queueDepth: number;
+  pendingApprovals: number;
+  pendingInputs: number;
+  lastActiveAt: IsoTimestamp;
+  lastHeartbeatAt: IsoTimestamp | null;
+}
+
+export interface ActiveRosterView {
+  workers: ActiveWorkerCard[];
+  snapshotAt: IsoTimestamp;
+}
+
+export interface WorkerRelationSuggestion {
+  workerId: Id;
+  archiveId: Id | null;
+  projectId: Id;
+  vmId: Id;
+  status: WorkerStatus | "archived";
+  score: number;
+  reasons: string[];
+  recommendation: "reuse" | "resume";
+  summary: string | null;
+}
+
+export interface WorkerRelationView {
+  conversationId: Id;
+  objective: string;
+  projectId: Id | null;
+  suggestions: WorkerRelationSuggestion[];
+  fallback: "create_new" | "none";
+  searchedAt: IsoTimestamp;
+}
+
+export interface WorkerArchiveBlockers {
+  blocked: boolean;
+  reasons: string[];
+}
+
+export interface WorkerSummaryView {
+  worker: WorkerRecord;
+  card: ActiveWorkerCard | null;
+  recentTasks: ActiveTaskCard[];
+  recentMessages: ConversationMessageRecord[];
+  latestArchive: WorkerArchiveRecord | null;
+  archiveBlockers: WorkerArchiveBlockers;
+}
+
+export interface WorkerResumeRequest {
+  mode?: WorkerResumeMode;
+}
+
+export interface WorkerResumeEnvironment {
+  vmId: Id;
+  vmName: string;
+  powerState: VmPowerState;
+  guestHealth: GuestHealthState;
+  workspacePath: string;
+  activeTaskIds: Id[];
+  recentTasks: ActiveTaskCard[];
+  archivedAt: IsoTimestamp | null;
+  archivedForMs: number | null;
+  capturedAt: IsoTimestamp;
+}
+
+export interface WorkerResumeContextRecord {
+  id: Id;
+  workerId: Id;
+  archiveId: Id | null;
+  restoreMode: WorkerRestoreMode;
+  screenshot: {
+    width: number;
+    height: number;
+    sha256: string;
+    capturedAt: IsoTimestamp;
+  } | null;
+  environment: WorkerResumeEnvironment;
+  createdAt: IsoTimestamp;
+}
+
+export interface WorkerResumeResult {
+  worker: WorkerView;
+  restoreMode: WorkerRestoreMode;
+  context: WorkerResumeContextRecord;
+  /** Human-readable explanation when auto mode fell back to summary restore. */
+  notice: string | null;
+}
+
+export interface RouterToolDefinition {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+}
+
+export type RouterStatus = "idle" | "running" | "failed";
+
+export interface RouterToolCallRecord {
+  id: Id;
+  conversationId: Id;
+  toolName: string;
+  args: unknown;
+  status: "ok" | "error";
+  errorCode: string | null;
+  errorMessage: string | null;
+  durationMs: number;
+  createdAt: IsoTimestamp;
+}
+
+export interface RouterMessageRecord {
+  id: Id;
+  conversationId: Id;
+  role: "user" | "assistant";
+  content: string;
+  createdAt: IsoTimestamp;
+}
+
+export interface RouterView {
+  conversationId: Id;
+  status: RouterStatus;
+  providerId: string | null;
+  modelId: string | null;
+  engineVersion: string | null;
+  sessionVersion: string | null;
+  lastError: string | null;
+  lastActiveAt: IsoTimestamp;
+  tools: RouterToolDefinition[];
+  messageCount: number;
+}
+
+export interface RouterSendRequest {
+  text: string;
+}
+
+export interface RouterSendResult {
+  conversationId: Id;
+  status: RouterStatus;
+  message: RouterMessageRecord;
 }
 
 export interface ModelDefinition {

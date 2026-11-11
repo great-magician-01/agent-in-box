@@ -326,6 +326,99 @@ export interface CuaTokensTable {
   last_used_at: string | null;
 }
 
+export interface WorkerArchivesTable {
+  id: string;
+  worker_id: string;
+  project_id: string;
+  vm_id: string;
+  conversation_id: string;
+  archive_ref: string;
+  engine_type: string;
+  engine_version: string;
+  session_version: string;
+  summary: string;
+  restore_point_json: string | null;
+  artifacts_json: string;
+  source: string;
+  status: string;
+  created_at: string;
+  restored_at: string | null;
+}
+
+export interface WorkerResumeContextsTable {
+  id: string;
+  worker_id: string;
+  archive_id: string | null;
+  restore_mode: string;
+  screenshot_path: string | null;
+  screenshot_sha256: string | null;
+  screenshot_width: number | null;
+  screenshot_height: number | null;
+  environment_json: string;
+  created_at: string;
+}
+
+export interface WorkerInputsTable {
+  id: string;
+  worker_id: string;
+  kind: string;
+  content: string;
+  status: string;
+  created_at: string;
+  delivered_at: string | null;
+}
+
+export interface RouterSessionsTable {
+  conversation_id: string;
+  status: string;
+  session_ref: string | null;
+  engine_type: string;
+  engine_version: string;
+  session_version: string;
+  provider_id: string | null;
+  model_id: string | null;
+  tool_token_hash: string | null;
+  tool_token_expires_at: string | null;
+  last_active_at: string;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RouterMessagesTable {
+  id: string;
+  conversation_id: string;
+  role: string;
+  content: string;
+  created_at: string;
+}
+
+export interface RouterToolCallsTable {
+  id: string;
+  conversation_id: string;
+  tool_name: string;
+  args_json: string;
+  result_json: string | null;
+  status: string;
+  error_code: string | null;
+  error_message: string | null;
+  duration_ms: number;
+  created_at: string;
+}
+
+export interface RouterModelTokensTable {
+  id: string;
+  token_hash: string;
+  conversation_id: string;
+  provider_id: string;
+  model: string;
+  expires_at: string;
+  revoked_at: string | null;
+  revoke_reason: string | null;
+  created_at: string;
+  last_used_at: string | null;
+}
+
 export interface SchemaMigrationsTable {
   id: string;
   applied_at: string;
@@ -387,4 +480,11 @@ export interface DatabaseSchema {
   cua_actions: CuaActionsTable;
   cua_approvals: CuaApprovalsTable;
   cua_tokens: CuaTokensTable;
+  worker_archives: WorkerArchivesTable;
+  worker_resume_contexts: WorkerResumeContextsTable;
+  worker_inputs: WorkerInputsTable;
+  router_sessions: RouterSessionsTable;
+  router_messages: RouterMessagesTable;
+  router_tool_calls: RouterToolCallsTable;
+  router_model_tokens: RouterModelTokensTable;
 }

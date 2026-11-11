@@ -172,7 +172,11 @@ export class WorkerRpcServer {
       this.error(response, 404, "not_found", "Worker RPC route not found", false);
       return;
     }
-    const input = (await this.body(request)) as { text?: unknown; attachments?: unknown };
+    const input = (await this.body(request)) as {
+      text?: unknown;
+      attachments?: unknown;
+      images?: unknown;
+    };
     switch (action) {
       case "prompt":
         await this.options.engine.prompt(sessionId, validateInput(input));
@@ -306,7 +310,8 @@ export class WorkerRpcServer {
     for await (const chunk of request) {
       const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       total += buffer.byteLength;
-      if (total > 2 * 1024 * 1024) {
+      // Resume/environment injection may carry one host-captured PNG inline.
+      if (total > 16 * 1024 * 1024) {
         throw new RpcHttpError(413, "bad_request", "Worker RPC request is too large", false);
       }
       chunks.push(buffer);
@@ -434,9 +439,10 @@ function validateSpec(value: unknown): WorkerSessionSpec {
   return spec as unknown as WorkerSessionSpec;
 }
 
-function validateInput(input: { text?: unknown; attachments?: unknown }): {
+function validateInput(input: { text?: unknown; attachments?: unknown; images?: unknown }): {
   text: string;
   attachments?: readonly string[];
+  images?: readonly { mimeType: "image/png" | "image/jpeg" | "image/webp"; data: string }[];
 } {
   if (typeof input.text !== "string" || !input.text.trim() || input.text.length > 100_000) {
     throw new RpcHttpError(
@@ -461,9 +467,37 @@ function validateInput(input: { text?: unknown; attachments?: unknown }): {
       false,
     );
   }
+  if (input.images !== undefined) {
+    if (
+      !Array.isArray(input.images) ||
+      input.images.length > 4 ||
+      input.images.some((item) => {
+        if (typeof item !== "object" || item === null) return true;
+        const image = item as Record<string, unknown>;
+        return (
+          (image.mimeType !== "image/png" &&
+            image.mimeType !== "image/jpeg" &&
+            image.mimeType !== "image/webp") ||
+          typeof image.data !== "string" ||
+          image.data.length === 0 ||
+          image.data.length > 16 * 1024 * 1024
+        );
+      })
+    ) {
+      throw new RpcHttpError(400, "bad_request", "inline images are invalid", false);
+    }
+  }
   return {
     text: input.text,
     ...(input.attachments !== undefined ? { attachments: input.attachments as string[] } : {}),
+    ...(input.images !== undefined
+      ? {
+          images: input.images as Array<{
+            mimeType: "image/png" | "image/jpeg" | "image/webp";
+            data: string;
+          }>,
+        }
+      : {}),
   };
 }
 

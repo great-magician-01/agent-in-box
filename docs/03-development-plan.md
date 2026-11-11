@@ -20,7 +20,8 @@
 - **阶段 5 完成（代码、自动化与真实控制平面 Smoke）**：Project CRUD/归档/工作区配置、多对多 VM 绑定和主 VM、项目会话/活动/产物引用；Task 依赖/优先级/幂等/取消/重试、Per-VM 持久队列、完成结果与产物 SHA-256 校验；任务看板筛选、详情和 WebSocket 重连全量同步。真实控制平面重启后运行任务不重复认领，HTTP 不提供伪造完成路由。Pi Worker、真实浏览器/Electron 人工看板验收仍未在本轮执行，详见 [`tests/phase5/summary.md`](../tests/phase5/summary.md)。
 - **阶段 6 完成（代码、自动化与真实本地进程 Smoke）**：Guest Worker RPC（认证、事件重连、版本握手、归档校验）、固定 Pi 1.5.1 运行时与 `images/linux` 安装资产；Model Broker（Provider/模型白名单、短期令牌、撤销中断流、流式 usage/错误记录、长期 Key 仅存宿主机）；Worker Engine Adapter 接入 TaskService/Lease/Registry、心跳、Steer/Follow-up、取消→Abort、断线/重启对账与 Native Resume；项目 Worker 会话面板。`pnpm smoke:phase6` 11 项通过。真实 QEMU/WHPX、Golden Image、真实 Pi/模型与人工 UI 仍未验收，详见 [`tests/phase6/summary.md`](../tests/phase6/summary.md)。
 - **阶段 7 完成（代码、自动化与真实本地进程 Smoke）**：Host 侧 Computer Use Broker + 短期令牌 + Pi CUA 工具集；动作必须持有 Lease、引用最新截图并经显示分辨率校验；前后截图/Trace、最大步数/时长、无进展与重复动作保护、Blocked/Cancelled 处理；项目 Policy、敏感动作等待审批、批准/拒绝/超时/取消；完成必须通过 Guest 文件/进程或重新截图证据，模型自述不再进入完成状态；任务看板展示 Trace 与审批。`pnpm smoke:phase7` 覆盖 15 项主链路。首轮真实 QEMU/WHPX + 真实 Pi/模型任务评测尚未执行，详见 [`tests/phase7/summary.md`](../tests/phase7/summary.md)。
-- **下一步**：进入阶段 8（Router、Worker Registry 与归档）。真实 QEMU/WHPX 与 noVNC 回归、真实 Pi/模型 Computer Use 任务评测、Windows NSIS 安装包与干净 Windows Smoke Test、真实飞书/QQ 和长时稳定性作为发布前验收门槛持续跟踪。
+- **阶段 8 完成（代码、自动化与真实本地进程 Smoke）**：Worker Registry/Active Roster、可搜索 Archive Registry、空闲自动归档及阻塞条件；宿主 Pi Router 仅持有项目/任务/Worker/看板/归档工具，工具调用审计、短期 Router 模型/工具令牌；Native Resume、版本不兼容时的摘要语义恢复和新 Worker 加载归档摘要，恢复时注入最新截图与离开期间环境变化。`pnpm smoke:phase8` 10 项通过。真实 QEMU/WHPX、真实 Router Pi/模型决策质量和人工 UI 仍未验收，详见 [`tests/phase8/summary.md`](../tests/phase8/summary.md)。
+- **下一步**：进入阶段 9（多 VM 资源调度和共享环境完善）。真实 QEMU/WHPX 与 noVNC 回归、真实 Pi/模型 Computer Use 任务评测、Windows NSIS 安装包与干净 Windows Smoke Test、真实飞书/QQ 和长时稳定性作为发布前验收门槛持续跟踪。
 
 1. 先验证 Hypervisor、镜像、Pi Computer Use 和模型代理等高风险链路，再大规模开发 UI。
 2. 每个阶段形成可运行、可测试的纵向能力，避免一次性生成大量空模块。
@@ -647,6 +648,13 @@
 - 用户能继续归档前工作；
 - 不使用过期截图直接输入；
 - 语义恢复时 UI 和日志明确标注恢复类型。
+
+**完成记录（2026-11-11）**
+
+- Worker Registry：`worker_archives`、`worker_resume_contexts`、`worker_inputs`；Active Roster 每次从数据库重建，Archive Registry 支持项目过滤与摘要/产物/引用检索。
+- Router：`router_sessions`、`router_messages`、`router_tool_calls`、`router_model_tokens`；宿主 Pi Router 通过回环短期工具令牌访问结构化工具，模型请求经 Model Broker 的短期 Router 令牌转发；工具面不含 VM 输入、Shell 或 Supervisor 接口。
+- 归档/恢复：空闲策略（`workerLifecycle` 设置）、运行任务/待审批/排队消息/Lease 阻塞条件；归档只停止 Worker 会话；同版本 Native Resume、版本不兼容或恢复失败的显式摘要降级、新 Worker 加载归档摘要；恢复前捕获最新截图和项目/VM 变化并注入首回合。
+- `pnpm smoke:phase8` 使用真实控制平面、SQLite、Router Tool Broker、Worker RPC 和伪造 Guest Agent/Router Pi 验证 10 项主链路；自动归档、阻塞条件、摘要降级与新 Worker 恢复由 Vitest 覆盖。真实 QEMU/WHPX、真实 Router Pi/模型决策质量与浏览器/Electron 人工 UI 仍待显式验收，详见 [`tests/phase8/summary.md`](../tests/phase8/summary.md)。
 
 ---
 

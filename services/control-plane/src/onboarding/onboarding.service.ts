@@ -7,6 +7,7 @@ import type {
   ResourcePolicy,
   SecuritySettings,
   SettingsView,
+  WorkerLifecyclePolicy,
 } from "@agent-in-box/protocol";
 import { PersistenceError } from "../persistence/errors";
 import { HostInspectionService } from "../host/host-inspection.service";
@@ -16,6 +17,7 @@ import {
   normalizeModelProvider,
   normalizeResourcePolicy,
   normalizeSecuritySettings,
+  normalizeWorkerLifecyclePolicy,
 } from "../settings/settings.service";
 import { StorageService } from "../storage/storage.service";
 
@@ -123,6 +125,10 @@ export class OnboardingService {
     return { state, restartRequired, storageMigration: migration };
   }
 
+  workerLifecyclePolicy(): Promise<WorkerLifecyclePolicy> {
+    return this.settings.workerLifecyclePolicy();
+  }
+
   async updateSettings(body: unknown): Promise<OnboardingState> {
     const input = asRecord(body);
     const resourcePolicy =
@@ -131,10 +137,15 @@ export class OnboardingService {
         : normalizeResourcePolicy(input.resourcePolicy, os.totalmem());
     const security =
       input.security === undefined ? undefined : normalizeSecuritySettings(input.security);
+    const workerLifecycle =
+      input.workerLifecycle === undefined
+        ? undefined
+        : normalizeWorkerLifecyclePolicy(input.workerLifecycle);
 
     await this.settings.updatePreferences({
       ...(resourcePolicy ? { resourcePolicy } : {}),
       ...(security ? { security } : {}),
+      ...(workerLifecycle ? { workerLifecycle } : {}),
     });
 
     return this.state();

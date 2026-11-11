@@ -293,15 +293,31 @@ export class GuestClient {
     if (!response.ok) {
       const payload = await readLimited(response, 1024 * 1024).catch(() => new Uint8Array());
       let message = `Guest Agent 返回 HTTP ${response.status}`;
+      let guestCode: string | null = null;
       try {
         const parsed = JSON.parse(Buffer.from(payload).toString("utf8")) as {
-          error?: { message?: string };
+          error?: string | { code?: string; message?: string };
+          errorCode?: string;
         };
-        message = parsed.error?.message ?? message;
+        if (typeof parsed.error === "string") {
+          message = parsed.error;
+        } else {
+          message = parsed.error?.message ?? message;
+          guestCode = parsed.error?.code ?? null;
+        }
+        if (typeof parsed.errorCode === "string") guestCode = parsed.errorCode;
       } catch {
         // Preserve the bounded HTTP error when the peer did not return JSON.
       }
-      throw new PersistenceError(response.status === 401 ? "unauthorized" : "unavailable", message);
+      throw new PersistenceError(
+        response.status === 401
+          ? "unauthorized"
+          : response.status === 423
+            ? "conflict"
+            : "unavailable",
+        message,
+        guestCode ? { guestCode } : undefined,
+      );
     }
     return response;
   }

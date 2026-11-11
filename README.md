@@ -1,6 +1,6 @@
 # Agent-in-Box
 
-面向个人用户的本地 AI 虚拟机工作平台。当前仓库已完成 **开发计划阶段 1（工程骨架、协议和本地持久化）**、**阶段 2（Electron、本地服务与自定义存储）**、**阶段 3（镜像服务、VM 生命周期与管理 UI）**、**阶段 4（Guest Agent、noVNC 实时控制台与统一 Execution Lease）**、**阶段 5（项目、多 VM 绑定、持久任务队列与任务看板）**、**阶段 6（Pi Worker Runtime、Model Broker 与 Worker Engine Adapter）**、**阶段 7（完整 Computer Use 执行器、执行保护、Policy/Approval 与完成校验）**、**阶段 8（Router、Worker Registry 与归档）**、**阶段 9（多 VM 资源调度、共享环境与多端状态同步）**、**阶段 10（飞书和 QQ 本地机器人）**、**阶段 11（Web、Electron 和安装体验）** 和 **阶段 12（Linux 安全、故障、升级与全链路验收）**。包含无特权 Electron 壳、控制平面进程监管、首次启动向导、自定义数据目录、可续传镜像服务、受 ACL 保护的 Go VM Supervisor、QEMU/WHPX 生命周期、认证 Guest 管理通道、AI/人工互斥桌面输入、跨项目串行的 VM 任务内核、认证 Guest Worker RPC、短期模型令牌、流式 Broker、Worker 心跳/归档/恢复、Host 侧 Computer Use Broker、动作/截图 Trace、人工审批、独立完成证据校验、可重建 Active Roster、可搜索 Archive Registry、自动空闲归档、原生/摘要恢复、只持有结构化工具的本地 Router、宿主内存软预算与 VM 自动启动/空闲休眠、共享 VM 整机快照影响确认、独立项目目录备份/恢复、看板/VM/项目页统一状态快照、飞书/QQ 本机出站长连接、持久化事件去重、身份/群白名单、敏感操作二次确认和任务/审批通知，本机访问密钥认证、CSRF/Origin 防护、统一导航与通知中心、文件拖放投递、桌面原生通知/开机启动、后台服务启动停止、更新检查/校验/回滚和保留用户数据的卸载选择，以及迁移前数据库备份、本机诊断报告、日志/诊断凭据脱敏和阶段 12 查询索引。远程 Relay 未实现。真实 QEMU/WHPX、Linux Golden Image、真实 Pi/模型任务评测、真实飞书/QQ 应用凭据、真实更新源、Windows NSIS 干净安装和浏览器/Electron 人工交互验收仍按各阶段记录单独执行。
+面向个人用户的本地 AI 虚拟机工作平台。当前仓库已完成 **开发计划阶段 1（工程骨架、协议和本地持久化）**、**阶段 2（Electron、本地服务与自定义存储）**、**阶段 3（镜像服务、VM 生命周期与管理 UI）**、**阶段 4（Guest Agent、noVNC 实时控制台与统一 Execution Lease）**、**阶段 5（项目、多 VM 绑定、持久任务队列与任务看板）**、**阶段 6（Pi Worker Runtime、Model Broker 与 Worker Engine Adapter）**、**阶段 7（完整 Computer Use 执行器、执行保护、Policy/Approval 与完成校验）**、**阶段 8（Router、Worker Registry 与归档）**、**阶段 9（多 VM 资源调度、共享环境与多端状态同步）**、**阶段 10（飞书和 QQ 本地机器人）**、**阶段 11（Web、Electron 和安装体验）**、**阶段 12（Linux 安全、故障、升级与全链路验收）** 和 **阶段 13（Windows VM、混合 OS 调度与本期联合验收代码）**。包含无特权 Electron 壳、控制平面进程监管、首次启动向导、自定义数据目录、可续传镜像服务、受 ACL 保护的 Go VM Supervisor、QEMU/WHPX Linux/Windows Guest 生命周期、认证 Guest 管理通道、Windows GDI/SendInput Guest Agent、锁屏/UAC 安全桌面人工接管、AI/人工互斥桌面输入、跨项目串行的 VM 任务内核、认证 Guest Worker RPC、Windows Pi 启动适配、短期模型令牌、流式 Broker、Worker 心跳/归档/恢复、Host 侧 Computer Use Broker、动作/截图 Trace、人工审批、独立完成证据校验、可重建 Active Roster、可搜索 Archive Registry、自动空闲归档、原生/摘要恢复、只持有结构化工具的本地 Router、宿主内存软预算与 VM 自动启动/空闲休眠、共享 VM 整机快照影响确认、独立项目目录备份/恢复、看板/VM/项目页统一状态快照、飞书/QQ 本机出站长连接、持久化事件去重、身份/群白名单、敏感操作二次确认和任务/审批通知，本机访问密钥认证、CSRF/Origin 防护、统一导航与通知中心、文件拖放投递、桌面原生通知/开机启动、后台服务启动停止、更新检查/校验/回滚和保留用户数据的卸载选择，以及迁移前数据库备份、本机诊断报告、日志/诊断凭据脱敏和阶段 12/13 查询与混合 OS 展示。远程 Relay 未实现。真实 QEMU/WHPX Windows Guest、Windows ISO/Golden Image、真实 Windows 截图/输入/UAC/DPI、真实 Pi/模型任务评测、真实飞书/QQ 应用凭据、真实更新源、Windows NSIS 干净安装和浏览器/Electron 人工交互验收仍按各阶段记录单独执行。
 
 完整方案见：
 
@@ -20,11 +20,24 @@
 - [阶段 12 验收记录](tests/phase12/summary.md)
 - [阶段 12 安全测试矩阵](tests/phase12/security-matrix.md)
 - [阶段 12 Linux 全链路验收任务集](tests/phase12/full-chain-tasks.json)
+- [阶段 13 验收记录](tests/phase13/summary.md)
+- [阶段 13 Linux/Windows 混合验收任务集](tests/phase13/mixed-tasks.json)
+- [Windows Guest 镜像与运行时资产](images/windows/README.md)
 - [用户指南](docs/04-user-guide.md)
 - [飞书与 QQ 机器人配置指南](docs/05-bot-guide.md)
 - [存储与备份指南](docs/06-storage-guide.md)
 - [隐私与数据处理说明](docs/07-privacy.md)
 - [Linux Guest Worker 安装资产](images/linux/README.md)
+
+## 阶段 13 已落地
+
+- **Windows Guest 主链路**：`VmSpec`/`VmInstanceRecord` 的 `osFamily` 贯穿控制平面、Supervisor 和 QEMU Provider；Windows 使用 IDE 磁盘、e1000 网卡、标准 VGA、xHCI + USB tablet，不依赖 stock Windows 缺少的 VirtIO 驱动。
+- **Windows Guest Agent**：Go 原生 GDI 截图、`SetCursorPos`/`SendInput` 鼠标键盘、中文 Unicode、滚轮、拖拽、DPI/虚拟桌面坐标和 Toolhelp32 进程证据；锁屏或 UAC 安全桌面返回 `session_locked`/`secure_desktop`，Heartbeat 标记降级，Computer Use 任务转为 `blocked` 等待人工接管，不绕过系统安全机制。
+- **Windows 路径与策略**：项目工作目录、文件证据根目录、workspace 归档/恢复接受 Windows 盘符绝对路径；拒绝 `..`、UNC、NTFS 数据流和文件系统根目录。Web/Electron 可选择 Windows 镜像、显示 Guest OS 并按 OS 预填工作目录。
+- **Windows Worker Runtime**：`AGENT_IN_BOX_PI_SCRIPT` 通过 Node 启动 Pi CLI，避免 Windows `.cmd` shim 无法直接 `spawn`；安装资产固定 Node 24.18.0/Pi 1.5.1，并包含防火墙、登录任务和每 VM token 注入脚本。
+- **混合项目与调度**：一个项目可同时绑定 Linux/Windows VM；看板任务带 `vmOsFamily`；Router 的项目/看板摘要暴露 OS 与每 VM 队列；同 VM 串行、跨 VM 并行继续由统一 TaskService 保证。
+- **构建与发布资产**：新增合法 ISO 的 Windows Golden Image 构建脚本、无人值守模板、内部 Manifest 示例、`pnpm package:guest-agent` 和 Windows Guest Runtime 安装资产；Linux/Windows CUA 扩展字节一致。
+- **验证边界**：`pnpm smoke:phase13` 12 项通过（真实 Guest Agent 进程/认证/进程证据/workspace 往返、控制平面、双 OS 绑定与调度）；真实 Windows ISO 安装、WHPX Windows Guest、截图/中文输入/UAC/DPI、真实 Pi/模型、NSIS 干净安装和长时 soak 仍未验收。详见 [`tests/phase13/summary.md`](tests/phase13/summary.md)。
 
 ## 阶段 12 已落地
 
@@ -531,5 +544,9 @@ SQLite 数据库位于数据根目录下的 `agent-in-box.sqlite`，使用 WAL �
 - 数据库迁移前备份与手动恢复已验证，但尚未提供产品化的定时备份、备份加密、自动保留期限和多版本升级编排
 - 诊断报告目前是 JSON 文件而非 zip/签名包；没有自动上传、工单或反馈提交通道
 - 截图/日志没有可配置的自动保留期限；卸载默认保留用户数据
+- Windows Guest 代码主链路已实现，但真实 Windows ISO 安装、WHPX Windows Guest、Windows 截图/中文输入/UAC/锁屏/DPI、真实 Pi/模型和每 VM token 自动注入仍未验收
+- Windows profile 面向 Windows 10/Server Desktop Experience；Windows 11 需要额外 OVMF + `swtpm` TPM 2.0 方案，Server Core 没有可用桌面
+- Windows 锁屏、UAC 安全桌面、Ctrl+Alt+Del 和激活界面必须人工处理，产品不绕过这些系统安全机制
+- Windows Golden Image 构建脚本使用 build-only vvfat provisioning 介质；必须在目标 QEMU/Windows 版本上复测介质识别、安装、关机与启动
 
-阶段 0～12 的代码主链路和本机自动化验收已完成。下一步按 [开发计划](docs/03-development-plan.md) 进入阶段 13：Windows VM 可行性、开发与本期最终联合验收；在此之前仍需完成阶段 12 的真实 QEMU/WHPX + noVNC、真实 Pi/模型任务集、真实飞书/QQ、Windows NSIS 干净安装、真实更新源、Guest 网络边界和长时稳定性发布门槛。
+阶段 0～13 的代码主链路和本机自动化验收已完成。下一步是关闭阶段 13 的真实 Windows 环境发布门槛（合法 ISO/Golden Image、WHPX Windows Guest、真实截图/输入/UAC/DPI、真实 Pi/模型、token 注入、NSIS 干净安装与长时 soak），重跑阶段 12 Linux 全链路确认无回归，并形成本期最终签名构建与联合发布记录。详见 [开发计划](docs/03-development-plan.md) 与 [阶段 13 验收记录](tests/phase13/summary.md)。

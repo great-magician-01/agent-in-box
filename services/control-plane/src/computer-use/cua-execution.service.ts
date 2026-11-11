@@ -27,6 +27,7 @@ import type {
   TaskRecord,
   TaskTraceView,
 } from "@agent-in-box/protocol";
+import { guestPathEqualsOrWithin } from "@agent-in-box/domain";
 import { PersistenceError } from "../persistence/errors";
 import type { DatabaseSchema } from "../persistence/schema";
 import { nowIso } from "../persistence/time";
@@ -197,7 +198,19 @@ export class CuaExecutionService {
     return this.withTaskLock(binding.task.id, async () => {
       const policy = await this.policies.effective(binding.projectId);
       await this.consumeStep(binding.task, policy);
-      const observed = await this.guest.observe(binding.vmId);
+      let observed: Awaited<ReturnType<GuestService["observe"]>>;
+      try {
+        observed = await this.guest.observe(binding.vmId);
+      } catch (error) {
+        if (isHumanRequiredGuestError(error)) {
+          await this.blockTask(
+            binding.task,
+            "guest_session_locked",
+            "Guest 的锁屏或安全桌面需要人工接管；已停止自动操作，不跳过系统安全机制",
+          );
+        }
+        throw error;
+      }
       const screenshot = await this.storeScreenshot(
         binding,
         "observation",
@@ -743,6 +756,12 @@ export class CuaExecutionService {
           "human_control_active",
           "人工已接管该 VM，Computer Use 动作被拒绝",
         );
+      } else if (isHumanRequiredGuestError(error)) {
+        await this.blockTask(
+          binding.task,
+          "guest_session_locked",
+          "Guest 的锁屏或安全桌面需要人工接管；已停止自动操作，不跳过系统安全机制",
+        );
       }
       throw error;
     }
@@ -1273,18 +1292,21 @@ function validateCompletion(input: CuaCompleteRequest, policy: CuaPolicy): strin
 }
 
 function pathAllowed(candidate: string, roots: string[]): boolean {
-  if (
-    !candidate.startsWith("/") ||
-    candidate.includes("\0") ||
-    candidate.split("/").includes("..")
-  ) {
-    return false;
-  }
   if (roots.length === 0) return false;
-  return roots.some((root) => {
-    const normalized = root.replace(/\/+$/, "") || "/";
-    return candidate === normalized || candidate.startsWith(`${normalized}/`);
-  });
+  return roots.some((root) => guestPathEqualsOrWithin(candidate, root));
+}
+
+const HUMAN_REQUIRED_GUEST_CODES = new Set(["session_locked", "secure_desktop"]);
+
+function isHumanRequiredGuestError(error: unknown): boolean {
+  return (
+    error instanceof PersistenceError &&
+    typeof error.details === "object" &&
+    error.details !== null &&
+    HUMAN_REQUIRED_GUEST_CODES.has(
+      String((error.details as { guestCode?: unknown }).guestCode ?? ""),
+    )
+  );
 }
 
 function toScreenshotRecord(row: {

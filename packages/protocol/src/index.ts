@@ -1009,7 +1009,10 @@ export interface VmCreateRequest {
   cpuCount: number;
   memoryGb: number;
   diskGb: number;
-  /** Optional phase-0 NoCloud artifact. It is never generated from model input. */
+  /**
+   * Optional Linux NoCloud or controlled Windows provisioning artifact.
+   * It is never generated from model input.
+   */
   seedImagePath?: string;
 }
 
@@ -1305,13 +1308,17 @@ export interface GuestActionResult {
   durationMs: number;
 }
 
+export type GuestSessionState = "interactive" | "locked" | "secure_desktop";
+
 export interface GuestAgentCapabilities {
   protocolVersion: string;
   agentVersion?: string;
+  platform?: OsFamily;
   displayServer: string;
   screenshot: boolean;
   input: boolean;
   unicodeInput: boolean;
+  sessionState?: GuestSessionState;
   updateSupported?: boolean;
 }
 
@@ -1321,6 +1328,9 @@ export interface GuestDesktopInfo {
   height: number;
   dpi?: number;
   scaleFactor?: number;
+  sessionState?: GuestSessionState;
+  locked?: boolean;
+  secureDesktop?: boolean;
 }
 
 export interface GuestVersionHandshake {
@@ -1341,9 +1351,11 @@ export interface GuestHeartbeat {
   uptimeSeconds: number;
   compatible: boolean;
   desktopAvailable: boolean;
+  platform?: OsFamily;
   requestedProtocolVersion?: string;
   compatibilityError?: string;
   displayServer?: string;
+  sessionState?: GuestSessionState;
   desktopError?: string;
 }
 
@@ -1475,6 +1487,8 @@ export interface TaskBoardItem extends TaskRecord {
   queuePosition: number | null;
   /** Power state of the task's target VM at snapshot time. */
   vmPowerState: VmPowerState;
+  /** Guest OS of the task's target VM at snapshot time. */
+  vmOsFamily: OsFamily;
 }
 
 export interface TaskBoardSnapshot {

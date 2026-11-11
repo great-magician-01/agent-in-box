@@ -214,15 +214,14 @@ export function VmManager({
   }, [consoleRequest, vms, supervisorAvailable]);
 
   const availableImages = useMemo(
-    () =>
-      (catalog?.items ?? []).filter(
-        (image) => image.osFamily === "linux" && image.status === "available",
-      ),
+    () => (catalog?.items ?? []).filter((image) => image.status === "available"),
     [catalog],
   );
   const selectedImageId = availableImages.some((image) => image.id === imageId)
     ? imageId
     : (availableImages[0]?.id ?? "");
+  const selectedImage = availableImages.find((image) => image.id === selectedImageId) ?? null;
+  const selectedIsWindows = selectedImage?.osFamily === "windows";
 
   const activeDownloads = useMemo(
     () =>
@@ -581,10 +580,12 @@ export function VmManager({
   const trimmedName = nameInput.trim();
   const trimmedSeed = seedInput.trim();
 
+  const minMemoryGb = selectedIsWindows ? 4 : 1;
+  const minDiskGb = selectedIsWindows ? 32 : 1;
   const nameValid = trimmedName.length >= 1 && trimmedName.length <= 64;
   const cpuValid = cpuCount !== null && cpuCount >= 1 && cpuCount <= 32;
-  const memoryValid = memoryGb !== null && memoryGb >= 1 && memoryGb <= 64;
-  const diskValid = diskGb !== null && diskGb >= 1 && diskGb <= 2048;
+  const memoryValid = memoryGb !== null && memoryGb >= minMemoryGb && memoryGb <= 64;
+  const diskValid = diskGb !== null && diskGb >= minDiskGb && diskGb <= 2048;
   const seedValid = trimmedSeed === "" || isAbsolutePath(trimmedSeed);
 
   const canCreate =
@@ -600,8 +601,12 @@ export function VmManager({
   const createDisabledReason = !supervisorAvailable
     ? "Supervisor 不可用，暂时无法创建 VM。"
     : availableImages.length === 0
-      ? "没有 Available 的 Linux 镜像，请先下载并完成校验。"
-      : null;
+      ? "没有 Available 的 Linux 或 Windows 镜像，请先下载或导入并完成校验。"
+      : selectedIsWindows && !memoryValid
+        ? "Windows Guest 至少需要 4 GiB 内存。"
+        : selectedIsWindows && !diskValid
+          ? "Windows Guest 至少需要 32 GiB 磁盘。"
+          : null;
 
   const selectedMemoryBytes = memoryGb !== null && memoryGb >= 1 ? memoryGb * GIB : null;
   const hostTotal = host?.totalMemoryBytes ?? null;
@@ -622,6 +627,16 @@ export function VmManager({
             )}，运行 Guest 时可能挤压宿主机。`
           : null
       : null;
+
+  function selectImage(nextId: string): void {
+    setImageId(nextId);
+    const image = availableImages.find((item) => item.id === nextId);
+    if (image?.osFamily !== "windows") return;
+    const memory = parseInteger(memoryInput);
+    if (memory === null || memory < 4) setMemoryInput("8");
+    const disk = parseInteger(diskInput);
+    if (disk === null || disk < 32) setDiskInput("64");
+  }
 
   async function createVm(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -889,7 +904,7 @@ export function VmManager({
         <p className="muted small">
           {loading
             ? "正在读取镜像目录…"
-            : "还没有镜像记录，请刷新 Manifest 获取阶段 0 Linux 基线。"}
+            : "还没有镜像记录，请刷新 Manifest 获取 Linux 基线，或通过自定义 Manifest 加入合法的 Windows Golden Image。"}
         </p>
       ) : (
         <div className="image-grid">
@@ -1042,28 +1057,35 @@ export function VmManager({
             </div>
 
             <div className="field">
-              <label htmlFor="vm-image">Linux 镜像</label>
+              <label htmlFor="vm-image">Guest 镜像</label>
               <select
                 id="vm-image"
                 value={selectedImageId}
-                onChange={(event) => setImageId(event.target.value)}
+                onChange={(event) => selectImage(event.target.value)}
                 disabled={availableImages.length === 0}
                 aria-describedby="vm-image-hint"
               >
                 {availableImages.length === 0 ? (
-                  <option value="">没有 Available 的 Linux 镜像</option>
+                  <option value="">没有 Available 的 Linux 或 Windows 镜像</option>
                 ) : (
                   availableImages.map((image) => (
                     <option key={image.id} value={image.id}>
-                      {image.name} · {image.version} · {image.architecture} ·{" "}
-                      {formatBytes(image.sizeBytes)}
+                      {image.osFamily === "windows" ? "Windows" : "Linux"} · {image.name} ·{" "}
+                      {image.version} · {image.architecture} · {formatBytes(image.sizeBytes)}
                     </option>
                   ))
                 )}
               </select>
               <span className="form-hint" id="vm-image-hint">
-                仅列出已下载且校验通过的 Linux 镜像。
+                仅列出已下载且校验通过的 Linux/Windows 镜像。Windows 镜像必须来自合法 ISO
+                或评估镜像的自建 Golden Image。
               </span>
+              {selectedIsWindows && (
+                <span className="form-hint">
+                  Windows 至少 4 GiB 内存和 32 GiB 磁盘；锁屏、UAC 与安全桌面会暂停 AI
+                  操作并要求人工接管，不绕过系统安全机制。
+                </span>
+              )}
             </div>
 
             <div className="field">
@@ -1089,7 +1111,7 @@ export function VmManager({
               <input
                 id="vm-memory"
                 type="number"
-                min={1}
+                min={minMemoryGb}
                 max={64}
                 step={1}
                 inputMode="numeric"
@@ -1097,7 +1119,7 @@ export function VmManager({
                 onChange={(event) => setMemoryInput(event.target.value)}
                 aria-describedby="vm-resource-guide"
               />
-              <span className="form-hint">1～64 的整数。</span>
+              <span className="form-hint">{minMemoryGb}～64 的整数。</span>
             </div>
 
             <div className="field">
@@ -1105,7 +1127,7 @@ export function VmManager({
               <input
                 id="vm-disk"
                 type="number"
-                min={1}
+                min={minDiskGb}
                 max={2048}
                 step={1}
                 inputMode="numeric"
@@ -1114,12 +1136,12 @@ export function VmManager({
                 aria-describedby="vm-disk-hint"
               />
               <span className="form-hint" id="vm-disk-hint">
-                1～2048 的整数，创建独立的覆盖盘。
+                {minDiskGb}～2048 的整数，创建独立的覆盖盘。
               </span>
             </div>
 
             <div className="field create-seed">
-              <label htmlFor="vm-seed">NoCloud Seed（可选，绝对路径）</label>
+              <label htmlFor="vm-seed">Seed / Provisioning 介质（可选，绝对路径）</label>
               <input
                 id="vm-seed"
                 value={seedInput}
@@ -1129,8 +1151,8 @@ export function VmManager({
                 aria-describedby="vm-seed-hint"
               />
               <span className="form-hint" id="vm-seed-hint">
-                阶段 0 生成的 NoCloud artifact（包含 SSH 公钥与 Guest
-                初始化配置）绝对路径。留空则不注入；不会从模型输入自动生成。
+                Linux 使用阶段 0 生成的 NoCloud artifact；Windows 可使用受控的 token/初始化介质。
+                留空则不注入，不会从模型输入自动生成。
               </span>
               {!seedValid && <span className="error-line small">Seed 必须是绝对路径。</span>}
             </div>
@@ -1210,8 +1232,9 @@ export function VmManager({
                   <div>
                     <h4>{view.vm.name}</h4>
                     <p className="muted small">
-                      Linux · {view.vm.cpuCount} 核 · {formatBytes(view.vm.memoryBytes)} 内存 ·{" "}
-                      {formatBytes(view.vm.diskBytes)} 磁盘
+                      {view.vm.osFamily === "windows" ? "Windows" : "Linux"} · {view.vm.cpuCount} 核
+                      · {formatBytes(view.vm.memoryBytes)} 内存 · {formatBytes(view.vm.diskBytes)}{" "}
+                      磁盘
                     </p>
                   </div>
                   <div className="badge-stack">

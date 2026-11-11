@@ -75,13 +75,17 @@ type VerifyResult struct {
 	Error    string              `json:"error,omitempty"`
 }
 
-// DesktopInfo describes the active guest display.
+// DesktopInfo describes the active guest display and interactive session
+// state. Windows lock/UAC secure desktops are reported instead of bypassed.
 type DesktopInfo struct {
 	DisplayServer string  `json:"displayServer"`
 	Width         int     `json:"width"`
 	Height        int     `json:"height"`
 	DPI           float64 `json:"dpi"`
 	ScaleFactor   float64 `json:"scaleFactor"`
+	SessionState  string  `json:"sessionState,omitempty"`
+	Locked        bool    `json:"locked,omitempty"`
+	SecureDesktop bool    `json:"secureDesktop,omitempty"`
 }
 
 // Capabilities advertises what this guest build can actually do.
@@ -89,10 +93,12 @@ type Capabilities struct {
 	ProtocolVersion string `json:"protocolVersion"`
 	// AgentVersion is the explicit build version injected at link time.
 	AgentVersion  string `json:"agentVersion"`
+	Platform      string `json:"platform"`
 	DisplayServer string `json:"displayServer"`
 	Screenshot    bool   `json:"screenshot"`
 	Input         bool   `json:"input"`
 	UnicodeInput  bool   `json:"unicodeInput"`
+	SessionState  string `json:"sessionState,omitempty"`
 }
 
 // VersionInfo is the host-facing version handshake.
@@ -117,7 +123,9 @@ type Heartbeat struct {
 	RequestedProtocolVersion string `json:"requestedProtocolVersion,omitempty"`
 	CompatibilityError       string `json:"compatibilityError,omitempty"`
 	DesktopAvailable         bool   `json:"desktopAvailable"`
+	Platform                 string `json:"platform"`
 	DisplayServer            string `json:"displayServer,omitempty"`
+	SessionState             string `json:"sessionState,omitempty"`
 	DesktopError             string `json:"desktopError,omitempty"`
 	UptimeSeconds            int64  `json:"uptimeSeconds"`
 	Now                      string `json:"now"`

@@ -4,15 +4,18 @@ import {
   PI_SESSION_FORMAT_VERSION,
   PiWorkerEngine,
   WorkerRpcServer,
+  resolvePiLaunch,
 } from "./index";
 
 async function main(): Promise<void> {
   const tokenFile = required("AGENT_IN_BOX_WORKER_TOKEN_FILE");
   const sessionRoot = path.resolve(required("AGENT_IN_BOX_SESSION_ROOT"));
   const extensionPath = process.env.AGENT_IN_BOX_CUA_EXTENSION?.trim();
+  const piLaunch = resolvePiLaunch();
   const engine = new PiWorkerEngine({
     sessionRoot,
-    piBinary: process.env.AGENT_IN_BOX_PI_BINARY?.trim() || "pi",
+    piBinary: piLaunch.command,
+    argsPrefix: piLaunch.argsPrefix,
     ...(extensionPath ? { extensionPath } : {}),
     engineVersion: process.env.AGENT_IN_BOX_PI_VERSION?.trim() || PI_ENGINE_VERSION,
     sessionVersion: PI_SESSION_FORMAT_VERSION,

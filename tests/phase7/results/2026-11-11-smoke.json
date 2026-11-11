@@ -1,7 +1,7 @@
 {
   "name": "agent-in-box-phase7-smoke",
-  "startedAt": "2026-11-11T15:11:36.359Z",
-  "finishedAt": "2026-11-11T15:11:45.455Z",
+  "startedAt": "2026-11-11T15:50:01.366Z",
+  "finishedAt": "2026-11-11T15:50:10.375Z",
   "status": "passed",
   "checks": [
     {
@@ -11,7 +11,7 @@
     {
       "name": "Guest Worker 会话收到短期 Computer Use Broker 令牌",
       "passed": true,
-      "detail": "worker=ab8aad57-73b1-47ce-8b42-513549d993b9"
+      "detail": "worker=c21e0f57-4bcf-4c39-aa0e-c5ffae168e25"
     },
     {
       "name": "Computer Use Broker 拒绝无令牌请求",

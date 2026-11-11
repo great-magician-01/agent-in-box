@@ -8,6 +8,7 @@ import {
   type CuaPolicyView,
   type SecuritySettings,
 } from "@agent-in-box/protocol";
+import { isGuestVolumeRoot, isSafeAbsoluteGuestPath } from "@agent-in-box/domain";
 import { NotFoundError, PersistenceError } from "../persistence/errors";
 import type { DatabaseSchema } from "../persistence/schema";
 import { nowIso } from "../persistence/time";
@@ -25,7 +26,11 @@ export const DEFAULT_CUA_POLICY: CuaPolicy = {
   approvalTimeoutMs: 2 * 60_000,
   approvalActionTypes: [],
   network: { mode: "broker_only", allowedHosts: [] },
-  fileExchange: { enabled: true, maxBytes: 256 * 1024 * 1024, allowedRoots: ["/home", "/tmp"] },
+  fileExchange: {
+    enabled: true,
+    maxBytes: 256 * 1024 * 1024,
+    allowedRoots: ["/home", "/tmp", "C:\\Users"],
+  },
   credentials: { allowInGuest: false },
 };
 
@@ -276,16 +281,10 @@ function normalizeFileExchange(
     throw new PersistenceError("validation_failed", "fileExchange.allowedRoots 最多 20 项");
   }
   for (const root of allowedRoots) {
-    if (
-      typeof root !== "string" ||
-      !root.startsWith("/") ||
-      root.length > 240 ||
-      root.split("/").includes("..") ||
-      root.includes("\0")
-    ) {
+    if (!isSafeAbsoluteGuestPath(root) || isGuestVolumeRoot(root)) {
       throw new PersistenceError(
         "validation_failed",
-        "fileExchange.allowedRoots 必须是安全绝对路径",
+        "fileExchange.allowedRoots 必须是安全的绝对 POSIX 或 Windows 路径，且不能是文件系统根目录",
       );
     }
   }

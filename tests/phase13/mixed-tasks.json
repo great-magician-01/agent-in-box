@@ -1,0 +1,226 @@
+{
+  "version": 1,
+  "description": "Agent-in-Box phase 13 Linux/Windows mixed acceptance task set. Execute against real Linux and Windows Guests, real WHPX, real Worker/Pi and the configured model before the final release is declared. Model self-reports are never completion conditions.",
+  "defaults": {
+    "hostProfile": "H1",
+    "linuxGuestProfile": "G2",
+    "windowsGuestProfile": "W1",
+    "resourceProfile": "R2",
+    "repeat": 2
+  },
+  "tasks": [
+    {
+      "id": "MX-MIXED-001",
+      "level": "P0",
+      "title": "同一项目绑定 Linux 与 Windows VM 并按目标 OS 路由",
+      "entrypoints": ["electron", "web", "feishu", "qq"],
+      "preconditions": [
+        "项目同时绑定 Linux VM 与 Windows VM",
+        "两台 VM 均为 running/healthy",
+        "Model Broker 持有真实模型凭据"
+      ],
+      "steps": [
+        "通过 Router 创建 Windows 目标任务并指定 Windows VM",
+        "创建 Linux 目标任务并指定 Linux VM",
+        "等待两个任务完成",
+        "从任务看板、项目页和机器人查询同一任务状态"
+      ],
+      "completion": {
+        "mode": "machine",
+        "checks": [
+          "任务路由到声明的 VM 和 OS，未复用另一 OS 的 Worker",
+          "两个 VM 可并行执行",
+          "各端看到一致的 task.vmOsFamily、VM 电源和执行状态",
+          "任务产物 SHA-256 与 Guest 文件一致"
+        ]
+      },
+      "evidence": ["task-trace", "worker-registry", "guest-file-sha256", "board-snapshot"]
+    },
+    {
+      "id": "MX-SERIAL-002",
+      "level": "P0",
+      "title": "多个项目共享同一 Windows VM 时同 VM 串行",
+      "entrypoints": ["electron", "web"],
+      "preconditions": ["两个项目绑定同一 Windows VM", "项目工作目录不同"],
+      "steps": [
+        "项目 A 启动长任务",
+        "项目 B 创建任务",
+        "确认项目 B 排队而不是与 A 并行输入",
+        "A 完成后确认 B 获得执行位"
+      ],
+      "completion": {
+        "mode": "machine",
+        "checks": [
+          "同一 VM 同时最多一个 running/waiting_approval 任务",
+          "跨项目 Worker 未错误复用",
+          "共享 VM 状态污染提示与实际行为一致",
+          "项目目录备份互不覆盖"
+        ]
+      },
+      "evidence": ["task-events", "execution-lease-log", "project-backup"]
+    },
+    {
+      "id": "WX-DESKTOP-003",
+      "level": "P0",
+      "title": "Windows 截图、鼠标、滚动、拖拽与中文输入",
+      "entrypoints": ["electron", "web"],
+      "preconditions": ["Windows Golden Image 已启动并登录", "Guest Agent token 已注入", "noVNC 可用"],
+      "steps": [
+        "观察 Windows 桌面并记录分辨率/DPI",
+        "打开记事本或浏览器输入中英文文本",
+        "执行滚动、拖拽和双击",
+        "重新截图并校验记事本文本"
+      ],
+      "completion": {
+        "mode": "machine",
+        "checks": [
+          "截图尺寸与 /v1/desktop 一致",
+          "中文与 ASCII 输入进入目标应用",
+          "滚动/拖拽/双击产生预期界面变化",
+          "动作 Trace 包含前后截图和显示元数据"
+        ]
+      },
+      "evidence": ["cua-trace", "screenshots", "guest-file-sha256"]
+    },
+    {
+      "id": "WX-UAC-004",
+      "level": "P0",
+      "title": "UAC 安全桌面与锁屏转人工，不绕过系统安全机制",
+      "entrypoints": ["electron", "web"],
+      "preconditions": ["UAC 保持开启", "Windows 锁屏可用", "noVNC 人工接管可用"],
+      "steps": [
+        "触发 UAC 提示",
+        "观察 AI 动作被拒绝并进入 blocked",
+        "人工通过 noVNC 处理 UAC",
+        "重新观察后恢复或取消任务",
+        "锁定 Windows 会话并重复观察"
+      ],
+      "completion": {
+        "mode": "machine",
+        "checks": [
+          "Guest 返回 session_locked/secure_desktop 而非执行输入",
+          "任务进入 blocked，不会盲目重试或跳过安全桌面",
+          "人工处理后需要新的观察才能继续",
+          "Ctrl+Alt+Del 只通过人工控制台处理"
+        ]
+      },
+      "evidence": ["task-trace", "guest-heartbeat", "action-audit", "console-session-log"]
+    },
+    {
+      "id": "WX-DPI-005",
+      "level": "P1",
+      "title": "Windows 多显示器与 DPI 缩放坐标回归",
+      "entrypoints": ["electron", "web"],
+      "preconditions": ["Windows Guest 配置 125%/150% 缩放", "可选第二显示器"],
+      "steps": [
+        "记录 /v1/desktop 的宽高、DPI、scaleFactor",
+        "在缩放桌面点击已知控件",
+        "切换分辨率/缩放后重新观察",
+        "确认旧截图坐标被拒绝"
+      ],
+      "completion": {
+        "mode": "machine",
+        "checks": [
+          "截图坐标与输入坐标在缩放后一致",
+          "分辨率变化强制重新观察",
+          "多显示器使用虚拟桌面坐标，越界输入被拒绝"
+        ]
+      },
+      "evidence": ["cua-trace", "display-metadata", "rejected-actions"]
+    },
+    {
+      "id": "WX-WORKER-006",
+      "level": "P0",
+      "title": "Windows Guest Worker、Pi RPC 与 Model Broker",
+      "entrypoints": ["electron", "web"],
+      "preconditions": ["Windows Guest 已安装固定 Node/Pi/Worker Runtime", "Worker RPC token 已注入"],
+      "steps": [
+        "创建 Windows Worker 并完成握手",
+        "执行含流式文本、图片和工具调用的回合",
+        "执行 Steer、Follow-up、Abort 和 Session Resume",
+        "归档并恢复 Worker"
+      ],
+      "completion": {
+        "mode": "machine",
+        "checks": [
+          "Windows Worker 与 Linux 使用同一 RPC/Engine 协议",
+          "取消后 Pi 进程无残留工具调用",
+          "归档/恢复行为与 Linux 一致",
+          "Windows VM 中不存在上游 Provider Key 或长期机器人 Secret"
+        ]
+      },
+      "evidence": ["worker-rpc-log", "model-requests", "session-archive", "secret-scan"]
+    },
+    {
+      "id": "WX-SNAPSHOT-007",
+      "level": "P1",
+      "title": "Windows VM 停止、休眠、恢复与快照链",
+      "entrypoints": ["electron", "web"],
+      "preconditions": ["Windows VM 有已完成任务与项目绑定"],
+      "steps": [
+        "优雅停止并重新启动",
+        "Suspend/Resume",
+        "创建整机快照",
+        "恢复快照并确认所有受影响项目提示",
+        "宿主重启或 Supervisor 重启后对账"
+      ],
+      "completion": {
+        "mode": "machine",
+        "checks": [
+          "停止/休眠/宿主重启后状态准确",
+          "恢复共享 VM 快照前列出全部受影响项目",
+          "恢复快照不被当作单项目回滚",
+          "Supervisor 重启不产生幽灵 running 任务"
+        ]
+      },
+      "evidence": ["vm-state-transitions", "snapshot-impact", "task-events"]
+    },
+    {
+      "id": "MX-REGRESSION-008",
+      "level": "P0",
+      "title": "Windows 开发后 Linux 全链路无回归",
+      "entrypoints": ["electron", "web", "feishu", "qq"],
+      "preconditions": ["阶段 12 Linux 基线可复现"],
+      "steps": [
+        "重新运行 Linux 全链路任务集",
+        "重新运行阶段 2～12 Smoke",
+        "对比窗口、状态和错误提示",
+        "记录已知差异"
+      ],
+      "completion": {
+        "mode": "machine",
+        "checks": [
+          "Linux P0 能力无回归",
+          "共享 SQLite/Supervisor/Lease 的 Windows 改动未改变 Linux 语义",
+          "失败的基线项有明确 issue 与发布说明",
+          "最终安装包版本、镜像和协议版本已固定"
+        ]
+      },
+      "evidence": ["smoke-results", "linux-full-chain-results", "build-manifest"]
+    },
+    {
+      "id": "WX-CLEAN-009",
+      "level": "P0",
+      "title": "干净 Windows Host 安装、创建项目并执行双 Guest 任务",
+      "entrypoints": ["electron", "web"],
+      "preconditions": ["干净 Windows 11 主机", "无开发工具与 pnpm store", "合法 Windows/Linux 镜像"],
+      "steps": [
+        "安装最终构建",
+        "完成首次启动向导与存储选择",
+        "创建项目并绑定 Linux、Windows VM",
+        "通过两种 Guest 各完成一个任务",
+        "卸载并选择保留数据后重装"
+      ],
+      "completion": {
+        "mode": "machine",
+        "checks": [
+          "安装包不依赖开发机文件",
+          "NSIS 安装、升级、回滚、卸载按文档工作",
+          "两种 Guest 都能完成核心任务",
+          "卸载默认保留 VM、数据库和日志的说明与实际一致"
+        ]
+      },
+      "evidence": ["installer-log", "clean-host-checklist", "task-trace", "uninstall-result"]
+    }
+  ]
+}

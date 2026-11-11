@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -23,15 +24,32 @@ import (
 //	go build -ldflags "-X main.version=<version>"
 var version = "0.1.0"
 
+func defaultGuestRoots() string {
+	roots := make([]string, 0, 2)
+	if runtime.GOOS == "windows" {
+		if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+			roots = append(roots, home)
+		}
+		if temp := strings.TrimSpace(os.TempDir()); temp != "" {
+			roots = append(roots, temp)
+		}
+	} else {
+		roots = append(roots, "/home", "/tmp")
+	}
+	return strings.Join(roots, string(os.PathListSeparator))
+}
+
 func defaultVerifyRoots() string {
 	if value := strings.TrimSpace(os.Getenv("AGENT_IN_BOX_VERIFY_ROOTS")); value != "" {
 		return value
 	}
-	return "/home:/tmp"
+	return defaultGuestRoots()
 }
 
+// splitVerifyRoots uses the host path-list separator: ':' on Linux and ';' on
+// Windows. Splitting Windows paths on ':' would cut off the drive letter.
 func splitVerifyRoots(value string) []string {
-	parts := strings.Split(value, ":")
+	parts := filepath.SplitList(value)
 	roots := make([]string, 0, len(parts))
 	for _, part := range parts {
 		if trimmed := strings.TrimSpace(part); trimmed != "" {
@@ -45,7 +63,7 @@ func defaultWorkspaceRoots() string {
 	if value := strings.TrimSpace(os.Getenv("AGENT_IN_BOX_WORKSPACE_ROOTS")); value != "" {
 		return value
 	}
-	return "/home:/tmp"
+	return defaultGuestRoots()
 }
 
 func defaultUpdateDir() string {
@@ -62,8 +80,8 @@ func main() {
 	actionTimeout := flag.Duration("action-timeout", 30*time.Second, "maximum time allowed for one input action (capped at 30s)")
 	updateDir := flag.String("update-dir", defaultUpdateDir(), "directory for verified staged updates; empty disables update staging")
 	maxUpdateBytes := flag.Int64("update-max-bytes", 128<<20, "largest guest-agent update that may be staged")
-	verifyRoots := flag.String("verify-roots", defaultVerifyRoots(), "colon-separated absolute guest roots allowed for read-only completion file evidence")
-	workspaceRoots := flag.String("workspace-roots", defaultWorkspaceRoots(), "colon-separated absolute guest roots allowed for project workspace archive and restore")
+	verifyRoots := flag.String("verify-roots", defaultVerifyRoots(), "path-list-separated absolute guest roots allowed for read-only completion file evidence (';' on Windows, ':' on Linux)")
+	workspaceRoots := flag.String("workspace-roots", defaultWorkspaceRoots(), "path-list-separated absolute guest roots allowed for project workspace archive and restore")
 	maxWorkspaceArchiveBytes := flag.Int64("workspace-max-bytes", 512<<20, "largest workspace archive accepted or produced (capped at 512 MiB)")
 	flag.Parse()
 

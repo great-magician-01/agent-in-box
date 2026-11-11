@@ -69,6 +69,31 @@ describe("VmService", () => {
         manifest_json: "",
       })
       .execute();
+    await app.db
+      .insertInto("images")
+      .values({
+        id: "windows-v1",
+        name: "Windows test",
+        os_family: "windows",
+        os_version: "11",
+        architecture: "amd64",
+        version: "v1",
+        status: "available",
+        size_bytes: 17,
+        checksum: "b".repeat(64),
+        local_path: baseImage,
+        created_at: now,
+        verified_at: now,
+        source_url: "https://images.example.test/windows.qcow2",
+        file_name: "windows.qcow2",
+        downloaded_bytes: 17,
+        error_code: null,
+        error_message: null,
+        updated_at: now,
+        seed_local_path: null,
+        manifest_json: "",
+      })
+      .execute();
 
     states = new Map();
     createSpec = undefined;
@@ -124,8 +149,18 @@ describe("VmService", () => {
     await rm(directory, { recursive: true, force: true });
   });
 
-  async function createVm(name = "Linux desktop") {
-    return service.create({ name, imageId: "linux-v1", cpuCount: 2, memoryGb: 2, diskGb: 20 });
+  async function createVm(
+    name = "Linux desktop",
+    imageId = "linux-v1",
+    resources: { memoryGb?: number; diskGb?: number } = {},
+  ) {
+    return service.create({
+      name,
+      imageId,
+      cpuCount: 2,
+      memoryGb: resources.memoryGb ?? 2,
+      diskGb: resources.diskGb ?? 20,
+    });
   }
 
   it("creates independent stopped overlays from an Available Linux image", async () => {
@@ -137,6 +172,7 @@ describe("VmService", () => {
     expect(first.vm.guestHealth).toBe("unknown");
     expect(createSpec).toMatchObject({
       name: "Second Linux desktop",
+      osFamily: "linux",
       cpuCount: 2,
       memoryMb: 2048,
       diskSizeGb: 20,
@@ -149,7 +185,30 @@ describe("VmService", () => {
     expect(second.vm.storageRoot).not.toBe(first.vm.storageRoot);
   });
 
-  it("rejects unverified images and Windows guests before calling Supervisor", async () => {
+  it("creates a Windows VM with the Windows provider profile", async () => {
+    const created = await createVm("Windows desktop", "windows-v1", {
+      memoryGb: 8,
+      diskGb: 64,
+    });
+    expect(created.vm.osFamily).toBe("windows");
+    expect(createSpec).toMatchObject({
+      osFamily: "windows",
+      memoryMb: 8192,
+      diskSizeGb: 64,
+    });
+  });
+
+  it("enforces Windows resource minimums before calling Supervisor", async () => {
+    await expect(
+      createVm("Tiny Windows", "windows-v1", { memoryGb: 2, diskGb: 64 }),
+    ).rejects.toMatchObject({ code: "validation_failed" });
+    await expect(
+      createVm("Small Windows", "windows-v1", { memoryGb: 8, diskGb: 20 }),
+    ).rejects.toMatchObject({ code: "validation_failed" });
+    expect(supervisor.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects unverified images before calling Supervisor", async () => {
     await app.db.updateTable("images").set({ status: "failed", verified_at: null }).execute();
     await expect(createVm()).rejects.toMatchObject({ code: "conflict" });
     expect(supervisor.create).not.toHaveBeenCalled();

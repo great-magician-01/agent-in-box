@@ -1,9 +1,9 @@
-//go:build !linux
+//go:build !linux && !windows
 
 package guestagent
 
 import "fmt"
 
 func newDesktop(display string) (Desktop, error) {
-	return nil, fmt.Errorf("guest desktop control is currently implemented for Linux X11 only")
+	return nil, fmt.Errorf("guest desktop control is currently implemented for Linux X11 and Windows only")
 }

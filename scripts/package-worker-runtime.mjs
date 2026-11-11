@@ -22,6 +22,7 @@ try {
   await copyFile(path.join(runtimeRoot, "dist", "index.js"), path.join(dist, "index.js"));
   for (const module of [
     "pi-engine.js",
+    "pi-launch.js",
     "pi-rpc-process.js",
     "worker-rpc-client.js",
     "worker-rpc-server.js",
@@ -46,7 +47,11 @@ try {
   await mkdir(outputDirectory, { recursive: true });
   const archive = path.join(outputDirectory, filename);
   await rm(archive, { force: true });
-  const result = spawnSync("tar", ["-czf", archive, "-C", staging, "."], {
+  // Use a relative archive name with cwd set to the output directory. Windows
+  // tar interprets a drive-letter prefix such as "F:\..." as a remote host in
+  // the -f argument ("Cannot connect to F: resolve failed").
+  const result = spawnSync("tar", ["-czf", filename, "-C", staging.replace(/\\/g, "/"), "."], {
+    cwd: outputDirectory,
     stdio: "inherit",
   });
   if (result.status !== 0) throw new Error("tar failed to create the Worker runtime archive");

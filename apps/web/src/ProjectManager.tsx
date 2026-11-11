@@ -11,6 +11,13 @@ import type {
 import { api } from "./api";
 import { formatDate, VM_POWER_STATE_LABELS } from "./format";
 
+const DEFAULT_LINUX_WORKSPACE = "/home/worker/workspace";
+const DEFAULT_WINDOWS_WORKSPACE = "C:\\Users\\aib-worker\\workspace";
+
+function defaultGuestWorkspace(osFamily: VmInstanceRecord["osFamily"]): string {
+  return osFamily === "windows" ? DEFAULT_WINDOWS_WORKSPACE : DEFAULT_LINUX_WORKSPACE;
+}
+
 interface ProjectManagerProps {
   projects: ProjectView[];
   vms: VmInstanceRecord[];
@@ -32,12 +39,12 @@ export function ProjectManager({
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [workspace, setWorkspace] = useState("/home/worker/workspace");
+  const [workspace, setWorkspace] = useState(DEFAULT_LINUX_WORKSPACE);
   const [editName, setEditName] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editWorkspace, setEditWorkspace] = useState("");
   const [bindVmId, setBindVmId] = useState("");
-  const [bindPath, setBindPath] = useState("/home/worker/workspace");
+  const [bindPath, setBindPath] = useState(DEFAULT_LINUX_WORKSPACE);
   const [bindPrimary, setBindPrimary] = useState(false);
   const [conversationTitle, setConversationTitle] = useState("");
   const [policyView, setPolicyView] = useState<CuaPolicyView | null>(null);
@@ -45,7 +52,7 @@ export function ProjectManager({
   const [policyMinutes, setPolicyMinutes] = useState("15");
   const [policyApproval, setPolicyApproval] = useState<ComputerActionType[]>([]);
   const [policyHosts, setPolicyHosts] = useState("");
-  const [policyRoots, setPolicyRoots] = useState("/home, /tmp");
+  const [policyRoots, setPolicyRoots] = useState("/home, /tmp, C:\\Users");
 
   useEffect(() => {
     if (!detail) return;
@@ -119,6 +126,21 @@ export function ProjectManager({
     : (availableVms[0]?.id ?? "");
   const archived = detail?.project.archivedAt != null;
 
+  function selectBindingVm(nextId: string): void {
+    setBindVmId(nextId);
+    const vm = vms.find((item) => item.id === nextId);
+    setBindPath(defaultGuestWorkspace(vm?.osFamily ?? "linux"));
+  }
+
+  // When the first unbound VM is selected automatically, keep the suggested
+  // directory in sync with its Guest OS without overwriting a custom path.
+  useEffect(() => {
+    const vm = vms.find((item) => item.id === selectedBindVm);
+    if (!vm) return;
+    if (bindPath !== DEFAULT_LINUX_WORKSPACE && bindPath !== DEFAULT_WINDOWS_WORKSPACE) return;
+    setBindPath(defaultGuestWorkspace(vm.osFamily));
+  }, [selectedBindVm, vms, bindPath]);
+
   async function run<T>(action: () => Promise<T>): Promise<T | null> {
     if (busy) return null;
     setBusy(true);
@@ -147,7 +169,7 @@ export function ProjectManager({
     if (created) {
       setName("");
       setDescription("");
-      setWorkspace("/home/worker/workspace");
+      setWorkspace(DEFAULT_LINUX_WORKSPACE);
       onSelect(created.project.id);
     }
   }
@@ -365,13 +387,14 @@ export function ProjectManager({
                     <span>添加 VM</span>
                     <select
                       value={selectedBindVm}
-                      onChange={(event) => setBindVmId(event.target.value)}
+                      onChange={(event) => selectBindingVm(event.target.value)}
                       disabled={!selectedBindVm || busy}
                     >
                       {!selectedBindVm && <option value="">所有 VM 均已绑定</option>}
                       {availableVms.map((vm) => (
                         <option key={vm.id} value={vm.id}>
-                          {vm.name} · {VM_POWER_STATE_LABELS[vm.powerState]}
+                          {vm.osFamily === "windows" ? "Windows" : "Linux"} · {vm.name} ·{" "}
+                          {VM_POWER_STATE_LABELS[vm.powerState]}
                         </option>
                       ))}
                     </select>
@@ -452,6 +475,10 @@ export function ProjectManager({
                         disabled={archived || busy}
                         onChange={(event) => setPolicyRoots(event.target.value)}
                       />
+                      <span className="form-hint">
+                        支持 POSIX（如 /home/worker）和 Windows（如 C:\Users\aib-worker）绝对路径；
+                        不能使用文件系统根目录。
+                      </span>
                     </label>
                   </div>
                   <div className="field">

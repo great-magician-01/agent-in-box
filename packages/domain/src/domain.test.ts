@@ -4,7 +4,10 @@ import {
   assertTaskTransition,
   canTransitionTask,
   canTransitionWorker,
+  guestPathEqualsOrWithin,
+  guestPathsEqual,
   isLeaseActive,
+  isSafeAbsoluteGuestPath,
   normalizeQueuePriority,
   normalizeGuestWorkspacePath,
   validateBindings,
@@ -90,9 +93,37 @@ describe("lease and priority helpers", () => {
 
   it("validates guest workspace paths without treating them as host paths", () => {
     expect(normalizeGuestWorkspacePath("/home/worker/project/")).toBe("/home/worker/project");
-    expect(normalizeGuestWorkspacePath("/")).toBe("/");
-    expect(() => normalizeGuestWorkspacePath("relative/path")).toThrow("absolute POSIX");
+    expect(normalizeGuestWorkspacePath("C:\\Users\\aib-worker\\workspace\\")).toBe(
+      "C:\\Users\\aib-worker\\workspace",
+    );
+    expect(normalizeGuestWorkspacePath("d:/work/project")).toBe("D:\\work\\project");
+    expect(() => normalizeGuestWorkspacePath("relative/path")).toThrow("absolute");
     expect(() => normalizeGuestWorkspacePath("/home/worker/../host")).toThrow("without '..'");
-    expect(() => normalizeGuestWorkspacePath("C:\\host")).toThrow("absolute POSIX");
+    expect(() => normalizeGuestWorkspacePath("C:\\Users\\..\\Windows")).toThrow("without '..'");
+    expect(() => normalizeGuestWorkspacePath("C:\\")).toThrow("filesystem root");
+    expect(() => normalizeGuestWorkspacePath("\\\\server\\share")).toThrow("absolute");
+    expect(() => normalizeGuestWorkspacePath("C:relative")).toThrow("absolute");
+    expect(() => normalizeGuestWorkspacePath("C:\\work:stream")).toThrow("absolute");
+  });
+
+  it("checks guest path containment across POSIX and Windows roots", () => {
+    expect(isSafeAbsoluteGuestPath("/home/worker")).toBe(true);
+    expect(isSafeAbsoluteGuestPath("C:\\Users\\aib-worker")).toBe(true);
+    expect(isSafeAbsoluteGuestPath("//server/share")).toBe(false);
+    expect(isSafeAbsoluteGuestPath("relative")).toBe(false);
+    expect(guestPathEqualsOrWithin("/home/worker/report.txt", "/home/worker")).toBe(true);
+    expect(guestPathEqualsOrWithin("/home/worker2/report.txt", "/home/worker")).toBe(false);
+    expect(guestPathEqualsOrWithin("C:\\Users\\aib-worker\\out.txt", "c:\\users\\AIB-WORKER")).toBe(
+      true,
+    );
+    expect(
+      guestPathEqualsOrWithin("C:\\Users\\aib-worker2\\out.txt", "C:\\Users\\aib-worker"),
+    ).toBe(false);
+    expect(guestPathEqualsOrWithin("C:\\Users\\aib-worker\\out.txt", "/home")).toBe(false);
+    expect(
+      guestPathsEqual("C:\\Users\\AIB-Worker\\workspace\\", "c:/users/aib-worker/workspace"),
+    ).toBe(true);
+    expect(guestPathsEqual("/home/worker/workspace/", "/home/worker/workspace")).toBe(true);
+    expect(guestPathsEqual("/home/worker/Workspace", "/home/worker/workspace")).toBe(false);
   });
 });

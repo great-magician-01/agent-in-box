@@ -139,12 +139,20 @@ interface CapturedResumeContext {
 }
 
 const DEFAULT_SYSTEM_PROMPT = [
-  "You are an Agent-in-Box Worker running inside the Linux VM.",
+  "You are an Agent-in-Box Worker running inside the guest VM.",
   "Operate the guest desktop with the vm_* Computer Use tools when the task requires it.",
   "The current task is provided by the host. Use the guest workspace for files.",
   "Never request or expose host credentials, the VM Supervisor, the Model Broker key, or host filesystem paths.",
+  "If the guest is locked or shows a UAC/secure desktop, stop and report that human takeover is required.",
   "If the task cannot be completed safely, explain the blocker in your final message.",
 ].join("\n");
+
+function systemPromptForOs(base: string, osFamily: string): string {
+  const name = osFamily === "windows" ? "Windows" : "Linux";
+  return base.includes("inside the guest VM")
+    ? base.replace("inside the guest VM", `inside the ${name} VM`)
+    : base;
+}
 
 @Injectable()
 export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
@@ -330,8 +338,8 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
         engineVersion: PI_ENGINE_VERSION,
         sessionVersion: PI_SESSION_FORMAT_VERSION,
         systemPrompt: archive
-          ? summarySystemPrompt(this.systemPrompt, archive.summary)
-          : this.systemPrompt,
+          ? summarySystemPrompt(systemPromptForOs(this.systemPrompt, vm.osFamily), archive.summary)
+          : systemPromptForOs(this.systemPrompt, vm.osFamily),
         capabilities: ["computer_use"],
         provider: model.provider.id,
         model: model.model.id,
@@ -1221,14 +1229,20 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     id: string;
     powerState: string;
     storageRoot: string;
+    osFamily: string;
   }> {
     const row = await this.db
       .selectFrom("vm_instances")
-      .select(["id", "power_state", "storage_root"])
+      .select(["id", "power_state", "storage_root", "os_family"])
       .where("id", "=", vmId)
       .executeTakeFirst();
     if (!row) throw new PersistenceError("not_found", `VM 不存在：${vmId}`);
-    return { id: row.id, powerState: row.power_state, storageRoot: row.storage_root };
+    return {
+      id: row.id,
+      powerState: row.power_state,
+      storageRoot: row.storage_root,
+      osFamily: row.os_family,
+    };
   }
 
   private async resolveConversation(input: WorkerCreateRequest): Promise<string> {

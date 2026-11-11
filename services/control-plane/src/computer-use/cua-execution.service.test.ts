@@ -8,6 +8,7 @@ import { WorkerRepository } from "../persistence/repositories/worker-repository"
 import { LeaseService } from "../persistence/services/lease-service";
 import { TaskService } from "../persistence/services/task-service";
 import { createTestContext, type TestContext } from "../persistence/testing/fixtures";
+import { PersistenceError } from "../persistence/errors";
 import { SettingsService } from "../settings/settings.service";
 import type { GuestService } from "../vms/guest.service";
 import { ApprovalService } from "./approval.service";
@@ -29,8 +30,11 @@ class FakeGuest {
   verifyOk = true;
   failInput = false;
   advanceScreen = true;
+  observeError: Error | null = null;
+  inputError: Error | null = null;
 
   async observe(): Promise<{ desktop: GuestDesktopInfo; screenshot: GuestScreenshot }> {
+    if (this.observeError) throw this.observeError;
     const screenshot: GuestScreenshot = {
       actionId: "guest-shot",
       width: this.display.width,
@@ -49,6 +53,7 @@ class FakeGuest {
     _vmId: string,
     request: { action: unknown; actionId?: string; timeoutMs?: number },
   ): Promise<{ actionId: string; ok: boolean; error?: string }> {
+    if (this.inputError) throw this.inputError;
     this.inputCalls.push(request);
     if (this.failInput)
       return { actionId: request.actionId ?? "guest", ok: false, error: "fake failure" };
@@ -527,6 +532,36 @@ describe("CuaExecutionService", () => {
       .execute();
     expect(await h.cua.expireIfNeeded(h.taskId)).toBe(true);
     expect((await h.tasks.get(h.taskId))?.errorCode).toBe("cua_execution_timeout");
+  });
+
+  it("blocks Windows tasks when a lock screen or secure desktop appears", async () => {
+    const h = harness!;
+    const observation = await h.cua.observe(h.token);
+    h.guest.inputError = new PersistenceError("conflict", "Windows secure desktop is active", {
+      guestCode: "secure_desktop",
+    });
+    await expect(
+      h.cua.act(h.token, {
+        screenshotId: observation.screenshotId,
+        action: { type: "click", point: { x: 20, y: 20 } },
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    expect(await h.tasks.get(h.taskId)).toMatchObject({
+      status: "blocked",
+      errorCode: "guest_session_locked",
+    });
+  });
+
+  it("blocks the task when observation finds a locked session", async () => {
+    const h = harness!;
+    h.guest.observeError = new PersistenceError("conflict", "Windows session is locked", {
+      guestCode: "session_locked",
+    });
+    await expect(h.cua.observe(h.token)).rejects.toMatchObject({ code: "conflict" });
+    expect(await h.tasks.get(h.taskId)).toMatchObject({
+      status: "blocked",
+      errorCode: "guest_session_locked",
+    });
   });
 });
 

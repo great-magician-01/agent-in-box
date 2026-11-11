@@ -95,16 +95,86 @@ export function normalizeQueuePriority(value: number): number {
 }
 
 /** Guest paths are configuration only; they are never host filesystem paths. */
-export function normalizeGuestWorkspacePath(value: string): string {
+export function isWindowsGuestPath(value: string): boolean {
+  return /^[A-Za-z]:[\\/]/.test(value);
+}
+
+function hasParentSegment(value: string): boolean {
+  return value.split(/[\\/]+/).some((segment) => segment === "..");
+}
+
+/**
+ * Accepts both POSIX and Windows drive-absolute guest paths. UNC paths, device
+ * paths, alternate data streams and parent segments are rejected so the same
+ * value can be used by policy checks, workspace backups and the Guest Agent.
+ */
+export function isSafeAbsoluteGuestPath(value: unknown): value is string {
+  if (typeof value !== "string") return false;
   const normalized = value.trim();
   if (
     !normalized ||
     normalized.length > 240 ||
     normalized.includes("\0") ||
-    !normalized.startsWith("/") ||
-    normalized.split("/").includes("..")
+    hasParentSegment(normalized)
   ) {
-    throw new Error("Guest workspace must be an absolute POSIX path without '..'");
+    return false;
   }
-  return normalized.replace(/\/+$/, "") || "/";
+  if (normalized.startsWith("/")) {
+    return !normalized.startsWith("//");
+  }
+  if (!isWindowsGuestPath(normalized)) {
+    return false;
+  }
+  // Reject C:\path:stream and device namespaces after the drive prefix.
+  return !normalized.slice(2).includes(":");
+}
+
+export function isGuestVolumeRoot(value: string): boolean {
+  const normalized = value.trim().replace(/[\\/]+$/, "");
+  return normalized === "/" || normalized === "" || /^[A-Za-z]:$/.test(normalized);
+}
+
+export function normalizeGuestWorkspacePath(value: string): string {
+  const normalized = value.trim();
+  if (!isSafeAbsoluteGuestPath(normalized) || isGuestVolumeRoot(normalized)) {
+    throw new Error(
+      "Guest workspace must be an absolute POSIX or Windows drive path without '..' or a filesystem root",
+    );
+  }
+  if (normalized.startsWith("/")) {
+    return normalized.replace(/\/+$/, "") || "/";
+  }
+  const drive = normalized.slice(0, 2).toUpperCase();
+  const relative = normalized.slice(2).replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/+$/, "");
+  return `${drive}\\${relative.replace(/\//g, "\\")}`;
+}
+
+function normalizeGuestPathForCompare(value: string): { normalized: string; windows: boolean } {
+  const windows = isWindowsGuestPath(value);
+  let normalized = value.trim().replace(/\\/g, "/").replace(/\/+$/, "");
+  if (normalized === "" || /^[A-Za-z]:$/.test(normalized)) normalized = `${normalized}/`;
+  return { normalized: windows ? normalized.toLowerCase() : normalized, windows };
+}
+
+export function guestPathsEqual(left: string, right: string): boolean {
+  if (!isSafeAbsoluteGuestPath(left) || !isSafeAbsoluteGuestPath(right)) return false;
+  const a = normalizeGuestPathForCompare(left);
+  const b = normalizeGuestPathForCompare(right);
+  return a.windows === b.windows && a.normalized === b.normalized;
+}
+
+/**
+ * Case-insensitive containment for Windows paths and case-sensitive
+ * containment for POSIX paths. Mixed path families never match.
+ */
+export function guestPathEqualsOrWithin(candidate: string, root: string): boolean {
+  if (!isSafeAbsoluteGuestPath(candidate) || !isSafeAbsoluteGuestPath(root)) {
+    return false;
+  }
+  const a = normalizeGuestPathForCompare(candidate);
+  const b = normalizeGuestPathForCompare(root);
+  if (a.windows !== b.windows) return false;
+  return (
+    a.normalized === b.normalized || a.normalized.startsWith(`${b.normalized.replace(/\/$/, "")}/`)
+  );
 }

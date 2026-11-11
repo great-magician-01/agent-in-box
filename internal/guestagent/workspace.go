@@ -263,9 +263,9 @@ func (s *Server) resolveWorkspacePath(raw string) (string, error) {
 		return "", errors.New("workspace path is required")
 	}
 	cleaned := filepath.Clean(trimmed)
-	if !filepath.IsAbs(cleaned) || cleaned == string(filepath.Separator) ||
+	if !filepath.IsAbs(cleaned) || filepath.Dir(cleaned) == cleaned ||
 		strings.ContainsRune(cleaned, 0) || pathHasParentSegment(cleaned) {
-		return "", errors.New("workspace must be a cleaned absolute path without '..'")
+		return "", errors.New("workspace must be a cleaned absolute path without '..' or a filesystem root")
 	}
 	resolved := cleaned
 	if _, err := os.Lstat(cleaned); err == nil {
@@ -288,9 +288,12 @@ func (s *Server) resolveWorkspacePath(raw string) (string, error) {
 		if err != nil {
 			continue
 		}
-		if resolved == realRoot || strings.HasPrefix(resolved, realRoot+string(filepath.Separator)) {
-			return resolved, nil
+		relative, err := filepath.Rel(realRoot, resolved)
+		if err != nil || filepath.IsAbs(relative) || relative == ".." ||
+			strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			continue
 		}
+		return resolved, nil
 	}
 	return "", errors.New("workspace path is outside the configured workspace roots")
 }

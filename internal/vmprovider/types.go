@@ -6,6 +6,8 @@ package vmprovider
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 )
 
@@ -31,11 +33,22 @@ var (
 	ErrQmpUnavailable = errors.New("qmp is unavailable")
 )
 
+const (
+	// OsLinux is the default guest family for metadata written before phase 13.
+	OsLinux = "linux"
+	// OsWindows selects SATA/IDE storage, an e1000 NIC and standard VGA so a
+	// stock Windows installation can boot without virtio guest drivers.
+	OsWindows = "windows"
+)
+
 // VmSpec is the fixed, validated input for QEMU VM creation. The JSON tags are
 // the HTTP boundary contract; encoding/json still accepts the historical
 // upper-case field names from vm.json case-insensitively.
 type VmSpec struct {
-	ID             string `json:"id"`
+	ID string `json:"id"`
+	// OsFamily is "linux" or "windows". An empty value means Linux so VM
+	// metadata created before phase 13 remains readable.
+	OsFamily       string `json:"osFamily,omitempty"`
 	Name           string `json:"name"`
 	BaseImagePath  string `json:"baseImagePath"`
 	SeedImagePath  string `json:"seedImagePath"`
@@ -48,6 +61,18 @@ type VmSpec struct {
 	GuestHostPort  int    `json:"guestHostPort"`
 	WorkerHostPort int    `json:"workerHostPort"`
 	VNCDisplay     int    `json:"vncDisplay"`
+}
+
+// EffectiveOsFamily normalizes the guest family and rejects unknown values.
+func (s VmSpec) EffectiveOsFamily() (string, error) {
+	switch strings.ToLower(strings.TrimSpace(s.OsFamily)) {
+	case "", OsLinux:
+		return OsLinux, nil
+	case OsWindows:
+		return OsWindows, nil
+	default:
+		return "", fmt.Errorf("%w: unsupported osFamily %q", ErrInvalidSpec, s.OsFamily)
+	}
 }
 
 // VmState is persisted in the VM directory and reconciled with the real

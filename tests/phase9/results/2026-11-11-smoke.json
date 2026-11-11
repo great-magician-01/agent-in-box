@@ -1,7 +1,7 @@
 {
   "phase": 9,
-  "startedAt": "2026-11-11T15:12:34.676Z",
-  "finishedAt": "2026-11-11T15:12:37.046Z",
+  "startedAt": "2026-11-11T16:00:38.850Z",
+  "finishedAt": "2026-11-11T16:00:41.189Z",
   "passed": true,
   "checks": [
     {
@@ -12,17 +12,17 @@
     {
       "name": "资源不足时任务进入等待资源并发出通知",
       "passed": true,
-      "detail": "task=76a4c4c7-fdf6-440a-823c-e57a6df9a2a0"
+      "detail": "task=259346bd-7a65-4efa-9735-25f794281158"
     },
     {
       "name": "预算足够后自动启动 VM 并将等待任务放回队列",
       "passed": true,
-      "detail": "vm=1143a1a6-81bb-400a-8ac3-3ec315861512"
+      "detail": "vm=0790e1ca-bd6b-4135-9ff4-23a71da0840d"
     },
     {
       "name": "看板、VM 页和项目页共享同一任务与 VM 状态",
       "passed": true,
-      "detail": "task=22035507-98e5-4fe2-8e7b-19c8df1c82f4"
+      "detail": "task=0e322a16-a8e7-4003-a918-60edb24d2e49"
     },
     {
       "name": "共享 VM 快照恢复前列出全部受影响项目并要求确认",

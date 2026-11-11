@@ -25,7 +25,8 @@
 - **阶段 10 完成（代码、自动化与真实本地进程 Smoke）**：Bot Connector 持久 Ingress（事件与去重同事务落库后再 ACK）、连接/心跳/重连状态、平台身份一次性绑定码、用户/群白名单与管理员/只读权限；飞书官方 SDK WebSocket + Open API、QQ Bot API v2 WebSocket Intents + REST；机器人自然语言进入同一主 Router 会话，任务/审批/Router 回复回传来源会话，敏感操作二次确认。`pnpm smoke:phase10` 13 项通过。真实飞书/QQ 应用凭据、平台权限矩阵和长时连接仍未验收，详见 [`tests/phase10/summary.md`](../tests/phase10/summary.md)。
 - **阶段 11 完成（代码、自动化与真实本地进程 Smoke）**：本机访问密钥登录、SQLite 会话、HttpOnly/SameSite Cookie、CSRF、Host/Origin/Sec-Fetch-Site 校验、无宽松 CORS 和事件 WebSocket 认证；总览/主会话/项目/任务/VM/归档/通知/设置导航、统一通知中心、文件拖放投递、响应式与基础可访问性；Electron 托盘、原生通知、开机启动、后台服务启动/停止、更新检查/下载/SHA-256/数据库与资源备份/回滚，以及 NSIS 卸载默认保留数据的显式选择。`pnpm smoke:phase11` 12 项通过，阶段 2～10 Smoke 重跑通过。真实浏览器/Electron 人工 UI、Windows NSIS 干净安装、真实更新源和远程 Relay 仍未验收，详见 [`tests/phase11/summary.md`](../tests/phase11/summary.md)。
 - **阶段 12 完成（本机自动化与本机验收资产）**：迁移前 SQLite 备份/完整性校验/SHA-256/保留策略、本机诊断报告、日志与诊断凭据脱敏、未知异常堆栈隔离、状态/Worker/项目查询索引；`pnpm smoke:phase12` 使用真实控制平面/SQLite/静态 Web 构建、崩溃对账、2001 条任务历史和备份恢复完成 12 项检查。新增 Linux 全链路验收任务集、安全测试矩阵、用户指南、机器人配置指南、存储指南和隐私说明。真实 QEMU/WHPX、真实 Pi/模型任务集、真实飞书/QQ、Windows NSIS 干净安装、真实更新源、Guest 网络边界和长时稳定性仍是发布门槛，详见 [`tests/phase12/summary.md`](../tests/phase12/summary.md)。
-- **下一步**：进入阶段 13（Windows VM 可行性、开发与本期最终联合验收）。阶段 12 的真实发布门槛仍需在阶段 13 前或并行关闭；阶段 13 入口条件见 13 章说明。
+- **阶段 13 完成（Windows VM 代码、本机自动化与真实环境资产）**：Windows Provider profile（IDE/e1000/std VGA/xHCI）、Windows 原生 Guest Agent（GDI 截图、SendInput、Unicode、DPI、锁屏/UAC 人工接管）、Windows 路径与策略、Windows Pi 启动适配、混合 OS 项目/看板/Router 调度、合法 ISO 的 Golden Image 与 Guest Runtime 安装资产；`pnpm smoke:phase13` 使用真实 Guest Agent 进程、真实控制平面/SQLite 和混合 VM Fixture 完成 12 项检查。真实 Windows ISO 安装、WHPX Windows Guest、截图/输入/UAC/DPI、真实 Pi/模型、NSIS 干净安装与长时 soak 仍是发布门槛，详见 [`tests/phase13/summary.md`](../tests/phase13/summary.md)。
+- **下一步**：关闭阶段 13 的真实 Windows 环境发布门槛，重跑阶段 12 Linux 全链路确认无回归，并形成本期最终签名构建与联合发布记录。阶段 12 的真实发布门槛仍需与阶段 13 真实环境验收并行关闭。
 
 1. 先验证 Hypervisor、镜像、Pi Computer Use 和模型代理等高风险链路，再大规模开发 UI。
 2. 每个阶段形成可运行、可测试的纵向能力，避免一次性生成大量空模块。

@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -148,7 +149,8 @@ func normalizeVerifyRoots(roots []string) []string {
 			continue
 		}
 		cleaned := filepath.Clean(root)
-		if !filepath.IsAbs(cleaned) || cleaned == "/" {
+		// Reject filesystem roots ("/" or "C:\") as evidence roots.
+		if !filepath.IsAbs(cleaned) || filepath.Dir(cleaned) == cleaned {
 			continue
 		}
 		normalized = append(normalized, cleaned)
@@ -211,14 +213,16 @@ func (s *Server) capabilities(w http.ResponseWriter, r *http.Request) {
 	capabilities := Capabilities{
 		ProtocolVersion: protocolVersion,
 		AgentVersion:    s.agentVersion,
+		Platform:        runtime.GOOS,
 	}
 	if s.desktop != nil {
 		info, err := s.desktop.Info(r.Context())
 		if err == nil {
 			capabilities.DisplayServer = info.DisplayServer
+			capabilities.SessionState = info.SessionState
 			capabilities.Screenshot = true
 			capabilities.Input = true
-			capabilities.UnicodeInput = info.DisplayServer == "x11"
+			capabilities.UnicodeInput = info.DisplayServer == "x11" || info.DisplayServer == "windows"
 		}
 	}
 	writeJSON(w, http.StatusOK, capabilities)
@@ -240,6 +244,7 @@ func (s *Server) heartbeat(w http.ResponseWriter, r *http.Request) {
 		RequestedProtocolVersion: requested,
 		CompatibilityError:       compatibilityError,
 		DesktopAvailable:         s.desktop != nil,
+		Platform:                 runtime.GOOS,
 		UptimeSeconds:            int64(now.Sub(s.startedAt) / time.Second),
 		Now:                      now.UTC().Format(time.RFC3339Nano),
 	}
@@ -258,6 +263,12 @@ func (s *Server) heartbeat(w http.ResponseWriter, r *http.Request) {
 			heartbeat.DesktopError = err.Error()
 		} else {
 			heartbeat.DisplayServer = info.DisplayServer
+			heartbeat.SessionState = info.SessionState
+			switch info.SessionState {
+			case "locked", "secure_desktop":
+				heartbeat.Status = "degraded"
+				heartbeat.DesktopError = "交互桌面被锁屏或安全桌面占用；需要人工接管"
+			}
 		}
 	}
 	writeJSON(w, http.StatusOK, heartbeat)
@@ -283,6 +294,10 @@ func (s *Server) screenshot(w http.ResponseWriter, r *http.Request) {
 	}
 	capture, err := s.desktop.Screenshot(r.Context())
 	if err != nil {
+		if status, code := sessionBoundaryError(err); status != 0 {
+			writeError(w, status, code, err.Error())
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "screenshot_failed", err.Error())
 		return
 	}
@@ -374,6 +389,15 @@ func (s *Server) input(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if inputError != nil {
+		if status, code := sessionBoundaryError(inputError); status != 0 {
+			writeJSON(w, status, ActionResult{
+				ActionID:  actionID,
+				OK:        false,
+				Error:     inputError.Error(),
+				ErrorCode: code,
+			})
+			return
+		}
 		writeJSON(w, http.StatusBadRequest, ActionResult{
 			ActionID:  actionID,
 			OK:        false,
@@ -397,6 +421,20 @@ func (s *Server) effectiveActionTimeout(requested time.Duration) time.Duration {
 		timeout = defaultActionTimeout
 	}
 	return timeout
+}
+
+// sessionBoundaryError maps an unavailable interactive session to a stable
+// error code. The host treats these as human-takeover conditions and does not
+// retry the desktop action.
+func sessionBoundaryError(err error) (int, string) {
+	switch {
+	case errors.Is(err, ErrSessionLocked):
+		return http.StatusLocked, "session_locked"
+	case errors.Is(err, ErrSecureDesktop):
+		return http.StatusLocked, "secure_desktop"
+	default:
+		return 0, ""
+	}
 }
 
 func newActionID() string {

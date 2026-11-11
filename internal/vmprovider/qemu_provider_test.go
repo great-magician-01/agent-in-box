@@ -33,6 +33,74 @@ func TestValidateSpec(t *testing.T) {
 	}
 }
 
+func TestValidateSpecOsFamily(t *testing.T) {
+	base := filepath.Join(t.TempDir(), "base.qcow2")
+	if err := os.WriteFile(base, []byte("base"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, family := range []string{"", "linux", "Linux", "windows", "Windows"} {
+		spec := VmSpec{
+			ID: "vm-1", OsFamily: family, BaseImagePath: base,
+			CPUCount: 2, MemoryMB: 2048, DiskSizeGB: 20,
+		}
+		if err := validateSpec(spec); err != nil {
+			t.Fatalf("osFamily %q rejected: %v", family, err)
+		}
+	}
+	spec := VmSpec{
+		ID: "vm-1", OsFamily: "plan9", BaseImagePath: base,
+		CPUCount: 2, MemoryMB: 2048, DiskSizeGB: 20,
+	}
+	if err := validateSpec(spec); err == nil {
+		t.Fatal("unsupported osFamily was accepted")
+	}
+}
+
+func TestBuildQemuArgsWindows(t *testing.T) {
+	metadata := &vmMetadata{
+		Spec: VmSpec{
+			ID:             "vm-win",
+			OsFamily:       OsWindows,
+			BaseImagePath:  "/images/windows.qcow2",
+			SeedImagePath:  "/vms/vm-win/provision.iso",
+			CPUCount:       4,
+			MemoryMB:       8192,
+			Desktop:        true,
+			QMPPort:        14446,
+			SSHHostPort:    10024,
+			GuestHostPort:  17621,
+			WorkerHostPort: 17622,
+			VNCDisplay:     2,
+		},
+		State: VmState{DiskPath: "/vms/vm-win/disk.qcow2"},
+	}
+	qemuArgs, err := buildQemuArgs(metadata, "whpx", "qemu64")
+	if err != nil {
+		t.Fatalf("build args: %v", err)
+	}
+	args := strings.Join(qemuArgs, " ")
+	for _, expected := range []string{
+		"file=/vms/vm-win/disk.qcow2,if=ide,format=qcow2",
+		"provision.iso,if=ide,media=cdrom,format=raw,readonly=on",
+		"-cpu qemu64,+ssse3,+sse4.1,+sse4.2,+popcnt",
+		"-vga std",
+		"qemu-xhci",
+		"usb-tablet",
+		"e1000,netdev=n0",
+		"hostfwd=tcp:127.0.0.1:17621-:7611",
+		"hostfwd=tcp:127.0.0.1:17622-:7612",
+	} {
+		if !strings.Contains(args, expected) {
+			t.Fatalf("Windows args missing %q: %s", expected, args)
+		}
+	}
+	for _, unexpected := range []string{"virtio-gpu-pci", "virtio-tablet-pci", "virtio-net-pci", "if=virtio"} {
+		if strings.Contains(args, unexpected) {
+			t.Fatalf("Windows args must not contain %q: %s", unexpected, args)
+		}
+	}
+}
+
 func TestBuildQemuArgs(t *testing.T) {
 	metadata := &vmMetadata{
 		Spec: VmSpec{

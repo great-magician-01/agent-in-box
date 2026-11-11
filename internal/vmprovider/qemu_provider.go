@@ -93,6 +93,9 @@ func NewQemuProvider(config QemuConfig) (*QemuProvider, error) {
 var vmIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
 
 func validateSpec(spec VmSpec) error {
+	if _, err := spec.EffectiveOsFamily(); err != nil {
+		return err
+	}
 	if !vmIDPattern.MatchString(spec.ID) {
 		return fmt.Errorf("%w: invalid vm id %q", ErrInvalidSpec, spec.ID)
 	}
@@ -271,8 +274,22 @@ func buildQemuArgs(metadata *vmMetadata, accelerator string, cpuModel string) ([
 	return buildQemuArgsWithResolver(metadata, accelerator, cpuModel, resolveQemuPathDefault)
 }
 
+// windowsCPUModel keeps the WHPX-verified qemu64 baseline but exposes the
+// instruction sets required by current Windows client/server images. Modern
+// Windows refuses to boot without SSE4.2/POPCNT on x86-64.
+func windowsCPUModel(cpuModel string) string {
+	if strings.Contains(cpuModel, ",") {
+		return cpuModel
+	}
+	return cpuModel + ",+ssse3,+sse4.1,+sse4.2,+popcnt"
+}
+
 func buildQemuArgsWithResolver(metadata *vmMetadata, accelerator string, cpuModel string, resolve func(string) (string, error)) ([]string, error) {
 	spec := metadata.Spec
+	osFamily, err := spec.EffectiveOsFamily()
+	if err != nil {
+		return nil, err
+	}
 	state := metadata.State
 	vmDir := filepath.Dir(state.DiskPath)
 	diskPath, err := resolve(state.DiskPath)
@@ -287,27 +304,51 @@ func buildQemuArgsWithResolver(metadata *vmMetadata, accelerator string, cpuMode
 	if err != nil {
 		return nil, fmt.Errorf("pid file: %w", err)
 	}
+	guestCPU := cpuModel
+	if osFamily == OsWindows {
+		guestCPU = windowsCPUModel(cpuModel)
+	}
 	args := []string{
 		"-name", "agent-in-box-" + spec.ID,
 		"-machine", "q35",
 		"-accel", accelerator + ",kernel-irqchip=off",
-		"-cpu", cpuModel,
+		"-cpu", guestCPU,
 		"-smp", strconv.Itoa(spec.CPUCount),
 		"-m", strconv.Itoa(spec.MemoryMB),
-		"-drive", "file=" + diskPath + ",if=virtio,format=qcow2",
 	}
-	if spec.SeedImagePath != "" {
-		seedPath, err := resolve(spec.SeedImagePath)
-		if err != nil {
-			return nil, fmt.Errorf("seed image: %w", err)
+	if osFamily == OsWindows {
+		// A stock Windows image has no virtio-block driver. IDE/AHCI works on
+		// q35 out of the box and keeps the golden image free of third-party
+		// drivers; e1000 is also inbox on supported Windows versions.
+		args = append(args, "-drive", "file="+diskPath+",if=ide,format=qcow2")
+		if spec.SeedImagePath != "" {
+			seedPath, err := resolve(spec.SeedImagePath)
+			if err != nil {
+				return nil, fmt.Errorf("seed image: %w", err)
+			}
+			args = append(args, "-drive", "file="+seedPath+",if=ide,media=cdrom,format=raw,readonly=on")
 		}
-		args = append(args, "-drive", "file="+seedPath+",if=virtio,media=cdrom,format=raw,readonly=on")
-	}
-	if spec.Desktop {
-		// Remove the default std VGA: leaving it beside virtio-gpu made Xorg
-		// abort with "Cannot run in framebuffer mode". virtio-tablet provides
-		// absolute pointer input without requiring a q35 USB controller.
-		args = append(args, "-vga", "none", "-device", "virtio-gpu-pci", "-device", "virtio-tablet-pci")
+		if spec.Desktop {
+			// Standard VGA uses the Windows inbox display driver. xHCI plus
+			// usb-tablet provides absolute pointer input for noVNC and the
+			// Windows Guest Agent without requiring virtio input drivers.
+			args = append(args, "-vga", "std", "-device", "qemu-xhci", "-device", "usb-tablet")
+		}
+	} else {
+		args = append(args, "-drive", "file="+diskPath+",if=virtio,format=qcow2")
+		if spec.SeedImagePath != "" {
+			seedPath, err := resolve(spec.SeedImagePath)
+			if err != nil {
+				return nil, fmt.Errorf("seed image: %w", err)
+			}
+			args = append(args, "-drive", "file="+seedPath+",if=virtio,media=cdrom,format=raw,readonly=on")
+		}
+		if spec.Desktop {
+			// Remove the default std VGA: leaving it beside virtio-gpu made Xorg
+			// abort with "Cannot run in framebuffer mode". virtio-tablet provides
+			// absolute pointer input without requiring a q35 USB controller.
+			args = append(args, "-vga", "none", "-device", "virtio-gpu-pci", "-device", "virtio-tablet-pci")
+		}
 	}
 	network := fmt.Sprintf("user,id=n0,hostfwd=tcp:127.0.0.1:%d-:22", spec.SSHHostPort)
 	if spec.GuestHostPort > 0 {
@@ -316,9 +357,13 @@ func buildQemuArgsWithResolver(metadata *vmMetadata, accelerator string, cpuMode
 	if spec.WorkerHostPort > 0 {
 		network += fmt.Sprintf(",hostfwd=tcp:127.0.0.1:%d-:7612", spec.WorkerHostPort)
 	}
+	args = append(args, "-netdev", network)
+	if osFamily == OsWindows {
+		args = append(args, "-device", "e1000,netdev=n0")
+	} else {
+		args = append(args, "-device", "virtio-net-pci,netdev=n0")
+	}
 	args = append(args,
-		"-netdev", network,
-		"-device", "virtio-net-pci,netdev=n0",
 		"-display", "none",
 		"-vnc", fmt.Sprintf("127.0.0.1:%d", spec.VNCDisplay),
 		"-serial", "file:"+consolePath,

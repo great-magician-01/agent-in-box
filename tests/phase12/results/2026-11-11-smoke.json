@@ -1,7 +1,7 @@
 {
   "phase": 12,
-  "startedAt": "2026-11-11T15:19:50.671Z",
-  "finishedAt": "2026-11-11T15:19:56.089Z",
+  "startedAt": "2026-11-11T15:51:02.190Z",
+  "finishedAt": "2026-11-11T15:51:07.640Z",
   "checks": [
     {
       "name": "控制平面启动并保持回环监听",
@@ -36,7 +36,7 @@
     {
       "name": "迁移前数据库备份先通过完整性校验并写入 SHA-256，再应用迁移",
       "passed": true,
-      "detail": "pre-migration-2026-11-11T15-19-54-322Z-011_phase12_hardening-to-011_phase12_hardening.sqlite"
+      "detail": "pre-migration-2026-11-11T15-51-05-875Z-011_phase12_hardening-to-011_phase12_hardening.sqlite"
     },
     {
       "name": "控制平面崩溃后运行任务安全失败、Worker 对账、Lease 释放且不盲目重放",
@@ -45,7 +45,7 @@
     {
       "name": "大任务历史看板与 Router 消息查询保持可用",
       "passed": true,
-      "detail": "2001 tasks / 64 ms; router 4 ms"
+      "detail": "2001 tasks / 46 ms; router 4 ms"
     },
     {
       "name": "停止控制平面后用迁移前备份重建主数据库，模拟备份恢复流程",
@@ -59,11 +59,11 @@
   ],
   "metrics": {
     "boardTaskCount": 2001,
-    "boardMs": 64,
+    "boardMs": 46,
     "routerMessages": 100,
     "routerMessagesMs": 4,
     "restoredTaskCount": 2001,
-    "preMigrationBackup": "pre-migration-2026-11-11T15-19-54-322Z-011_phase12_hardening-to-011_phase12_hardening.sqlite"
+    "preMigrationBackup": "pre-migration-2026-11-11T15-51-05-875Z-011_phase12_hardening-to-011_phase12_hardening.sqlite"
   },
   "boundaries": {
     "realQemuWxpx": false,

@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "allowedHosts": ["images.internal.example"],
+  "images": [
+    {
+      "id": "windows-server-2022-eval-2026-11-11-amd64",
+      "name": "Windows Server 2022 Evaluation（内部 Golden Image）",
+      "osFamily": "windows",
+      "osVersion": "2022",
+      "architecture": "amd64",
+      "version": "2026-11-11",
+      "url": "https://images.internal.example/windows-server-2022-eval-2026-11-11-amd64.qcow2",
+      "fileName": "windows-server-2022-eval-2026-11-11-amd64.qcow2",
+      "sizeBytes": 0,
+      "sha256": "REPLACE_WITH_64_LOWERCASE_HEX_SHA256"
+    }
+  ]
+}

@@ -129,20 +129,28 @@ export class VmService {
       throw new PersistenceError("validation_failed", "必须选择一个镜像");
     }
     const image = await this.images.get(input.imageId);
-    if (image.osFamily !== "linux") {
-      throw new PersistenceError("validation_failed", "阶段 3 仅允许创建 Linux Guest");
-    }
     if (image.status !== "available" || !image.localPath || !image.verifiedAt) {
       throw new PersistenceError("conflict", "只有校验通过的 Available 镜像可以创建 VM");
+    }
+    if (image.osFamily === "windows") {
+      if (input.memoryGb < 4) {
+        throw new PersistenceError("validation_failed", "Windows Guest 至少需要 4 GiB 内存");
+      }
+      if (input.diskGb < 32) {
+        throw new PersistenceError("validation_failed", "Windows Guest 至少需要 32 GiB 磁盘");
+      }
     }
     const seedImagePath = input.seedImagePath?.trim() || image.seedLocalPath || "";
     if (seedImagePath) {
       if (!path.isAbsolute(seedImagePath)) {
-        throw new PersistenceError("validation_failed", "NoCloud Seed 必须使用绝对路径");
+        throw new PersistenceError("validation_failed", "Seed/Provisioning 介质必须使用绝对路径");
       }
       const info = await lstat(seedImagePath).catch(() => null);
       if (!info?.isFile() || info.isSymbolicLink()) {
-        throw new PersistenceError("validation_failed", "NoCloud Seed 必须是可读取的普通文件");
+        throw new PersistenceError(
+          "validation_failed",
+          "Seed/Provisioning 介质必须是可读取的普通文件",
+        );
       }
     }
 
@@ -150,6 +158,7 @@ export class VmService {
     const runtime = await this.supervisor.create({
       id,
       name,
+      osFamily: image.osFamily,
       baseImagePath: image.localPath,
       seedImagePath,
       cpuCount: input.cpuCount,
@@ -169,7 +178,7 @@ export class VmService {
         id,
         name,
         image_id: image.id,
-        os_family: "linux",
+        os_family: image.osFamily,
         cpu_count: input.cpuCount,
         memory_bytes: input.memoryGb * GIB,
         disk_bytes: input.diskGb * GIB,

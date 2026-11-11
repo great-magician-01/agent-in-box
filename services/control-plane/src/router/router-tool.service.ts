@@ -109,6 +109,7 @@ export class RouterToolService {
             "project_vm_bindings.guest_workspace_path as guest_workspace_path",
             "project_vm_bindings.is_primary as is_primary",
             "vm_instances.name as vm_name",
+            "vm_instances.os_family as os_family",
             "vm_instances.power_state as power_state",
           ])
           .orderBy("project_vm_bindings.created_at", "asc")
@@ -124,6 +125,7 @@ export class RouterToolService {
             .map((binding) => ({
               vmId: binding.vm_id,
               vmName: binding.vm_name,
+              osFamily: binding.os_family,
               powerState: binding.power_state,
               guestWorkspacePath: binding.guest_workspace_path,
               isPrimary: binding.is_primary === 1,
@@ -259,11 +261,19 @@ export class RouterToolService {
         for (const task of board.tasks) {
           byStatus[task.status] = (byStatus[task.status] ?? 0) + 1;
         }
+        const queueByVm = groupCounts(
+          board.tasks.filter((task) => task.status === "queued").map((task) => task.vmId),
+        );
         return {
           countsByStatus: byStatus,
-          queueByVm: groupCounts(
-            board.tasks.filter((task) => task.status === "queued").map((task) => task.vmId),
-          ),
+          queueByVm,
+          vms: board.vms.map((vm) => ({
+            vmId: vm.id,
+            name: vm.name,
+            osFamily: vm.osFamily,
+            powerState: vm.powerState,
+            queuedTaskCount: queueByVm[vm.id] ?? 0,
+          })),
           activeWorkerCount: board.workers.filter((worker) =>
             ["starting", "running", "idle"].includes(worker.status),
           ).length,

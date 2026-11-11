@@ -17,7 +17,7 @@ jobs:
   check:
     name: Check and smoke (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
@@ -53,8 +53,18 @@ jobs:
       - name: Package self-contained control plane
         run: pnpm package:control-plane
 
+      - name: Package Guest Agent binaries
+        run: pnpm package:guest-agent
+
       - name: Vet Go packages
         run: go vet ./...
+
+      - name: Cross-compile the Windows Guest Agent
+        run: go build ./...
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: "0"
 
       - name: Race-test stateful Go packages
         run: go test -race ./internal/vmprovider ./internal/vmsupervisor ./internal/imagedownload ./internal/guestagent
@@ -111,6 +121,36 @@ jobs:
         run: pnpm smoke:phase12
         env:
           AGENT_IN_BOX_PHASE12_RESULT: ${{ runner.temp }}/phase12-smoke.json
+
+      - name: Run phase 13 Windows Guest and mixed-OS smoke test
+        run: pnpm smoke:phase13
+        env:
+          AGENT_IN_BOX_PHASE13_RESULT: ${{ runner.temp }}/phase13-smoke.json
+
+      - name: Validate Windows Guest PowerShell and unattend assets
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Get-ChildItem images/windows -Recurse -Filter *.ps1 | ForEach-Object {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              $_.FullName, [ref]$tokens, [ref]$errors
+            ) | Out-Null
+            if ($errors.Count -gt 0) {
+              throw "$($_.FullName): $($errors[0].Message)"
+            }
+          }
+          [xml](Get-Content -Raw images/windows/unattend/autounattend.xml.example) | Out-Null
+
+      - name: Upload phase 13 smoke result
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase13-smoke-${{ runner.os }}
+          path: ${{ runner.temp }}/phase13-smoke.json
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Upload phase 12 smoke result
         if: success()

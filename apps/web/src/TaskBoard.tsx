@@ -689,7 +689,8 @@ function TaskRow({
           {projectName}
         </button>
         <span className="muted small">
-          {vmName} · {VM_POWER_STATE_LABELS[task.vmPowerState]}
+          {vmName} · {task.vmOsFamily === "windows" ? "Windows" : "Linux"} ·{" "}
+          {VM_POWER_STATE_LABELS[task.vmPowerState]}
         </span>
         {task.status === "waiting_resources" && (
           <span className="pill warn small">等待宿主资源</span>

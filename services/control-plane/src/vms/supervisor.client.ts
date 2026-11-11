@@ -17,6 +17,7 @@ export interface SupervisorOptions {
 export interface SupervisorCreateSpec {
   id: string;
   name: string;
+  osFamily: "linux" | "windows";
   baseImagePath: string;
   seedImagePath: string;
   cpuCount: number;

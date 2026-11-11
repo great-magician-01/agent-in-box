@@ -827,11 +827,13 @@ export class TaskService {
       const powerByVm = new Map(
         vms.map((vm) => [vm.id, vm.power_state as TaskBoardItem["vmPowerState"]]),
       );
+      const osByVm = new Map(vms.map((vm) => [vm.id, vm.os_family as TaskBoardItem["vmOsFamily"]]));
       const items: TaskBoardItem[] = tasks.map((task) => ({
         ...task,
         dependencyIds: dependenciesByTask.get(task.id) ?? [],
         queuePosition: task.status === "queued" ? (queuePositions.get(task.id) ?? null) : null,
         vmPowerState: powerByVm.get(task.vmId) ?? "error",
+        vmOsFamily: osByVm.get(task.vmId) ?? "linux",
       }));
       return {
         tasks: items,

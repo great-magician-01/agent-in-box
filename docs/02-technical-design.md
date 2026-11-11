@@ -856,7 +856,18 @@ Router / Task Outbox → Notification Mapper → Durable Outbound Queue → Plat
 
 Windows Guest 的延迟验证只改变开发顺序，不改变其属于本期最终交付范围的决定。
 
-### 18.3 2026-11-10 Linux 先行阶段冻结结果
+### 18.3 2026-11-11 Windows VM 代码冻结结果
+
+阶段 13 在 Linux 全链路代码验收后完成了 Windows Guest 的代码与自动化主链路，真实环境门槛见 [`tests/phase13/summary.md`](../tests/phase13/summary.md)：
+
+1. **镜像来源**：只接受用户提供的合法 Windows ISO/评估镜像/内部 Golden Image；仓库不下载、不分发、不绕过激活。构建脚本输出 `.qcow2`、SHA-256 和 build manifest，内部 HTTPS 地址通过 `AGENT_IN_BOX_IMAGE_MANIFEST` 发布。
+2. **Provider profile**：Windows Guest 固定 `-machine q35 -cpu qemu64,+ssse3,+sse4.1,+sse4.2,+popcnt -drive if=ide -device e1000 -vga std -device qemu-xhci -device usb-tablet`，不依赖 stock Windows 缺少的 VirtIO block/net/GPU/input 驱动。Linux profile 不变。当前 profile 面向 Windows 10/Server 评估镜像；Windows 11 需要额外的 OVMF + `swtpm` TPM 2.0 方案，未在本期 profile 中宣称支持。
+3. **Guest Agent**：Windows 原生 GDI 屏幕采集与 `SendInput`；Per-Monitor V2 DPI；虚拟桌面坐标；`KEYEVENTF_UNICODE` 中文/emoji；Toolhelp32 只读进程证据。锁屏/安全桌面返回稳定 `session_locked`/`secure_desktop`，控制平面把任务置为 `blocked` 并要求人工接管。
+4. **Worker**：Windows 使用同一 Worker RPC/Pi Engine 协议；由于 npm `.cmd` shim 不能直接 `spawn`，通过 `AGENT_IN_BOX_PI_SCRIPT` 由 Node 启动 Pi CLI。长期 Provider/机器人 Secret 不进入 Windows 镜像。
+5. **调度**：项目可同时绑定 Linux/Windows VM；任务看板和 Router 摘要包含 `osFamily`；同 VM 串行、跨 VM 并行由统一 TaskService/Lease 保证。
+6. **未冻结项**：真实 Windows ISO 自动安装、WHPX Windows Guest 稳定性、截图/输入/UAC/DPI 实测、Windows Pi/模型任务成功率、每 VM token 自动注入介质、NSIS 干净安装和长时 soak。这些未完成前不得宣称 Windows VM 已通过本期最终验收。
+
+### 18.4 2026-11-10 Linux 先行阶段冻结结果
 
 基于 `tests/phase0/summary.md` 中的真实验证记录，以下选型进入产品化基线：
 

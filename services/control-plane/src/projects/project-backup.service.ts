@@ -16,6 +16,7 @@ import {
   type RestoreProjectBackupRequest,
   type VmProjectReference,
 } from "@agent-in-box/protocol";
+import { guestPathsEqual } from "@agent-in-box/domain";
 import { NotFoundError, PersistenceError } from "../persistence/errors";
 import { DatabaseService } from "../persistence/database.service";
 import { OutboxRepository } from "../persistence/repositories/outbox-repository";
@@ -285,7 +286,7 @@ export class ProjectBackupService {
         });
         continue;
       }
-      if (current.guest_workspace_path !== binding.guest_workspace_path) {
+      if (!guestPathsEqual(current.guest_workspace_path, binding.guest_workspace_path)) {
         conflicts.push({
           bindingId: binding.binding_id,
           vmId: binding.vm_id,
@@ -295,7 +296,7 @@ export class ProjectBackupService {
           affectedProjects: [],
         });
       }
-      const shared = await this.db
+      const bindings = await this.db
         .selectFrom("project_vm_bindings")
         .innerJoin("projects", "projects.id", "project_vm_bindings.project_id")
         .select([
@@ -303,11 +304,14 @@ export class ProjectBackupService {
           "projects.name as name",
           "projects.archived_at as archived_at",
           "project_vm_bindings.is_primary as is_primary",
+          "project_vm_bindings.guest_workspace_path as guest_workspace_path",
         ])
         .where("project_vm_bindings.vm_id", "=", binding.vm_id)
-        .where("project_vm_bindings.guest_workspace_path", "=", binding.guest_workspace_path)
         .where("project_vm_bindings.project_id", "!=", projectId)
         .execute();
+      const shared = bindings.filter((candidate) =>
+        guestPathsEqual(candidate.guest_workspace_path, binding.guest_workspace_path),
+      );
       if (shared.length > 0) {
         conflicts.push({
           bindingId: binding.binding_id,

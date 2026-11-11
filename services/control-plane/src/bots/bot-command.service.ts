@@ -479,7 +479,10 @@ export class BotCommandService {
     return projects
       .map((view, index) => {
         const bindings = view.bindings
-          .map((binding) => `${binding.vm.name}(${binding.binding.guestWorkspacePath})`)
+          .map(
+            (binding) =>
+              `${binding.vm.name}[${binding.vm.osFamily === "windows" ? "Windows" : "Linux"}](${binding.binding.guestWorkspacePath})`,
+          )
           .join("、");
         return `${index + 1}. ${view.project.name} — ${view.project.id}\n   绑定：${bindings || "无"}`;
       })

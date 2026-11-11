@@ -1,5 +1,12 @@
 import { createHash } from "node:crypto";
-import { createReadStream, existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import {
+  createReadStream,
+  existsSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 
 const root = path.resolve(import.meta.dirname, "..");
@@ -36,6 +43,15 @@ function collect() {
     if (!existsSync(target)) continue;
     for (const entry of readdirSync(target, { withFileTypes: true })) {
       if (entry.isFile() && /\.(tar\.gz|zip)$/i.test(entry.name)) {
+        add(path.join(target, entry.name));
+      }
+    }
+  }
+  for (const directory of ["guest-agent"]) {
+    const target = path.join(release, directory);
+    if (!existsSync(target)) continue;
+    for (const entry of readdirSync(target, { withFileTypes: true })) {
+      if (entry.isFile() && /^guest-agent-(linux|windows)-/.test(entry.name)) {
         add(path.join(target, entry.name));
       }
     }

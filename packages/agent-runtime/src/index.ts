@@ -119,6 +119,7 @@ export function createWorkerEngineRegistry(): WorkerEngineRegistry {
 
 export { PiRpcProcess } from "./pi-rpc-process";
 export { PiWorkerEngine, type PiWorkerEngineOptions } from "./pi-engine";
+export { assertPiLaunchSupported, resolvePiLaunch, type PiLaunchCommand } from "./pi-launch";
 export {
   WorkerRpcClient,
   WorkerRpcError,

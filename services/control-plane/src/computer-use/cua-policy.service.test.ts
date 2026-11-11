@@ -38,7 +38,7 @@ describe("CuaPolicyService", () => {
       maxSteps: 12,
       approvalActionTypes: ["type_text", "drag"],
       network: { allowedHosts: ["models.example.test"] },
-      fileExchange: { allowedRoots: ["/home/worker/workspace"] },
+      fileExchange: { allowedRoots: ["/home/worker/workspace", "C:\\Users\\aib-worker"] },
     });
     expect(updated.source).toBe("project");
     expect(updated.policy).toMatchObject({
@@ -47,7 +47,7 @@ describe("CuaPolicyService", () => {
       network: { mode: "broker_only", allowedHosts: ["models.example.test"] },
       fileExchange: {
         enabled: true,
-        allowedRoots: ["/home/worker/workspace"],
+        allowedRoots: ["/home/worker/workspace", "C:\\Users\\aib-worker"],
       },
     });
 
@@ -89,6 +89,14 @@ describe("CuaPolicyService", () => {
     ).rejects.toMatchObject({ code: "validation_failed" });
     await expect(
       policies.update(ctx.projectId, { fileExchange: { allowedRoots: ["/home/../etc"] } }),
+    ).rejects.toMatchObject({ code: "validation_failed" });
+    await expect(
+      policies.update(ctx.projectId, {
+        fileExchange: { allowedRoots: ["C:\\Users\\..\\Windows"] },
+      }),
+    ).rejects.toMatchObject({ code: "validation_failed" });
+    await expect(
+      policies.update(ctx.projectId, { fileExchange: { allowedRoots: ["C:\\"] } }),
     ).rejects.toMatchObject({ code: "validation_failed" });
     await expect(
       policies.update(ctx.projectId, { approvalActionTypes: ["open_firewall" as never] }),

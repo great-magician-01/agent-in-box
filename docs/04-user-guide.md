@@ -1,7 +1,7 @@
-# Agent-in-Box 用户指南（Linux 全链路版本）
+# Agent-in-Box 用户指南（Linux / Windows）
 
-> 适用版本：0.1.0 阶段 12 Linux 全链路验收构建  
-> 本文描述当前已实现的行为。真实镜像、模型和机器人凭据仍需按验收环境配置。
+> 适用版本：0.1.0 阶段 13 代码与自动化构建
+> 本文描述当前已实现的行为。真实 Linux/Windows 镜像、模型和机器人凭据仍需按验收环境配置。
 
 ## 1. 安装与首次启动
 
@@ -23,13 +23,14 @@
 
 更完整的存储操作见 [存储指南](06-storage-guide.md)。
 
-## 3. 下载镜像与创建 Linux VM
+## 3. 下载镜像与创建 Linux/Windows VM
 
-1. 打开“虚拟机”，在镜像列表选择 Linux 镜像并下载。
+1. 打开“虚拟机”，在镜像列表选择 Linux 或 Windows 镜像并下载。默认 Manifest 只包含 Linux 基线；Windows Golden Image 需要通过 `AGENT_IN_BOX_IMAGE_MANIFEST` 指向内部 Manifest。
 2. 下载显示进度、速度和错误；中断后重新开始会从已下载部分续传，校验不通过的文件不会启用。
-3. 创建 VM 时选择 CPU、内存、磁盘和存储位置。宿主资源不足时会提示；`when_needed` 策略会在有任务时自动启动或恢复 VM。
+3. 创建 VM 时选择 CPU、内存、磁盘和存储位置。Windows Guest 至少需要 4 GiB 内存和 32 GiB 磁盘；宿主资源不足时会提示；`when_needed` 策略会在有任务时自动启动或恢复 VM。
 4. VM 电源状态与 Guest 健康状态分开显示。`running` 不等于 Guest Agent 一定健康。
 5. 停止 VM 使用 ACPI 优雅关机；强制停止可能丢失 Guest 内未保存数据。
+6. Windows 镜像必须来自合法 ISO、评估镜像或内部 Golden Image；构建和 token 注入步骤见 [Windows Guest 资产](../images/windows/README.md)。
 
 ## 4. 项目、任务与 Worker
 
@@ -52,6 +53,7 @@
 - VM 页面的 noVNC 控制台使用回环一次性票据；票据失效后不能继续输入。
 - AI 或人工同一时间只能有一个 Execution Lease。人工接管后，AI 需要重新获得 Lease 才能继续。
 - 控制台输入会经过 Lease 校验，不能绕过 Worker/任务边界直接操作。
+- Windows Guest 出现锁屏或 UAC 安全桌面时，AI 截图/输入会被拒绝并返回 `session_locked`/`secure_desktop`，任务进入 `blocked`。请在控制台人工解锁或处理 UAC，然后让 Worker 重新观察；`Ctrl+Alt+Del` 只能人工操作。
 
 ## 7. 通知、Web 与桌面
 
@@ -89,6 +91,8 @@
 ## 11. 当前明确限制
 
 - Linux 全链路验收构建仍需要真实 QEMU/WHPX、Golden Image、Pi/模型和机器人凭据验收。
-- Windows Guest、Wayland、远程 Relay、真实更新源和长时稳定性不属于本构建已验证范围。
+- Windows Guest 代码与自动化主链路已落地，但真实 Windows ISO 安装、WHPX Windows Guest、截图/中文输入/UAC/锁屏/DPI、真实 Pi/模型和每 VM token 自动注入仍待验收。
+- Windows 锁屏、UAC 安全桌面、Ctrl+Alt+Del 和激活界面必须人工处理；产品不绕过这些系统安全机制。
+- Wayland、远程 Relay、真实更新源和长时稳定性不属于本构建已验证范围。
 - 同一 VM 上的多个项目不构成强安全隔离；共享桌面/软件/系统状态会互相影响。
 - Computer Use 的成功率取决于模型、镜像和任务；不要用模型自述代替结果验证。

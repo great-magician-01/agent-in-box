@@ -6,9 +6,11 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { smokeAuthHeaders } from "./smoke-auth.mjs";
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const temporary = await mkdtemp(path.join(os.tmpdir(), "agent-in-box-phase3-"));
+const configDirectory = path.join(temporary, "config");
 const children: ChildProcess[] = [];
 let imageServer: Server | undefined;
 let controlPlane: ChildProcess | undefined;
@@ -85,6 +87,7 @@ async function api<T>(port: number, route: string, init: RequestInit = {}): Prom
     signal: init.signal ?? AbortSignal.timeout(15_000),
     headers: {
       accept: "application/json",
+      ...smokeAuthHeaders(configDirectory),
       ...(init.body ? { "content-type": "application/json" } : {}),
       ...init.headers,
     },
@@ -215,7 +218,7 @@ try {
 
   const environment = {
     ...process.env,
-    AGENT_IN_BOX_CONFIG_DIR: path.join(temporary, "config"),
+    AGENT_IN_BOX_CONFIG_DIR: configDirectory,
     AGENT_IN_BOX_DATA_ROOT: temporary,
     CONTROL_PLANE_PORT: String(controlPlanePort),
     AGENT_IN_BOX_IMAGE_MANIFEST: manifestPath,
@@ -250,7 +253,9 @@ try {
   ) {
     throw new Error(`Unexpected initial catalog: ${JSON.stringify(catalog)}`);
   }
-  const events = await fetch(`http://127.0.0.1:${controlPlanePort}/api/v1/images/events`);
+  const events = await fetch(`http://127.0.0.1:${controlPlanePort}/api/v1/images/events`, {
+    headers: smokeAuthHeaders(configDirectory),
+  });
   const eventReader = events.body?.getReader();
   if (!eventReader) throw new Error("SSE response has no body");
   console.log("STAGE: downloading base image");

@@ -20,6 +20,13 @@ import type {
   ImageDownloadEvent,
   ImageRecord,
   ImageStatus,
+  InboxFileListResponse,
+  InboxFileRecord,
+  LocalAuthLoginRequest,
+  LocalAuthRotateResult,
+  LocalAuthSessionView,
+  NotificationCenterView,
+  NotificationRecord,
   OnboardingCompleteRequest,
   OnboardingCompleteResult,
   OnboardingState,
@@ -103,14 +110,31 @@ export class ApiRequestError extends Error {
   }
 }
 
+export const UNAUTHORIZED_EVENT = "agent-in-box:unauthorized";
+const CSRF_HEADER = "x-agent-in-box-csrf";
+const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+let csrfToken: string | null = null;
+
+export function setCsrfToken(value: string | null): void {
+  csrfToken = value;
+}
+
 async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("accept", "application/json");
-  if (init.body !== undefined && !headers.has("content-type")) {
+  if (init.body !== undefined && !headers.has("content-type") && !(init.body instanceof Blob)) {
     headers.set("content-type", "application/json");
   }
+  const method = (init.method ?? "GET").toUpperCase();
+  if (UNSAFE_METHODS.has(method) && csrfToken && !headers.has(CSRF_HEADER)) {
+    headers.set(CSRF_HEADER, csrfToken);
+  }
 
-  const response = await fetch(path, { ...init, headers });
+  const response = await fetch(path, { ...init, headers, credentials: "same-origin" });
+  if (response.status === 401 && !path.endsWith("/auth/login")) {
+    csrfToken = null;
+    window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
+  }
   if (!response.ok) {
     let parsed: unknown = null;
     try {
@@ -280,6 +304,75 @@ function taskBoardQuery(filters: TaskListFilters): string {
 
 export const api = {
   health: fetchHealth,
+  authSession: async () => {
+    const result = await apiFetch<LocalAuthSessionView>("/api/v1/auth/session");
+    setCsrfToken(result.csrfToken);
+    return result;
+  },
+  login: async (body: LocalAuthLoginRequest) => {
+    const result = await apiFetch<LocalAuthSessionView>("/api/v1/auth/login", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    setCsrfToken(result.csrfToken);
+    return result;
+  },
+  logout: async () => {
+    const result = await apiFetch<LocalAuthSessionView>("/api/v1/auth/logout", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    setCsrfToken(null);
+    return result;
+  },
+  rotateAccessKey: () =>
+    apiFetch<LocalAuthRotateResult>("/api/v1/auth/rotate", {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+  notifications: (input: { limit?: number; unreadOnly?: boolean } = {}) => {
+    const query = new URLSearchParams();
+    if (input.limit !== undefined) query.set("limit", String(input.limit));
+    if (input.unreadOnly) query.set("unreadOnly", "true");
+    const encoded = query.toString();
+    return apiFetch<NotificationCenterView>(`/api/v1/notifications${encoded ? `?${encoded}` : ""}`);
+  },
+  markNotificationRead: (id: string) =>
+    apiFetch<NotificationRecord>(`/api/v1/notifications/${encodeURIComponent(id)}/read`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+  dismissNotification: (id: string) =>
+    apiFetch<NotificationRecord>(`/api/v1/notifications/${encodeURIComponent(id)}/dismiss`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+  markAllNotificationsRead: () =>
+    apiFetch<NotificationCenterView>("/api/v1/notifications/read-all", {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+  inbox: (projectId?: string | null) =>
+    apiFetch<InboxFileListResponse>(
+      `/api/v1/inbox${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ""}`,
+    ),
+  uploadInboxFile: (file: File, projectId?: string | null) =>
+    apiFetch<InboxFileRecord>(
+      `/api/v1/inbox/upload${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ""}`,
+      {
+        method: "POST",
+        headers: {
+          "x-file-name": encodeURIComponent(file.name),
+          ...(projectId ? { "x-project-id": projectId } : {}),
+          "content-type": file.type || "application/octet-stream",
+        },
+        body: file,
+      },
+    ),
+  deleteInboxFile: (id: string) =>
+    apiFetch<InboxFileRecord>(`/api/v1/inbox/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
   runtime: () => apiFetch<RuntimeInfo>("/api/v1/runtime"),
   onboarding: () => apiFetch<OnboardingState>("/api/v1/onboarding"),
   completeOnboarding: (body: OnboardingCompleteRequest) =>

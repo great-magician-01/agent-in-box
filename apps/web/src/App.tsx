@@ -1,21 +1,46 @@
 /* eslint-disable react-hooks/set-state-in-effect -- initial data fetch effects intentionally set loading/result state */
 import { useCallback, useEffect, useState } from "react";
 import type {
+  DesktopAppStatus,
+  DesktopBridge,
   HealthResponse,
+  LocalAuthSessionView,
   OnboardingCompleteResult,
   OnboardingState,
   RuntimeInfo,
 } from "@agent-in-box/protocol";
-import { api } from "./api";
+import { api, UNAUTHORIZED_EVENT } from "./api";
 import { Dashboard, type RestartRequest } from "./Dashboard";
 import { useDesktop } from "./desktop";
 import { CONTROL_PLANE_STATE_LABELS, formatDate } from "./format";
+import { LoginScreen } from "./LoginScreen";
+import { NotificationCenter, useNotificationCenter } from "./NotificationCenter";
 import { OnboardingWizard } from "./OnboardingWizard";
 
-type Connection =
-  | { state: "loading" }
-  | { state: "online"; health: HealthResponse }
-  | { state: "offline"; message: string };
+export type AppView =
+  "overview" | "session" | "projects" | "tasks" | "vms" | "archive" | "notifications" | "settings";
+
+const NAV_ITEMS: Array<{ id: AppView; label: string; hint: string }> = [
+  { id: "overview", label: "总览", hint: "本机状态与快速摘要" },
+  { id: "session", label: "主会话", hint: "Router 主会话与结构化工具" },
+  { id: "projects", label: "项目", hint: "项目、绑定、Worker 与文件投递" },
+  { id: "tasks", label: "任务", hint: "持久任务看板与 Trace" },
+  { id: "vms", label: "虚拟机", hint: "VM 生命周期、控制台与快照" },
+  { id: "archive", label: "归档", hint: "Worker 归档注册表与搜索" },
+  { id: "notifications", label: "通知", hint: "统一通知中心" },
+  { id: "settings", label: "设置", hint: "存储、资源、桌面与更新" },
+];
+
+function viewFromHash(): AppView {
+  const value = window.location.hash.replace(/^#\/?/, "").split("?")[0];
+  return NAV_ITEMS.some((item) => item.id === value) ? (value as AppView) : "overview";
+}
+
+type AuthState =
+  | { state: "checking" }
+  | { state: "anonymous"; info: LocalAuthSessionView }
+  | { state: "authenticated"; info: LocalAuthSessionView }
+  | { state: "unreachable"; message: string };
 
 interface PendingRestart {
   targetRoot: string;
@@ -25,12 +50,201 @@ interface PendingRestart {
 
 export function App(): React.JSX.Element {
   const { bridge, status: desktopStatus, error: desktopError } = useDesktop();
-  const [connection, setConnection] = useState<Connection>({ state: "loading" });
+  const [auth, setAuth] = useState<AuthState>({ state: "checking" });
+
+  const checkAuth = useCallback(async (): Promise<void> => {
+    try {
+      const info = await api.authSession();
+      setAuth(
+        info.state === "authenticated"
+          ? { state: "authenticated", info }
+          : { state: "anonymous", info },
+      );
+    } catch (error) {
+      setAuth({
+        state: "unreachable",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    void checkAuth();
+  }, [checkAuth]);
+
+  useEffect(() => {
+    function onUnauthorized(): void {
+      if (bridge) {
+        // A rotated/revoked session in Electron is recovered by reloading:
+        // Main re-reads the current access key and injects a new cookie.
+        try {
+          const last = Number(window.sessionStorage.getItem("agent-in-box:auth-reload") ?? 0);
+          if (Date.now() - last > 10_000) {
+            window.sessionStorage.setItem("agent-in-box:auth-reload", String(Date.now()));
+            window.location.reload();
+            return;
+          }
+        } catch {
+          // Fall through to the normal unlock screen.
+        }
+      }
+      void api
+        .authSession()
+        .then((info) => setAuth({ state: "anonymous", info }))
+        .catch(() => setAuth({ state: "checking" }));
+    }
+    window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+  }, [bridge]);
+
+  useEffect(() => {
+    if (auth.state !== "unreachable") return;
+    const timer = window.setInterval(() => void checkAuth(), 3000);
+    return () => window.clearInterval(timer);
+  }, [auth.state, checkAuth]);
+
+  useEffect(() => {
+    if (auth.state !== "anonymous" || !bridge) return;
+    let cancelled = false;
+    let attempts = 0;
+    const timer = window.setInterval(() => {
+      attempts += 1;
+      if (attempts > 60) {
+        window.clearInterval(timer);
+        return;
+      }
+      void api
+        .authSession()
+        .then((info) => {
+          if (!cancelled && info.state === "authenticated") {
+            setAuth({ state: "authenticated", info });
+            window.clearInterval(timer);
+          }
+        })
+        .catch(() => undefined);
+    }, 1500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [auth.state, bridge]);
+
+  if (auth.state === "checking") {
+    return (
+      <main className="shell" id="main-content">
+        <section className="panel loading-panel" aria-live="polite">
+          <span className="spinner" aria-hidden="true" />
+          <div>
+            <h1>正在验证本机会话</h1>
+            <p className="muted">正在检查本地控制平面和本机访问密钥。</p>
+          </div>
+        </section>
+      </main>
+    );
+  }
+
+  if (auth.state === "unreachable") {
+    return (
+      <main className="shell" id="main-content">
+        <header className="header">
+          <div>
+            <p className="eyebrow">LOCAL-FIRST AI COMPUTER</p>
+            <h1>Agent-in-Box</h1>
+          </div>
+        </header>
+        <section className="notice offline-panel" role="alert">
+          <strong>无法连接本地控制平面。</strong>
+          <span>{auth.message}</span>
+          <button type="button" className="primary" onClick={() => void checkAuth()}>
+            重试连接
+          </button>
+        </section>
+      </main>
+    );
+  }
+
+  if (auth.state === "anonymous") {
+    return (
+      <main className="shell login-shell" id="main-content">
+        <header className="header">
+          <div>
+            <p className="eyebrow">LOCAL-FIRST AI COMPUTER</p>
+            <h1>Agent-in-Box</h1>
+            <p className="subtitle">
+              本地控制平面已在线。解锁后才能读取项目、任务、VM、机器人和设置。
+            </p>
+          </div>
+        </header>
+        <LoginScreen
+          info={auth.info}
+          bridge={bridge}
+          onAuthenticated={(info) => setAuth({ state: "authenticated", info })}
+        />
+      </main>
+    );
+  }
+
+  return (
+    <AuthenticatedApp
+      bridge={bridge}
+      desktopStatus={desktopStatus}
+      desktopError={desktopError}
+      authInfo={auth.info}
+      onLogout={() => setAuth({ state: "anonymous", info: auth.info })}
+    />
+  );
+}
+
+interface AuthenticatedAppProps {
+  bridge: DesktopBridge | null;
+  desktopStatus: DesktopAppStatus | null;
+  desktopError: string | null;
+  authInfo: LocalAuthSessionView;
+  onLogout(): void;
+}
+
+function AuthenticatedApp({
+  bridge,
+  desktopStatus,
+  desktopError,
+  authInfo,
+  onLogout,
+}: AuthenticatedAppProps): React.JSX.Element {
+  const [connection, setConnection] = useState<
+    | { state: "loading" }
+    | { state: "online"; health: HealthResponse }
+    | { state: "offline"; message: string }
+  >({ state: "loading" });
   const [onboarding, setOnboarding] = useState<OnboardingState | null>(null);
   const [runtime, setRuntime] = useState<RuntimeInfo | null>(null);
   const [pendingRestart, setPendingRestart] = useState<PendingRestart | null>(null);
   const [restartBusy, setRestartBusy] = useState(false);
   const [restartMessage, setRestartMessage] = useState<string | null>(null);
+  const [view, setView] = useState<AppView>(() => viewFromHash());
+  const [logoutBusy, setLogoutBusy] = useState(false);
+
+  const navigate = useCallback((next: string) => {
+    const target = NAV_ITEMS.some((item) => item.id === next) ? (next as AppView) : "overview";
+    setView(target);
+    if (window.location.hash !== `#/${target}`) {
+      window.history.replaceState(null, "", `#/${target}`);
+    }
+  }, []);
+
+  useEffect(() => {
+    function onHashChange(): void {
+      setView(viewFromHash());
+    }
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+
+  useEffect(() => {
+    if (!bridge) return;
+    return bridge.app.onNavigate((next) => navigate(next));
+  }, [bridge, navigate]);
+
+  const notifications = useNotificationCenter(bridge, () => navigate("notifications"));
 
   const refresh = useCallback(async (silent = false): Promise<HealthResponse | null> => {
     if (!silent) {
@@ -163,6 +377,17 @@ export function App(): React.JSX.Element {
     await refresh(true);
   }
 
+  async function lockUi(): Promise<void> {
+    if (logoutBusy) return;
+    setLogoutBusy(true);
+    try {
+      await api.logout();
+      onLogout();
+    } finally {
+      setLogoutBusy(false);
+    }
+  }
+
   const online = connection.state === "online" ? connection.health : null;
   const statusLabel =
     connection.state === "online"
@@ -172,15 +397,21 @@ export function App(): React.JSX.Element {
         : "正在连接本地服务";
 
   return (
-    <main className="shell">
-      <header className="header">
-        <div>
+    <div className="shell app-shell">
+      <a
+        className="skip-link"
+        href="#main-content"
+        onClick={(event) => {
+          event.preventDefault();
+          document.getElementById("main-content")?.focus();
+        }}
+      >
+        跳到主要内容
+      </a>
+      <header className="header app-header">
+        <div className="brand">
           <p className="eyebrow">LOCAL-FIRST AI COMPUTER</p>
           <h1>Agent-in-Box</h1>
-          <p className="subtitle">
-            在 Windows 宿主机上运行 Linux VM，由本机 Worker 接管受控桌面任务。
-            首次启动先完成环境、存储和安全设置。
-          </p>
           <div className="top-badges">
             <span className="badge">{bridge ? "桌面应用" : "本地 Web"}</span>
             {desktopStatus && (
@@ -188,16 +419,58 @@ export function App(): React.JSX.Element {
                 Electron {desktopStatus.version} · {desktopStatus.platform}/{desktopStatus.arch}
               </span>
             )}
-            {!bridge && <span className="badge">模型凭据需在桌面应用中配置</span>}
+            <span className="badge">{authInfo.user?.displayName ?? "本机管理员"}</span>
           </div>
         </div>
-        <div
-          className={`status ${connection.state === "online" ? "online" : connection.state === "offline" ? "offline" : "checking"}`}
-        >
-          <span className="dot" />
-          {statusLabel}
+        <div className="header-actions">
+          <button
+            type="button"
+            className="bell-button"
+            aria-label={`通知中心，${notifications.view?.unreadCount ?? 0} 条未读`}
+            onClick={() => navigate("notifications")}
+          >
+            <span aria-hidden="true">🔔</span>
+            {(notifications.view?.unreadCount ?? 0) > 0 && (
+              <span className="bell-count">{notifications.view?.unreadCount}</span>
+            )}
+          </button>
+          <div
+            className={`status ${connection.state === "online" ? "online" : connection.state === "offline" ? "offline" : "checking"}`}
+            role="status"
+          >
+            <span className="dot" aria-hidden="true" />
+            {statusLabel}
+          </div>
+          {!bridge && (
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => void lockUi()}
+              disabled={logoutBusy}
+            >
+              {logoutBusy ? "正在锁定…" : "锁定界面"}
+            </button>
+          )}
         </div>
       </header>
+
+      <nav className="app-nav" aria-label="主导航">
+        {NAV_ITEMS.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            className={view === item.id ? "nav-item active" : "nav-item"}
+            aria-current={view === item.id ? "page" : undefined}
+            title={item.hint}
+            onClick={() => navigate(item.id)}
+          >
+            {item.label}
+            {item.id === "notifications" && (notifications.view?.unreadCount ?? 0) > 0 && (
+              <span className="nav-count">{notifications.view?.unreadCount}</span>
+            )}
+          </button>
+        ))}
+      </nav>
 
       {desktopStatus && (
         <div className="desktop-strip">
@@ -213,114 +486,129 @@ export function App(): React.JSX.Element {
       )}
       {desktopError && <div className="notice">桌面桥接异常：{desktopError}</div>}
 
-      {pendingRestart ? (
-        <section className="panel restart-panel">
-          <p className="eyebrow">RESTART REQUIRED</p>
-          <h2>需要重启本地服务</h2>
-          <p className="muted">{pendingRestart.reason}</p>
-          <p className="muted small">新数据目录：{pendingRestart.targetRoot}</p>
-          {restartMessage && <div className="notice">{restartMessage}</div>}
-          <div className="action-row">
-            {bridge ? (
-              <button
-                type="button"
-                className="primary"
-                disabled={restartBusy}
-                onClick={() => void retryControlPlane()}
-              >
-                {restartBusy ? "正在重启…" : "重新启动本地服务"}
-              </button>
-            ) : (
-              <>
-                <code className="command">pnpm --filter @agent-in-box/control-plane start</code>
-                <button type="button" className="primary" onClick={() => void retryControlPlane()}>
-                  我已重启，重新连接
+      <main id="main-content" tabIndex={-1} className="app-main">
+        {pendingRestart ? (
+          <section className="panel restart-panel">
+            <p className="eyebrow">RESTART REQUIRED</p>
+            <h2>需要重启本地服务</h2>
+            <p className="muted">{pendingRestart.reason}</p>
+            <p className="muted small">新数据目录：{pendingRestart.targetRoot}</p>
+            {restartMessage && <div className="notice">{restartMessage}</div>}
+            <div className="action-row">
+              {bridge ? (
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={restartBusy}
+                  onClick={() => void retryControlPlane()}
+                >
+                  {restartBusy ? "正在重启…" : "重新启动本地服务"}
                 </button>
-              </>
-            )}
-            {bridge && (
-              <button
-                type="button"
-                className="secondary"
-                onClick={() => void bridge.app.openLogs()}
-              >
-                打开日志目录
-              </button>
-            )}
-          </div>
-          <p className="muted small">
-            重启后如果仍停留在本页，请检查控制平面日志；旧数据目录会保留，不会自动删除。
-          </p>
-        </section>
-      ) : connection.state === "offline" ? (
-        <section className="notice offline-panel">
-          <strong>无法连接本地控制平面。</strong>
-          <span>{connection.message}</span>
-          {desktopStatus?.controlPlane.message && <span>{desktopStatus.controlPlane.message}</span>}
-          <div className="action-row">
-            <button type="button" className="primary" onClick={() => void retryControlPlane()}>
-              {bridge ? "重新启动本地服务" : "重试连接"}
-            </button>
-            {bridge && (
-              <button
-                type="button"
-                className="secondary"
-                onClick={() => void bridge.app.openLogs()}
-              >
-                打开日志目录
-              </button>
-            )}
-          </div>
-          {!bridge && <code>pnpm --filter @agent-in-box/control-plane dev</code>}
-        </section>
-      ) : connection.state === "loading" ? (
-        <section className="panel loading-panel">
-          <span className="spinner" aria-hidden="true" />
-          <div>
-            <h2>正在连接本地服务</h2>
-            <p className="muted">
-              {desktopStatus?.controlPlane.message ??
-                "正在检查控制平面健康状态、首次启动配置和存储目录。"}
+              ) : (
+                <>
+                  <code className="command">pnpm --filter @agent-in-box/control-plane start</code>
+                  <button
+                    type="button"
+                    className="primary"
+                    onClick={() => void retryControlPlane()}
+                  >
+                    我已重启，重新连接
+                  </button>
+                </>
+              )}
+              {bridge && (
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => void bridge.app.openLogs()}
+                >
+                  打开日志目录
+                </button>
+              )}
+            </div>
+            <p className="muted small">
+              重启后如果仍停留在本页，请检查控制平面日志；旧数据目录会保留，不会自动删除。
             </p>
-          </div>
-        </section>
-      ) : onboarding && runtime && online ? (
-        onboarding.required ? (
-          <OnboardingWizard
-            initialState={onboarding}
-            bridge={bridge}
-            onCompleted={(result) => void completed(result)}
-          />
+          </section>
+        ) : connection.state === "offline" ? (
+          <section className="notice offline-panel" role="alert">
+            <strong>无法连接本地控制平面。</strong>
+            <span>{connection.message}</span>
+            {desktopStatus?.controlPlane.message && (
+              <span>{desktopStatus.controlPlane.message}</span>
+            )}
+            <div className="action-row">
+              <button type="button" className="primary" onClick={() => void retryControlPlane()}>
+                {bridge ? "重新启动本地服务" : "重试连接"}
+              </button>
+              {bridge && (
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => void bridge.app.openLogs()}
+                >
+                  打开日志目录
+                </button>
+              )}
+            </div>
+            {!bridge && <code>pnpm --filter @agent-in-box/control-plane dev</code>}
+          </section>
+        ) : connection.state === "loading" ? (
+          <section className="panel loading-panel" aria-live="polite">
+            <span className="spinner" aria-hidden="true" />
+            <div>
+              <h2>正在连接本地服务</h2>
+              <p className="muted">
+                {desktopStatus?.controlPlane.message ??
+                  "正在检查控制平面健康状态、首次启动配置和存储目录。"}
+              </p>
+            </div>
+          </section>
+        ) : onboarding && runtime && online ? (
+          onboarding.required ? (
+            <OnboardingWizard
+              initialState={onboarding}
+              bridge={bridge}
+              onCompleted={(result) => void completed(result)}
+            />
+          ) : view === "notifications" ? (
+            <NotificationCenter state={notifications} onNavigate={navigate} />
+          ) : (
+            <Dashboard
+              view={view}
+              onboarding={onboarding}
+              runtime={runtime}
+              health={online}
+              bridge={bridge}
+              authInfo={authInfo}
+              controlPlaneState={desktopStatus?.controlPlane.state ?? "running"}
+              onNavigate={navigate}
+              onChanged={async () => {
+                await refresh(true);
+              }}
+              onRestartRequired={restartRequired}
+            />
+          )
         ) : (
-          <Dashboard
-            onboarding={onboarding}
-            runtime={runtime}
-            health={online}
-            bridge={bridge}
-            controlPlaneState={desktopStatus?.controlPlane.state ?? "running"}
-            onChanged={async () => {
-              await refresh(true);
-            }}
-            onRestartRequired={restartRequired}
-          />
-        )
-      ) : (
-        <section className="panel loading-panel">
-          <span className="spinner" aria-hidden="true" />
-          <div>
-            <h2>正在读取本地配置</h2>
-            <p className="muted">控制平面已连接，正在加载首次启动状态。</p>
-          </div>
-        </section>
-      )}
+          <section className="panel loading-panel" aria-live="polite">
+            <span className="spinner" aria-hidden="true" />
+            <div>
+              <h2>正在读取本地配置</h2>
+              <p className="muted">控制平面已连接，正在加载首次启动状态。</p>
+            </div>
+          </section>
+        )}
+      </main>
 
       <footer className="footer">
         <span>所有密钥只保存在系统安全存储中，不写入普通配置、日志或 VM。</span>
         <span>
-          {online ? `控制平面启动于 ${formatDate(online.startedAt)}` : "本页面不连接模型。"}
+          {online && view !== "notifications"
+            ? `控制平面启动于 ${formatDate(online.startedAt)}`
+            : "本页面不连接模型。"}
         </span>
       </footer>
-    </main>
+    </div>
   );
 }
 

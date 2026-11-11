@@ -624,6 +624,46 @@ export interface BotConfirmationsTable {
   created_at: string;
 }
 
+export interface AuthSessionsTable {
+  /** SHA-256 of the session cookie value; the raw token is never stored. */
+  id: string;
+  user_id: string;
+  role: string;
+  csrf_token: string;
+  label: string;
+  created_at: string;
+  last_seen_at: string;
+  expires_at: string;
+}
+
+export interface NotificationsTable {
+  id: string;
+  source_event_id: number | null;
+  kind: string;
+  severity: string;
+  title: string;
+  body: string;
+  project_id: string | null;
+  task_id: string | null;
+  vm_id: string | null;
+  worker_id: string | null;
+  created_at: string;
+  read_at: string | null;
+  dismissed_at: string | null;
+}
+
+export interface InboxFilesTable {
+  id: string;
+  original_name: string;
+  content_type: string;
+  size_bytes: number;
+  sha256: string;
+  stored_path: string;
+  project_id: string | null;
+  created_at: string;
+  deleted_at: string | null;
+}
+
 export interface DatabaseSchema {
   schema_migrations: SchemaMigrationsTable;
   images: ImagesTable;
@@ -674,4 +714,7 @@ export interface DatabaseSchema {
   bot_approval_links: BotApprovalLinksTable;
   bot_access_codes: BotAccessCodesTable;
   bot_confirmations: BotConfirmationsTable;
+  auth_sessions: AuthSessionsTable;
+  notifications: NotificationsTable;
+  inbox_files: InboxFilesTable;
 }

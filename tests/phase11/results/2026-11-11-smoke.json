@@ -1,0 +1,63 @@
+{
+  "phase": 11,
+  "startedAt": "2026-11-11T14:31:22.637Z",
+  "finishedAt": "2026-11-11T14:31:24.685Z",
+  "checks": [
+    {
+      "name": "控制平面启动并保持回环监听",
+      "passed": true
+    },
+    {
+      "name": "静态 Web 可加载，CSP/安全头生效且没有宽松 CORS",
+      "passed": true
+    },
+    {
+      "name": "仅绑定本机地址不等于免认证：未登录 API 返回 401",
+      "passed": true
+    },
+    {
+      "name": "错误密钥被拒绝，正确密钥建立 HttpOnly + SameSite=Strict 会话",
+      "passed": true
+    },
+    {
+      "name": "Cookie 会话的写操作必须携带会话绑定的 CSRF 令牌",
+      "passed": true
+    },
+    {
+      "name": "跨端口 Origin、same-site 浏览器请求被拒绝；显式 Bearer 密钥可用于本机自动化",
+      "passed": true
+    },
+    {
+      "name": "事件 WebSocket 需要有效会话，匿名同源连接返回 401",
+      "passed": true
+    },
+    {
+      "name": "Outbox 投影到统一通知中心、只投影一次，并支持已读/移除",
+      "passed": true
+    },
+    {
+      "name": "文件拖放上传经过命名清洗、大小限制、SHA-256 记录、下载和删除",
+      "passed": true
+    },
+    {
+      "name": "控制平面重启后 SQLite 会话与通知游标仍然有效",
+      "passed": true
+    },
+    {
+      "name": "更换访问密钥后旧密钥和旧会话失效，新密钥立即可用",
+      "passed": true
+    },
+    {
+      "name": "连续错误访问密钥触发限速",
+      "passed": true
+    }
+  ],
+  "boundaries": {
+    "realBrowserUi": false,
+    "realElectronUi": false,
+    "windowsNsisInstall": false,
+    "realAutoUpdateFeed": false,
+    "relay": false
+  },
+  "note": "真实控制平面、SQLite、静态 Web 构建、HTTP/WS 和文件流；没有执行真实浏览器/Electron 人工可用性、Windows NSIS 安装、真实更新源或远程 Relay 验收。"
+}

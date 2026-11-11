@@ -1,7 +1,7 @@
 {
   "name": "agent-in-box-phase6-smoke",
-  "startedAt": "2026-11-11T12:25:02.550Z",
-  "finishedAt": "2026-11-11T12:25:04.669Z",
+  "startedAt": "2026-11-11T14:04:51.697Z",
+  "finishedAt": "2026-11-11T14:04:54.043Z",
   "status": "passed",
   "checks": [
     {
@@ -11,7 +11,7 @@
     {
       "name": "Worker 通过 Guest RPC 握手并建立 Pi 会话",
       "passed": true,
-      "detail": "worker=eb9f34fd-3218-4966-9674-42160298cc5d"
+      "detail": "worker=ec78c6ed-d4cc-407c-8522-958ad9973263"
     },
     {
       "name": "Guest 只持有短期 Broker 令牌，镜像/会话文件中没有长期 Provider Key",

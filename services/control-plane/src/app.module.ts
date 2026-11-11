@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { AuthModule } from "./auth/auth.module";
 import { PersistenceModule } from "./persistence/persistence.module";
 import { HealthController } from "./health.controller";
 import { RuntimeController } from "./runtime.controller";
@@ -17,10 +18,13 @@ import { WorkerModule } from "./workers/worker.module";
 import { RouterModule } from "./router/router.module";
 import { ResourceModule } from "./resources/resources.module";
 import { BotsModule } from "./bots/bots.module";
+import { NotificationsModule } from "./notifications/notifications.module";
+import { InboxModule } from "./inbox/inbox.module";
 
 @Module({
   imports: [
     PersistenceModule,
+    AuthModule,
     SettingsModule,
     StorageModule,
     HostModule,
@@ -36,6 +40,8 @@ import { BotsModule } from "./bots/bots.module";
     WorkerModule,
     RouterModule,
     BotsModule,
+    NotificationsModule,
+    InboxModule,
   ],
   controllers: [HealthController, RuntimeController],
 })

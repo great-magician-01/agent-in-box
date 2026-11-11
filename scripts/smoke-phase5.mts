@@ -7,6 +7,7 @@ import net, { type AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { smokeAuthHeaders } from "./smoke-auth.mjs";
 import type {
   ConversationRecord,
   ProjectBindingView,
@@ -29,6 +30,7 @@ interface StreamMessage {
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const temporary = await mkdtemp(path.join(os.tmpdir(), "agent-in-box-phase5-"));
+const configDirectory = path.join(temporary, "config");
 const children: ChildProcess[] = [];
 const sockets = new Set<import("ws").WebSocket>();
 const checks: string[] = [];
@@ -74,6 +76,7 @@ async function api<T>(route: string, init: RequestInit = {}): Promise<T> {
     signal: AbortSignal.timeout(15_000),
     headers: {
       accept: "application/json",
+      ...smokeAuthHeaders(configDirectory),
       ...(init.body ? { "content-type": "application/json" } : {}),
       ...init.headers,
     },
@@ -93,6 +96,7 @@ async function expectHttpStatus(
     signal: AbortSignal.timeout(10_000),
     headers: {
       accept: "application/json",
+      ...smokeAuthHeaders(configDirectory),
       ...(init.body ? { "content-type": "application/json" } : {}),
       ...init.headers,
     },
@@ -143,7 +147,7 @@ async function startControlPlane(): Promise<void> {
         CONTROL_PLANE_HOST: "127.0.0.1",
         CONTROL_PLANE_PORT: String(controlPlanePort),
         AGENT_IN_BOX_DATA_ROOT: temporary,
-        AGENT_IN_BOX_CONFIG_DIR: path.join(temporary, "config"),
+        AGENT_IN_BOX_CONFIG_DIR: configDirectory,
       },
       stdio: ["ignore", "inherit", "inherit"],
     },
@@ -310,6 +314,7 @@ try {
   const streamMessages: StreamMessage[] = [];
   const stream = new WebSocket(`ws://127.0.0.1:${controlPlanePort}/api/v1/events/ws`, {
     origin: `http://127.0.0.1:${controlPlanePort}`,
+    headers: smokeAuthHeaders(configDirectory),
   });
   sockets.add(stream);
   stream.on("message", (data: Buffer) => streamMessages.push(JSON.parse(String(data))));
@@ -523,7 +528,9 @@ try {
     },
     "phase5-offline",
   );
-  const reconnected = new WebSocket(`ws://127.0.0.1:${controlPlanePort}/api/v1/events/ws`);
+  const reconnected = new WebSocket(`ws://127.0.0.1:${controlPlanePort}/api/v1/events/ws`, {
+    headers: smokeAuthHeaders(configDirectory),
+  });
   sockets.add(reconnected);
   await withTimeout(once(reconnected, "open"), "event stream reconnect");
   console.log("Phase 5 smoke: event stream reconnected");

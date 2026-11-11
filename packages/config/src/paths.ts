@@ -17,6 +17,7 @@ export interface StorageLayout {
   snapshots: string;
   artifacts: string;
   archives: string;
+  inbox: string;
   database: string;
 }
 
@@ -76,6 +77,7 @@ export function storageLayout(root: string = defaultDataRoot()): StorageLayout {
     snapshots: path.join(resolved, "snapshots"),
     artifacts: path.join(resolved, "artifacts"),
     archives: path.join(resolved, "archives"),
+    inbox: path.join(resolved, "inbox"),
     database: path.join(resolved, "agent-in-box.sqlite"),
   };
 }

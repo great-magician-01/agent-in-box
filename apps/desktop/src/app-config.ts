@@ -1,13 +1,33 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { CloseBehavior } from "@agent-in-box/protocol";
+import type {
+  CloseBehavior,
+  DesktopPreferences,
+  DesktopPreferencesPatch,
+  DesktopUpdateRollbackView,
+} from "@agent-in-box/protocol";
+
+export interface PendingDesktopUpdate {
+  version: string;
+  previousVersion: string;
+  installerPath: string;
+  databaseBackupPath: string | null;
+  resourcesBackupPath: string | null;
+  startedAt: string;
+}
 
 export interface DesktopConfigFile {
   version: number;
   dataRoot?: string;
   onboardingCompletedAt?: string;
   closeBehavior?: CloseBehavior;
+  launchAtLogin?: boolean;
+  notificationsEnabled?: boolean;
+  autoUpdateCheck?: boolean;
+  updateFeedUrl?: string | null;
+  pendingUpdate?: PendingDesktopUpdate;
+  rollback?: DesktopUpdateRollbackView & { resourcesBackupPath: string | null };
   pendingMigration?: {
     targetRoot: string;
     startedAt: string;
@@ -60,6 +80,57 @@ export function resolveDesktopPaths(
   };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function normalizeUpdateFeedUrl(raw: string): string | null {
+  const value = raw.trim();
+  if (!value) {
+    return null;
+  }
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol === "https:") {
+      return parsed.toString();
+    }
+    if (
+      parsed.protocol === "http:" &&
+      (parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost")
+    ) {
+      return parsed.toString();
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function isPendingUpdate(value: unknown): value is PendingDesktopUpdate {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.version === "string" &&
+    typeof value.previousVersion === "string" &&
+    typeof value.installerPath === "string" &&
+    (typeof value.databaseBackupPath === "string" || value.databaseBackupPath === null) &&
+    (typeof value.resourcesBackupPath === "string" || value.resourcesBackupPath === null) &&
+    typeof value.startedAt === "string"
+  );
+}
+
+function isRollbackConfig(
+  value: unknown,
+): value is DesktopUpdateRollbackView & { resourcesBackupPath: string | null } {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.version === "string" &&
+    typeof value.installerPath === "string" &&
+    (typeof value.databaseBackupPath === "string" || value.databaseBackupPath === null) &&
+    (typeof value.resourcesBackupPath === "string" || value.resourcesBackupPath === null) &&
+    typeof value.createdAt === "string"
+  );
+}
+
 export function readDesktopConfig(configPath: string): DesktopConfigFile {
   try {
     const raw = fs.readFileSync(configPath, "utf8");
@@ -79,6 +150,29 @@ export function readDesktopConfig(configPath: string): DesktopConfigFile {
     }
     if (record.closeBehavior === "keep_running" || record.closeBehavior === "quit") {
       config.closeBehavior = record.closeBehavior;
+    }
+    if (typeof record.launchAtLogin === "boolean") {
+      config.launchAtLogin = record.launchAtLogin;
+    }
+    if (typeof record.notificationsEnabled === "boolean") {
+      config.notificationsEnabled = record.notificationsEnabled;
+    }
+    if (typeof record.autoUpdateCheck === "boolean") {
+      config.autoUpdateCheck = record.autoUpdateCheck;
+    }
+    if (record.updateFeedUrl === null) {
+      config.updateFeedUrl = null;
+    } else if (typeof record.updateFeedUrl === "string") {
+      const normalized = normalizeUpdateFeedUrl(record.updateFeedUrl);
+      if (normalized !== null) {
+        config.updateFeedUrl = normalized;
+      }
+    }
+    if (isPendingUpdate(record.pendingUpdate)) {
+      config.pendingUpdate = record.pendingUpdate;
+    }
+    if (isRollbackConfig(record.rollback)) {
+      config.rollback = record.rollback;
     }
     if (
       typeof record.pendingMigration === "object" &&
@@ -146,4 +240,89 @@ export function setCloseBehavior(configPath: string, value: CloseBehavior): Clos
   const current = readDesktopConfig(configPath);
   writeDesktopConfig(configPath, { ...current, closeBehavior: value });
   return value;
+}
+
+export function getDesktopPreferences(configPath: string): DesktopPreferences {
+  const config = readDesktopConfig(configPath);
+  return {
+    closeBehavior: config.closeBehavior ?? "keep_running",
+    launchAtLogin: config.launchAtLogin ?? false,
+    notificationsEnabled: config.notificationsEnabled ?? true,
+    autoUpdateCheck: config.autoUpdateCheck ?? false,
+    updateFeedUrl: config.updateFeedUrl ?? null,
+  };
+}
+
+export function setDesktopPreferences(
+  configPath: string,
+  patch: DesktopPreferencesPatch,
+): DesktopPreferences {
+  if (
+    patch.closeBehavior !== undefined &&
+    patch.closeBehavior !== "keep_running" &&
+    patch.closeBehavior !== "quit"
+  ) {
+    throw new Error("无效的关闭窗口行为");
+  }
+  if (
+    patch.updateFeedUrl !== undefined &&
+    patch.updateFeedUrl !== null &&
+    normalizeUpdateFeedUrl(patch.updateFeedUrl) === null
+  ) {
+    throw new Error("更新源必须是 HTTPS 地址（开发测试可使用本机回环 HTTP）");
+  }
+  for (const key of ["launchAtLogin", "notificationsEnabled", "autoUpdateCheck"] as const) {
+    if (patch[key] !== undefined && typeof patch[key] !== "boolean") {
+      throw new Error(`无效的桌面设置：${key}`);
+    }
+  }
+  const current = readDesktopConfig(configPath);
+  const next: DesktopConfigFile = { ...current };
+  if (patch.closeBehavior !== undefined) next.closeBehavior = patch.closeBehavior;
+  if (patch.launchAtLogin !== undefined) next.launchAtLogin = patch.launchAtLogin;
+  if (patch.notificationsEnabled !== undefined) {
+    next.notificationsEnabled = patch.notificationsEnabled;
+  }
+  if (patch.autoUpdateCheck !== undefined) next.autoUpdateCheck = patch.autoUpdateCheck;
+  if (patch.updateFeedUrl !== undefined) {
+    next.updateFeedUrl =
+      patch.updateFeedUrl === null ? null : normalizeUpdateFeedUrl(patch.updateFeedUrl);
+  }
+  writeDesktopConfig(configPath, next);
+  return getDesktopPreferences(configPath);
+}
+
+export function readPendingUpdate(configPath: string): PendingDesktopUpdate | null {
+  return readDesktopConfig(configPath).pendingUpdate ?? null;
+}
+
+export function setPendingUpdate(configPath: string, pending: PendingDesktopUpdate | null): void {
+  const current = readDesktopConfig(configPath);
+  const next: DesktopConfigFile = { ...current };
+  if (pending) {
+    next.pendingUpdate = pending;
+  } else {
+    delete next.pendingUpdate;
+  }
+  writeDesktopConfig(configPath, next);
+}
+
+export function readRollback(
+  configPath: string,
+): (DesktopUpdateRollbackView & { resourcesBackupPath: string | null }) | null {
+  return readDesktopConfig(configPath).rollback ?? null;
+}
+
+export function setRollback(
+  configPath: string,
+  rollback: (DesktopUpdateRollbackView & { resourcesBackupPath: string | null }) | null,
+): void {
+  const current = readDesktopConfig(configPath);
+  const next: DesktopConfigFile = { ...current };
+  if (rollback) {
+    next.rollback = rollback;
+  } else {
+    delete next.rollback;
+  }
+  writeDesktopConfig(configPath, next);
 }

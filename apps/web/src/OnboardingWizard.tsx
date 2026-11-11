@@ -11,7 +11,7 @@ import type {
   StorageValidation,
 } from "@agent-in-box/protocol";
 import { api, ApiRequestError } from "./api";
-import { chooseDirectory, credentialStatus, readCloseBehavior, saveCloseBehavior } from "./desktop";
+import { chooseDirectory, credentialStatus, readPreferences, saveCloseBehavior } from "./desktop";
 import {
   DATA_ROOT_SOURCE_LABELS,
   HOST_CHECK_STATUS_LABELS,
@@ -144,10 +144,10 @@ export function OnboardingWizard({
     if (!bridge) {
       return;
     }
-    void readCloseBehavior(bridge)
+    void readPreferences(bridge)
       .then((value) => {
         if (value) {
-          setCloseBehavior(value);
+          setCloseBehavior(value.closeBehavior);
         }
       })
       .catch(() => undefined);

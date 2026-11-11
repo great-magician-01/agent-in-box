@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -7,19 +8,47 @@ import {
   dialog,
   Menu,
   nativeImage,
+  Notification,
   safeStorage,
   session,
   shell,
   Tray,
   type WebContents,
 } from "electron";
-import type { CloseBehavior } from "@agent-in-box/protocol";
-import { getCloseBehavior, resolveDesktopPaths, setCloseBehavior } from "./app-config";
+import type {
+  CloseBehavior,
+  DesktopPreferences,
+  DesktopPreferencesPatch,
+} from "@agent-in-box/protocol";
+import {
+  getDesktopPreferences,
+  readPendingUpdate,
+  readRollback,
+  resolveDesktopPaths,
+  setDesktopPreferences,
+  setPendingUpdate,
+  setRollback,
+} from "./app-config";
+import { ensureDesktopSession } from "./control-plane-auth";
 import { ControlPlaneSupervisor } from "./control-plane-supervisor";
 import { CredentialBridge } from "./credential-bridge";
 import { CredentialStore } from "./credential-store";
-import { registerDesktopIpc } from "./ipc";
+import { registerDesktopIpc, type DesktopIpcHandle, type DesktopUpdateActions } from "./ipc";
+import { IPC_CHANNELS } from "./ipc-channels";
 import { JsonLineLogger } from "./logger";
+import { applyLoginItem } from "./login-item";
+import {
+  cleanUninstallData,
+  isUninstallCleanupInvocation,
+  resolveDesktopDataRoot,
+} from "./uninstall-cleanup";
+import {
+  UpdateManager,
+  backupDatabase,
+  createRollbackSnapshot,
+  restoreDatabase,
+  restoreRollbackSnapshot,
+} from "./updates";
 import { shouldHideWindowOnClose, shouldQuitWhenAllWindowsClosed } from "./window-behavior";
 
 const PORT = (() => {
@@ -43,6 +72,99 @@ const logger = new JsonLineLogger({
   scope: "main",
   mirrorToConsole: !app.isPackaged,
 });
+
+const startHidden = process.argv.includes("--hidden");
+const uninstallCleanup = isUninstallCleanupInvocation(process.argv);
+
+if (uninstallCleanup) {
+  if (!process.argv.includes("--yes")) {
+    console.error("uninstall cleanup requires --yes");
+    app.exit(2);
+  } else {
+    const dataRoot = resolveDesktopDataRoot({ configPath: paths.configPath });
+    const result = cleanUninstallData({
+      dataRoot,
+      configDirectory: paths.configDirectory,
+    });
+    console.log(JSON.stringify(result));
+    app.exit(result.errors.length === 0 ? 0 : 1);
+  }
+}
+
+const updatesDirectory = path.join(paths.configDirectory, "updates");
+const updateManager = new UpdateManager({
+  currentVersion: app.getVersion(),
+  directory: updatesDirectory,
+  feedUrl: () =>
+    currentPreferences().updateFeedUrl ?? (process.env.AGENT_IN_BOX_UPDATE_FEED?.trim() || null),
+  rollbackAvailable: () => {
+    const rollback = readRollback(paths.configPath);
+    return rollback
+      ? {
+          version: rollback.version,
+          installerPath: rollback.installerPath,
+          databaseBackupPath: rollback.databaseBackupPath,
+          createdAt: rollback.createdAt,
+        }
+      : null;
+  },
+});
+
+function currentPreferences(): DesktopPreferences {
+  try {
+    return getDesktopPreferences(paths.configPath);
+  } catch (error) {
+    logger.warn("读取桌面设置失败，使用默认值", { error: String(error) });
+    return {
+      closeBehavior: "keep_running",
+      launchAtLogin: false,
+      notificationsEnabled: true,
+      autoUpdateCheck: false,
+      updateFeedUrl: null,
+    };
+  }
+}
+
+function applySystemPreferences(preferences: DesktopPreferences): void {
+  if (!app.isPackaged) {
+    return;
+  }
+  try {
+    applyLoginItem({
+      enabled: preferences.launchAtLogin,
+      loginItemApi: app,
+      execPath: app.getPath("exe"),
+    });
+  } catch (error) {
+    logger.warn("应用开机启动设置失败", { error: String(error) });
+  }
+}
+
+function updatePreferences(patch: DesktopPreferencesPatch): DesktopPreferences {
+  const next = setDesktopPreferences(paths.configPath, patch);
+  applySystemPreferences(next);
+  updateTrayMenu();
+  broadcastStatus();
+  return next;
+}
+
+const updateActions: DesktopUpdateActions = {
+  status: () => updateManager.status(),
+  check: async () => {
+    const status = await updateManager.check();
+    broadcastStatus();
+    updateTrayMenu();
+    return status;
+  },
+  download: async () => {
+    const status = await updateManager.download();
+    broadcastStatus();
+    updateTrayMenu();
+    return status;
+  },
+  install: () => installUpdate(),
+  rollback: () => rollbackUpdate(),
+};
 
 const credentialStore = new CredentialStore({
   filePath: paths.credentialsPath,
@@ -112,15 +234,11 @@ let tray: Tray | null = null;
 let isQuitting = false;
 let shutdownStarted = false;
 let mainFrameFailed = false;
-let disposeIpc: (() => void) | null = null;
+let ipcHandle: DesktopIpcHandle | null = null;
+let authPromise: Promise<void> | null = null;
 
 function currentCloseBehavior(): CloseBehavior {
-  try {
-    return getCloseBehavior(paths.configPath);
-  } catch (error) {
-    logger.warn("读取关闭窗口设置失败，使用后台运行默认值", { error: String(error) });
-    return "keep_running";
-  }
+  return currentPreferences().closeBehavior;
 }
 
 function mainPageUrl(): string {
@@ -174,7 +292,7 @@ function hardenWebContents(contents: WebContents): void {
   contents.on("will-attach-webview", (event) => event.preventDefault());
 }
 
-function createWindow(): BrowserWindow {
+function createWindow(show = !startHidden): BrowserWindow {
   const window = new BrowserWindow({
     width: 1280,
     height: 820,
@@ -194,11 +312,14 @@ function createWindow(): BrowserWindow {
     },
   });
 
-  window.once("ready-to-show", () => window.show());
+  if (show) {
+    window.once("ready-to-show", () => window.show());
+  }
 
   window.webContents.on("did-finish-load", () => {
     if (window.webContents.getURL().startsWith("http://127.0.0.1:")) {
       mainFrameFailed = false;
+      void ensureRendererSession();
     }
   });
   window.webContents.on("did-fail-load", (_event, code, description, url, isMainFrame) => {
@@ -235,6 +356,199 @@ function createWindow(): BrowserWindow {
   return window;
 }
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function ensureRendererSession(): Promise<void> {
+  if (authPromise) {
+    return authPromise;
+  }
+  authPromise = (async () => {
+    let lastReason = "";
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const state = supervisor.getStatus().state;
+      if (state === "running" || state === "external") {
+        const result = await ensureDesktopSession({
+          baseUrl: `http://127.0.0.1:${PORT}`,
+          accessKeyPath: path.join(paths.configDirectory, "web-access-key"),
+          cookies: session.defaultSession.cookies,
+          logger: logger.child("auth"),
+        });
+        if (result.authenticated) {
+          broadcastStatus();
+          return;
+        }
+        lastReason = result.reason ?? "未知原因";
+      }
+      await delay(500);
+    }
+    logger.warn("桌面会话自动登录未完成；界面将显示解锁页", { reason: lastReason });
+  })().finally(() => {
+    authPromise = null;
+  });
+  return authPromise;
+}
+
+const notifiedIds = new Set<string>();
+
+function showDesktopNotification(request: {
+  notificationId: string;
+  title: string;
+  body: string;
+}): boolean {
+  if (!currentPreferences().notificationsEnabled || !Notification.isSupported()) {
+    return false;
+  }
+  if (notifiedIds.has(request.notificationId)) {
+    return false;
+  }
+  notifiedIds.add(request.notificationId);
+  if (notifiedIds.size > 500) {
+    const oldest = notifiedIds.values().next().value;
+    if (oldest) notifiedIds.delete(oldest);
+  }
+  const notification = new Notification({
+    title: request.title.slice(0, 120),
+    body: request.body.slice(0, 400),
+    silent: false,
+  });
+  notification.on("click", () => {
+    showMainWindow("notifications");
+    const window = mainWindow;
+    if (window && !window.isDestroyed()) {
+      window.webContents.send(IPC_CHANNELS.notificationClickEvent, request.notificationId);
+    }
+  });
+  notification.show();
+  return true;
+}
+
+function updateTimestamp(): string {
+  return new Date().toISOString().replace(/[:.]/g, "-");
+}
+
+async function installUpdate(): Promise<void> {
+  const ready = updateManager.getReady();
+  if (!ready) {
+    throw new Error("没有已下载并校验完成的更新");
+  }
+  if (!app.isPackaged) {
+    throw new Error("开发模式不支持安装更新；请使用打包后的应用验证");
+  }
+  updateManager.setState("installing");
+  broadcastStatus();
+  await supervisor.stop();
+
+  const dataRoot = resolveDesktopDataRoot({ configPath: paths.configPath });
+  const databasePath = path.join(dataRoot, "agent-in-box.sqlite");
+  const stamp = updateTimestamp();
+  let databaseBackupPath: string | null = null;
+  let resourcesBackupPath: string | null = null;
+  try {
+    if (fs.existsSync(databasePath)) {
+      databaseBackupPath = await backupDatabase({
+        databasePath,
+        destination: path.join(updatesDirectory, "backups", stamp),
+      });
+    }
+    resourcesBackupPath = path.join(updatesDirectory, "rollback", app.getVersion());
+    await createRollbackSnapshot({
+      resourcesPath: process.resourcesPath,
+      destination: resourcesBackupPath,
+    });
+    setPendingUpdate(paths.configPath, {
+      version: ready.version,
+      previousVersion: app.getVersion(),
+      installerPath: ready.installerPath,
+      databaseBackupPath,
+      resourcesBackupPath,
+      startedAt: new Date().toISOString(),
+    });
+    setRollback(paths.configPath, {
+      version: app.getVersion(),
+      // Rollback restores the captured resources; the downloaded installer is
+      // the new version and must not be re-run during a rollback.
+      installerPath: "",
+      databaseBackupPath,
+      resourcesBackupPath,
+      createdAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    updateManager.setState("error", `准备安装失败：${String(error)}`);
+    broadcastStatus();
+    await supervisor.start().catch(() => undefined);
+    throw error;
+  }
+
+  try {
+    const args = updateManager.getAvailable()?.installArgs ?? [];
+    const child = spawn(ready.installerPath, args, {
+      detached: true,
+      stdio: "ignore",
+    });
+    child.unref();
+  } catch (error) {
+    updateManager.setState("error", `启动安装程序失败：${String(error)}`);
+    broadcastStatus();
+    await supervisor.start().catch(() => undefined);
+    throw error;
+  }
+
+  logger.info("更新安装程序已启动，应用即将退出", { version: ready.version });
+  isQuitting = true;
+  app.quit();
+}
+
+async function rollbackUpdate(): Promise<void> {
+  const rollback = readRollback(paths.configPath);
+  if (!rollback) {
+    throw new Error("没有可用的回滚快照");
+  }
+  updateManager.setState("installing");
+  broadcastStatus();
+  await supervisor.stop();
+  try {
+    if (rollback.databaseBackupPath) {
+      const dataRoot = resolveDesktopDataRoot({ configPath: paths.configPath });
+      await restoreDatabase({
+        backupPath: rollback.databaseBackupPath,
+        databasePath: path.join(dataRoot, "agent-in-box.sqlite"),
+      });
+    }
+    if (rollback.resourcesBackupPath) {
+      await restoreRollbackSnapshot({
+        source: rollback.resourcesBackupPath,
+        resourcesPath: process.resourcesPath,
+      });
+    }
+    setPendingUpdate(paths.configPath, null);
+    setRollback(paths.configPath, null);
+    logger.info("回滚完成，应用即将重启", { version: rollback.version });
+    app.relaunch();
+    app.exit(0);
+  } catch (error) {
+    updateManager.setState("error", `回滚失败：${String(error)}`);
+    broadcastStatus();
+    await supervisor.start().catch(() => undefined);
+    throw error;
+  }
+}
+
+function reconcilePendingUpdate(): void {
+  const pending = readPendingUpdate(paths.configPath);
+  if (!pending) return;
+  if (app.getVersion() === pending.version) {
+    setPendingUpdate(paths.configPath, null);
+    logger.info("更新已成功应用", { version: pending.version });
+  } else if (app.getVersion() === pending.previousVersion) {
+    logger.warn("检测到未生效的更新，可在设置中重试或回滚", {
+      target: pending.version,
+      current: app.getVersion(),
+    });
+  }
+}
+
 function trayIcon(): Electron.NativeImage {
   return nativeImage
     .createFromDataURL(
@@ -248,6 +562,8 @@ function updateTrayMenu(): void {
     return;
   }
   const status = supervisor.getStatus();
+  const preferences = currentPreferences();
+  const update = updateManager.status();
   const label =
     status.state === "running"
       ? "本地服务：运行中"
@@ -260,6 +576,18 @@ function updateTrayMenu(): void {
             : status.state === "failed"
               ? "本地服务：异常"
               : "本地服务：已停止";
+  const updateLabel =
+    update.state === "ready"
+      ? `更新：${update.availableVersion} 已就绪`
+      : update.state === "available"
+        ? `更新：发现 ${update.availableVersion}`
+        : update.state === "downloading"
+          ? "更新：下载中"
+          : update.state === "error"
+            ? `更新：${update.error ?? "检查失败"}`
+            : update.state === "up_to_date"
+              ? "更新：已是最新"
+              : "检查更新";
   tray.setToolTip(`Agent-in-Box · ${label}`);
   tray.setContextMenu(
     Menu.buildFromTemplate([
@@ -267,13 +595,52 @@ function updateTrayMenu(): void {
         label: "打开 Agent-in-Box",
         click: () => showMainWindow(),
       },
+      {
+        label: "通知中心",
+        click: () => showMainWindow("notifications"),
+      },
       { label, enabled: false },
+      {
+        label:
+          status.state === "running" || status.state === "external"
+            ? "停止本地服务"
+            : "启动本地服务",
+        click: () => {
+          const action =
+            status.state === "running" || status.state === "external"
+              ? supervisor.stop()
+              : supervisor.start();
+          void action.catch((error: unknown) => {
+            logger.error("托盘切换本地服务失败", { error: String(error) });
+          });
+        },
+      },
       {
         label: "重新启动本地服务",
         click: () => {
           void supervisor.restart().catch((error: unknown) => {
             logger.error("手动重启本地服务失败", { error: String(error) });
           });
+        },
+      },
+      { type: "separator" },
+      {
+        label: "开机启动",
+        type: "checkbox",
+        checked: preferences.launchAtLogin,
+        click: (item) => updatePreferences({ launchAtLogin: item.checked }),
+      },
+      {
+        label: "桌面通知",
+        type: "checkbox",
+        checked: preferences.notificationsEnabled,
+        click: (item) => updatePreferences({ notificationsEnabled: item.checked }),
+      },
+      {
+        label: updateLabel,
+        enabled: update.state !== "downloading" && update.state !== "checking",
+        click: () => {
+          void updateActions.check().catch(() => undefined);
         },
       },
       { type: "separator" },
@@ -296,16 +663,23 @@ function createTray(): void {
   }
 }
 
-function showMainWindow(): void {
+function broadcastStatus(): void {
+  ipcHandle?.broadcast();
+}
+
+function showMainWindow(navigate?: string): void {
   if (!mainWindow || mainWindow.isDestroyed()) {
-    mainWindow = createWindow();
-    return;
+    mainWindow = createWindow(true);
+  } else {
+    if (mainWindow.isMinimized()) {
+      mainWindow.restore();
+    }
+    mainWindow.show();
+    mainWindow.focus();
   }
-  if (mainWindow.isMinimized()) {
-    mainWindow.restore();
+  if (navigate) {
+    mainWindow.webContents.send(IPC_CHANNELS.navigateEvent, navigate);
   }
-  mainWindow.show();
-  mainWindow.focus();
 }
 
 function requestQuit(): void {
@@ -404,7 +778,7 @@ async function bootstrap(): Promise<void> {
     logger.info("正在停止本地控制平面并退出");
     void supervisor.stop().finally(() => {
       credentialBridge.stop();
-      disposeIpc?.();
+      ipcHandle?.dispose();
       app.quit();
     });
   });
@@ -424,6 +798,8 @@ async function bootstrap(): Promise<void> {
   await app.whenReady();
 
   app.setAppUserModelId("com.agentinbox.desktop");
+  applySystemPreferences(currentPreferences());
+  reconcilePendingUpdate();
 
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => {
     callback(false);
@@ -434,16 +810,16 @@ async function bootstrap(): Promise<void> {
     hardenWebContents(contents);
   });
 
-  disposeIpc = registerDesktopIpc({
+  ipcHandle = registerDesktopIpc({
     supervisor,
     credentialStore,
     logger,
     paths,
     getMainWindow: () => mainWindow,
-    getCloseBehavior: () => currentCloseBehavior(),
-    setCloseBehavior: (value) => {
-      setCloseBehavior(paths.configPath, value);
-    },
+    getPreferences: currentPreferences,
+    setPreferences: updatePreferences,
+    updates: updateActions,
+    showNotification: showDesktopNotification,
     quit: requestQuit,
     openLogs: async () => {
       const error = await shell.openPath(paths.logDirectory);
@@ -458,9 +834,12 @@ async function bootstrap(): Promise<void> {
 
   supervisor.onStatus((status) => {
     updateTrayMenu();
-    if (status.state === "running" && mainFrameFailed && mainWindow && !mainWindow.isDestroyed()) {
-      logger.info("本地服务已恢复，重新加载主页面");
-      void mainWindow.loadURL(mainPageUrl());
+    if (status.state === "running") {
+      void ensureRendererSession();
+      if (mainFrameFailed && mainWindow && !mainWindow.isDestroyed()) {
+        logger.info("本地服务已恢复，重新加载主页面");
+        void mainWindow.loadURL(mainPageUrl());
+      }
     }
   });
 
@@ -481,8 +860,16 @@ async function bootstrap(): Promise<void> {
   }
 
   installApplicationMenu();
-  mainWindow = createWindow();
+  mainWindow = createWindow(!startHidden);
   createTray();
+  broadcastStatus();
+
+  const preferences = currentPreferences();
+  if (preferences.autoUpdateCheck && preferences.updateFeedUrl) {
+    setTimeout(() => {
+      void updateActions.check().catch(() => undefined);
+    }, 5000).unref();
+  }
 
   const smokeExitMs = Number(process.env.AGENT_IN_BOX_SMOKE_EXIT_MS ?? "");
   if (Number.isFinite(smokeExitMs) && smokeExitMs > 0) {
@@ -515,6 +902,8 @@ async function bootstrap(): Promise<void> {
           controlPlane: status,
           renderer,
           closeBehavior: currentCloseBehavior(),
+          preferences: currentPreferences(),
+          update: updateManager.status(),
           configDirectory: paths.configDirectory,
           logDirectory: paths.logDirectory,
           version: app.getVersion(),
@@ -537,14 +926,16 @@ async function bootstrap(): Promise<void> {
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      mainWindow = createWindow();
+      mainWindow = createWindow(true);
     } else {
       showMainWindow();
     }
   });
 }
 
-void bootstrap().catch((error: unknown) => {
-  reportFatal("桌面应用启动失败", error);
-  app.quit();
-});
+if (!uninstallCleanup) {
+  void bootstrap().catch((error: unknown) => {
+    reportFatal("桌面应用启动失败", error);
+    app.quit();
+  });
+}

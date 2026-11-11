@@ -7,9 +7,11 @@ import net, { type AddressInfo, type Socket } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { smokeAuthHeaders } from "./smoke-auth.mjs";
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const temporary = await mkdtemp(path.join(os.tmpdir(), "agent-in-box-phase4-"));
+const configDirectory = path.join(temporary, "config");
 const children: ChildProcess[] = [];
 const servers: Server[] = [];
 const tcpServers: net.Server[] = [];
@@ -68,14 +70,20 @@ async function stopChild(child: ChildProcess | undefined): Promise<void> {
 }
 
 async function api<T>(port: number, route: string, init: RequestInit = {}): Promise<T> {
+  const headers = new Headers(init.headers);
+  headers.set("accept", "application/json");
+  if (init.body && !headers.has("content-type")) headers.set("content-type", "application/json");
+  // Guest calls carry their own Bearer token; control-plane calls use the
+  // phase-11 local access key.
+  if (!headers.has("authorization")) {
+    for (const [name, value] of Object.entries(smokeAuthHeaders(configDirectory))) {
+      headers.set(name, value);
+    }
+  }
   const response = await fetch(`http://127.0.0.1:${port}${route}`, {
     ...init,
     signal: AbortSignal.timeout(15_000),
-    headers: {
-      accept: "application/json",
-      ...(init.body ? { "content-type": "application/json" } : {}),
-      ...init.headers,
-    },
+    headers,
   });
   const payload = await response.json();
   if (!response.ok) throw new Error(`${route} HTTP ${response.status}: ${JSON.stringify(payload)}`);
@@ -258,7 +266,7 @@ try {
         CONTROL_PLANE_HOST: "127.0.0.1",
         CONTROL_PLANE_PORT: String(controlPlanePort),
         AGENT_IN_BOX_DATA_ROOT: temporary,
-        AGENT_IN_BOX_CONFIG_DIR: path.join(temporary, "config"),
+        AGENT_IN_BOX_CONFIG_DIR: configDirectory,
         AGENT_IN_BOX_SUPERVISOR_URL: `http://127.0.0.1:${supervisorPort}`,
         AGENT_IN_BOX_SUPERVISOR_TOKEN_FILE: supervisorTokenFile,
       },
@@ -342,7 +350,7 @@ try {
     `http://127.0.0.1:${controlPlanePort}/api/v1/vms/${vmId}/guest/actions`,
     {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: smokeAuthHeaders(configDirectory, { "content-type": "application/json" }),
       body: JSON.stringify({ leaseId: worker.id, action: { type: "wait", milliseconds: 1 } }),
     },
   );

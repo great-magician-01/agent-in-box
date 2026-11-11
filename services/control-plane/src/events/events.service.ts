@@ -4,11 +4,13 @@ import {
   Inject,
   Injectable,
   Logger,
+  Optional,
   type OnModuleDestroy,
   type OnModuleInit,
 } from "@nestjs/common";
 import { WebSocket, WebSocketServer } from "ws";
 import { PROTOCOL_VERSION } from "@agent-in-box/protocol";
+import { AuthService } from "../auth/auth.service";
 import { OutboxRepository } from "../persistence/repositories/outbox-repository";
 import { KYSELY } from "../persistence/tokens";
 import type { Kysely } from "kysely";
@@ -30,6 +32,7 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly outbox: OutboxRepository,
     @Inject(KYSELY) private readonly db: Kysely<DatabaseSchema>,
+    @Optional() @Inject(AuthService) private readonly auth: AuthService | null = null,
   ) {}
 
   onModuleInit(): void {
@@ -53,7 +56,7 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
         return;
       }
       if (pathname !== EVENTS_PATH) return;
-      this.upgrade(request, socket, head);
+      void this.upgrade(request, socket, head);
     };
     server.on("upgrade", listener);
     return () => server.off("upgrade", listener);
@@ -110,7 +113,7 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private upgrade(request: IncomingMessage, socket: Duplex, head: Buffer): void {
+  private async upgrade(request: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
     const remote = request.socket.remoteAddress ?? "";
     if (
       !LOOPBACK_ADDRESSES.has(remote) ||
@@ -118,6 +121,14 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
       !validOrigin(request.headers.origin, request.headers.host)
     ) {
       rejectUpgrade(socket, 403, "Event stream access denied");
+      return;
+    }
+    const session = this.auth ? await this.auth.authenticateRequest(request.headers) : null;
+    if (!session) {
+      rejectUpgrade(socket, 401, "Event stream requires authentication");
+      return;
+    }
+    if (socket.destroyed) {
       return;
     }
     this.websocketServer.handleUpgrade(request, socket, head, (websocket) => {
@@ -195,7 +206,9 @@ function validHost(host: string | undefined): boolean {
 }
 
 function validOrigin(origin: string | undefined, host: string | undefined): boolean {
-  if (!origin || !host) return true;
+  // Browser WebSocket clients always send Origin. Require it to be exactly the
+  // same origin as the request; another local page is still cross-origin.
+  if (!origin || !host) return !origin;
   try {
     const parsed = new URL(origin);
     return parsed.protocol === "http:" && parsed.host === host && validHost(parsed.host);

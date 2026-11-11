@@ -34,11 +34,14 @@ win:
 nsis:
   oneClick: false
   perMachine: false
+  # Never request administrator rights; install for the current user only.
+  allowElevation: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
   deleteAppDataOnUninstall: false
   shortcutName: Agent-in-Box
+  include: build/installer.nsh
   # Per-user installs never elevate; this also removes the wine dependency when
   # building the Windows installer from Linux CI.
   packElevateHelper: false

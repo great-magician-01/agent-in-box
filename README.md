@@ -1,6 +1,6 @@
 # Agent-in-Box
 
-面向个人用户的本地 AI 虚拟机工作平台。当前仓库已完成 **开发计划阶段 1（工程骨架、协议和本地持久化）**、**阶段 2（Electron、本地服务与自定义存储）**、**阶段 3（镜像服务、VM 生命周期与管理 UI）**、**阶段 4（Guest Agent、noVNC 实时控制台与统一 Execution Lease）**、**阶段 5（项目、多 VM 绑定、持久任务队列与任务看板）**、**阶段 6（Pi Worker Runtime、Model Broker 与 Worker Engine Adapter）**、**阶段 7（完整 Computer Use 执行器、执行保护、Policy/Approval 与完成校验）**、**阶段 8（Router、Worker Registry 与归档）**、**阶段 9（多 VM 资源调度、共享环境与多端状态同步）** 和 **阶段 10（飞书和 QQ 本地机器人）**。包含无特权 Electron 壳、控制平面进程监管、首次启动向导、自定义数据目录、可续传镜像服务、受 ACL 保护的 Go VM Supervisor、QEMU/WHPX 生命周期、认证 Guest 管理通道、AI/人工互斥桌面输入、跨项目串行的 VM 任务内核、认证 Guest Worker RPC、短期模型令牌、流式 Broker、Worker 心跳/归档/恢复、Host 侧 Computer Use Broker、动作/截图 Trace、人工审批、独立完成证据校验、可重建 Active Roster、可搜索 Archive Registry、自动空闲归档、原生/摘要恢复、只持有结构化工具的本地 Router、宿主内存软预算与 VM 自动启动/空闲休眠、共享 VM 整机快照影响确认、独立项目目录备份/恢复、看板/VM/项目页统一状态快照，以及飞书/QQ 本机出站长连接、持久化事件去重、身份/群白名单、敏感操作二次确认和任务/审批通知。真实 QEMU/WHPX、Linux Golden Image、真实 Pi/模型任务评测、真实飞书/QQ 应用凭据和浏览器/Electron 人工交互验收仍按各阶段记录单独执行。
+面向个人用户的本地 AI 虚拟机工作平台。当前仓库已完成 **开发计划阶段 1（工程骨架、协议和本地持久化）**、**阶段 2（Electron、本地服务与自定义存储）**、**阶段 3（镜像服务、VM 生命周期与管理 UI）**、**阶段 4（Guest Agent、noVNC 实时控制台与统一 Execution Lease）**、**阶段 5（项目、多 VM 绑定、持久任务队列与任务看板）**、**阶段 6（Pi Worker Runtime、Model Broker 与 Worker Engine Adapter）**、**阶段 7（完整 Computer Use 执行器、执行保护、Policy/Approval 与完成校验）**、**阶段 8（Router、Worker Registry 与归档）**、**阶段 9（多 VM 资源调度、共享环境与多端状态同步）**、**阶段 10（飞书和 QQ 本地机器人）** 和 **阶段 11（Web、Electron 和安装体验）**。包含无特权 Electron 壳、控制平面进程监管、首次启动向导、自定义数据目录、可续传镜像服务、受 ACL 保护的 Go VM Supervisor、QEMU/WHPX 生命周期、认证 Guest 管理通道、AI/人工互斥桌面输入、跨项目串行的 VM 任务内核、认证 Guest Worker RPC、短期模型令牌、流式 Broker、Worker 心跳/归档/恢复、Host 侧 Computer Use Broker、动作/截图 Trace、人工审批、独立完成证据校验、可重建 Active Roster、可搜索 Archive Registry、自动空闲归档、原生/摘要恢复、只持有结构化工具的本地 Router、宿主内存软预算与 VM 自动启动/空闲休眠、共享 VM 整机快照影响确认、独立项目目录备份/恢复、看板/VM/项目页统一状态快照、飞书/QQ 本机出站长连接、持久化事件去重、身份/群白名单、敏感操作二次确认和任务/审批通知，以及本机访问密钥认证、CSRF/Origin 防护、统一导航与通知中心、文件拖放投递、桌面原生通知/开机启动、后台服务启动停止、更新检查/校验/回滚和保留用户数据的卸载选择。远程 Relay 未实现。真实 QEMU/WHPX、Linux Golden Image、真实 Pi/模型任务评测、真实飞书/QQ 应用凭据、真实更新源、Windows NSIS 干净安装和浏览器/Electron 人工交互验收仍按各阶段记录单独执行。
 
 完整方案见：
 
@@ -16,7 +16,20 @@
 - [阶段 8 验收记录](tests/phase8/summary.md)
 - [阶段 9 验收记录](tests/phase9/summary.md)
 - [阶段 10 验收记录](tests/phase10/summary.md)
+- [阶段 11 验收记录](tests/phase11/summary.md)
 - [Linux Guest Worker 安装资产](images/linux/README.md)
+
+## 阶段 11 已落地
+
+- **本地 Web 认证**：控制平面在配置目录生成 0600 访问密钥，浏览器在解锁页输入；Electron Main 读取密钥并自动注入会话 Cookie，Renderer 不接触密钥。SQLite 持久会话、HttpOnly + SameSite=Strict Cookie、30 天 TTL 和访问密钥轮换。
+- **本机 Web 防护**：移除宽松 CORS；写操作要求会话绑定的 CSRF 头；严格校验 Host、Origin 和 Sec-Fetch-Site，其他本机端口或跨站页面不能调用 API。事件 WebSocket 同样要求会话和同源 Origin。非回环监听直接拒绝启动。
+- **完整 Web UI**：总览、主会话、项目、任务、虚拟机、归档、通知和设置导航；统一通知中心汇总任务、审批、Worker、VM、资源、Router 和机器人事件；项目页支持文件拖放上传、列表、下载和删除；基础键盘/屏幕阅读器语义、焦点样式和响应式布局。
+- **Electron 体验**：托盘状态与启动/停止/重启、原生通知、开机启动、关闭到托盘、后台服务管理；更新源检查、流式下载、SHA-256 校验、安装前数据库/资源备份和回滚快照。
+- **安装与卸载**：NSIS 保持 per-user 安装，安装后提示首次启动向导；卸载默认保留 VM 与数据库，只有用户明确选择删除且目录带有数据根标记时才调用清理工具。
+- **远程边界**：阶段 11 只支持本机回环 Web；没有实现 Relay，也不把 Relay 作为本地核心、机器人或通知的依赖。
+- **验证边界**：`pnpm smoke:phase11` 12 项通过，阶段 2～10 Smoke 在认证改造后全部重跑通过；真实浏览器/Electron 人工可用性、Windows NSIS 干净安装、真实 HTTPS 更新源和远程 Relay 仍未验收。
+
+详见 [`tests/phase11/summary.md`](tests/phase11/summary.md)。
 
 ## 阶段 10 已落地
 
@@ -143,6 +156,12 @@ pnpm --filter @agent-in-box/web dev
 - 控制平面: http://127.0.0.1:3000
 - 健康检查: http://127.0.0.1:3000/api/v1/health
 
+阶段 11 起，浏览器首次访问需要本机访问密钥。控制平面启动后在配置目录创建
+`web-access-key`（Linux 默认 `~/.config/agent-in-box/web-access-key`，Windows
+默认 `%APPDATA%\AgentInBox\web-access-key`，设置了 `AGENT_IN_BOX_CONFIG_DIR`
+时位于该目录）。把文件中的 `aib_...` 粘贴到解锁页即可；Electron 会自动读取并登录。
+本机自动化可使用 `Authorization: Bearer <key>`。控制平面只允许回环监听，远程访问不在阶段 11 范围。
+
 VM 操作另需启动 Go Supervisor（普通用户、仅回环监听）：
 
 ```bash
@@ -192,6 +211,9 @@ pnpm smoke:phase7
 # Router Tool Broker + Worker Registry/Archive + 自动/手动归档 + 原生/摘要恢复 + 重启对账
 pnpm smoke:phase8
 
+# 本机 Web 认证/CSRF/Origin + 通知中心 + 文件投递 + 更新/卸载单元测试
+pnpm smoke:phase11
+
 # 生成 Guest Worker Runtime 自包含 tar.gz 与 SHA-256
 pnpm package:worker-runtime
 
@@ -224,7 +246,7 @@ GitHub Actions 工作流位于 `.github/workflows/ci.yml`，在 `main` 推送、
 
 - `pnpm install --frozen-lockfile`；
 - `pnpm check`、`go vet ./...`、关键 Go 包的 race 测试与自包含 Control Plane 打包；
-- 阶段 2～6 服务 Smoke Test，并上传阶段 3/4/5/6 的机器结果 artifact。
+- 阶段 2～11 服务 Smoke Test，并上传各阶段机器结果 artifact。
 
 CI 不申请模型或机器人凭据，也不运行真实 QEMU/WHPX；这些仍由对应阶段的显式集成测试和宿主环境验收覆盖。
 
@@ -447,7 +469,11 @@ SQLite 数据库位于数据根目录下的 `agent-in-box.sqlite`，使用 WAL �
 - Windows 干净环境中的 NSIS 安装、安装包运行和卸载验证；Linux/WSL 缺少 wine，当前只验证了 win-unpacked/portable 构建
 - 迁移后 qcow2 backing file 路径重写；当前会校验镜像并警告旧路径引用，依赖旧目录保留
 - 迁移进度流式事件；当前为单次请求并持有存储锁
-- 本地 API 管理员认证/CSRF 加固；当前为回环监听、Host 白名单与 CORS 限制，完整防护在阶段 11～12
+- 远程 Web 访问/Relay、设备授权和端到端加密；阶段 11 只支持本机回环访问，非回环监听会拒绝启动
+- Windows 打包环境的更新替换/回滚实测；当前有 Manifest、SHA-256、数据库和资源备份逻辑，但回滚替换 `app.asar` 可能受 Windows 文件锁影响
+- 真实浏览器与打包 Electron 的人工可访问性/响应式验收；阶段 11 完成了生产构建和 API/WS Smoke
+- 文件投递只保存在宿主数据目录，不自动传输到 Guest，也不直接附加到 Worker 任务
+- 登录失败限速为进程内状态；原生桌面通知依赖渲染进程存活；前端未做路由级代码分割
 - 生产级镜像来源签名与 CDN 长期可用性；当前 Manifest 使用来源白名单、大小和 SHA-256，跨多个控制平面进程的下载文件锁尚未实现
 - Electron 自动托管/打包 VM Supervisor 与 Go 二进制更新；当前 Supervisor 作为独立本机进程启动
 - Guest Agent 更新的服务管理器激活/回滚、发布签名和新镜像令牌自动 provision；当前已实现认证、令牌轮换/撤销与安全暂存
@@ -461,4 +487,4 @@ SQLite 数据库位于数据根目录下的 `agent-in-box.sqlite`，使用 WAL �
 - 资源调度只约束宿主内存软预算，不控制 CPU/磁盘 IO；手动启动允许突破预算
 - Worker 恢复环境增量来自已落库的项目活动/任务，不包含未落库的 Guest 桌面瞬时变化
 
-阶段 0～10 的代码主链路已完成。下一步按 [开发计划](docs/03-development-plan.md) 进入阶段 11：Web、Electron 和安装体验完善；同时继续跟踪真实 QEMU/WHPX + noVNC 回归、真实 Pi/模型 Computer Use 与 Router 评测、真实飞书/QQ 凭据、Windows NSIS 干净安装和长时稳定性门槛。
+阶段 0～11 的代码主链路已完成。下一步按 [开发计划](docs/03-development-plan.md) 进入阶段 12：Linux 安全、故障、升级与全链路验收；同时继续跟踪真实 QEMU/WHPX + noVNC 回归、真实 Pi/模型 Computer Use 与 Router 评测、真实飞书/QQ 凭据、Windows NSIS 干净安装、真实更新源和长时稳定性门槛。

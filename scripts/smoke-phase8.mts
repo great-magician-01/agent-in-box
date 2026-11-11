@@ -7,6 +7,7 @@ import net, { type AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { smokeAuthHeaders } from "./smoke-auth.mjs";
 import type {
   ActiveRosterView,
   RouterMessageRecord,
@@ -28,6 +29,7 @@ interface CheckResult {
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const temporary = await mkdtemp(path.join(os.tmpdir(), "agent-in-box-phase8-"));
+const configDirectory = path.join(temporary, "config");
 const resultPath =
   process.env.AGENT_IN_BOX_PHASE8_RESULT?.trim() ||
   path.join(
@@ -114,6 +116,7 @@ async function api<T>(route: string, init: RequestInit = {}): Promise<T> {
     signal: AbortSignal.timeout(30_000),
     headers: {
       accept: "application/json",
+      ...smokeAuthHeaders(configDirectory),
       ...(init.body ? { "content-type": "application/json" } : {}),
       ...init.headers,
     },
@@ -134,7 +137,7 @@ async function startControlPlane(): Promise<void> {
         CONTROL_PLANE_HOST: "127.0.0.1",
         CONTROL_PLANE_PORT: String(controlPlanePort),
         AGENT_IN_BOX_DATA_ROOT: temporary,
-        AGENT_IN_BOX_CONFIG_DIR: path.join(temporary, "config"),
+        AGENT_IN_BOX_CONFIG_DIR: configDirectory,
         AGENT_IN_BOX_SUPERVISOR_URL: `http://127.0.0.1:${supervisorPort}`,
         AGENT_IN_BOX_SUPERVISOR_TOKEN_FILE: path.join(temporary, "supervisor-acl.token"),
         AGENT_IN_BOX_MODEL_BROKER_PORT: String(modelBrokerPort),

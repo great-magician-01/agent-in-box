@@ -8,6 +8,7 @@ import type {
   TaskStreamState,
 } from "@agent-in-box/protocol";
 import { api, subscribeTaskEvents } from "./api";
+import { FileInboxPanel } from "./FileInboxPanel";
 import { ProjectBackupPanel } from "./ProjectBackupPanel";
 import { ProjectManager } from "./ProjectManager";
 import { RouterPanel } from "./RouterPanel";
@@ -15,11 +16,39 @@ import { TaskBoard } from "./TaskBoard";
 import { WorkerPanel } from "./WorkerPanel";
 import { WorkerRegistryPanel } from "./WorkerRegistryPanel";
 
+export type WorkView = "session" | "projects" | "tasks" | "archive";
+
 interface WorkManagerProps {
+  view: WorkView;
   onOpenVmConsole?(vmId: string): void;
 }
 
-export function WorkManager({ onOpenVmConsole }: WorkManagerProps = {}): React.JSX.Element {
+const VIEW_COPY: Record<WorkView, { eyebrow: string; title: string; description: string }> = {
+  session: {
+    eyebrow: "MAIN ROUTER SESSION",
+    title: "主会话",
+    description:
+      "Router 只持有项目、任务、Worker、看板和归档等结构化工具；所有任务事实仍由持久任务内核维护。",
+  },
+  projects: {
+    eyebrow: "PROJECTS & WORKERS",
+    title: "项目会话",
+    description:
+      "项目与 VM 是多对多关系。共享 VM 的桌面、软件和系统状态由所有绑定项目共同影响，所有项目任务进入同一串行队列。",
+  },
+  tasks: {
+    eyebrow: "DURABLE TASK BOARD",
+    title: "任务看板",
+    description: "任务状态只由任务状态机和执行证据改变；看板拖拽或刷新不会伪造完成。",
+  },
+  archive: {
+    eyebrow: "WORKER ARCHIVE REGISTRY",
+    title: "归档",
+    description: "归档停止 Worker 会话但不停 VM；搜索范围包含摘要、项目和恢复点。",
+  },
+};
+
+export function WorkManager({ view, onOpenVmConsole }: WorkManagerProps): React.JSX.Element {
   const [projects, setProjects] = useState<ProjectView[]>([]);
   const [board, setBoard] = useState<TaskBoardSnapshot | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
@@ -154,12 +183,13 @@ export function WorkManager({ onOpenVmConsole }: WorkManagerProps = {}): React.J
     document.getElementById("worker-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [focusedWorkerId, selectedDetail]);
 
+  const copy = VIEW_COPY[view];
   return (
     <section className="panel work-manager" aria-labelledby="work-manager-title">
       <div className="panel-heading">
         <div>
-          <p className="eyebrow">PROJECTS & DURABLE TASKS</p>
-          <h2 id="work-manager-title">项目与任务</h2>
+          <p className="eyebrow">{copy.eyebrow}</p>
+          <h2 id="work-manager-title">{copy.title}</h2>
         </div>
         <div className="stream-status" role="status">
           <span className={`dot ${streamState === "live" ? "live" : ""}`} aria-hidden="true" />
@@ -167,16 +197,34 @@ export function WorkManager({ onOpenVmConsole }: WorkManagerProps = {}): React.J
           {board && <span> · 快照 {new Date(board.snapshotAt).toLocaleTimeString("zh-CN")}</span>}
         </div>
       </div>
-      <p className="muted small">
-        项目与 VM 是多对多关系。共享 VM
-        的桌面、软件和系统状态由所有绑定项目共同影响，所有项目任务进入同一串行队列。
-      </p>
-      {error && <div className="notice">{error}</div>}
+      <p className="muted small">{copy.description}</p>
+      {error && (
+        <div className="notice" role="alert">
+          {error}
+        </div>
+      )}
       {loading && !board ? (
         <p className="muted">正在读取项目与任务快照…</p>
+      ) : view === "session" ? (
+        <RouterPanel revision={revision} onChanged={() => load(true)} />
+      ) : view === "archive" ? (
+        <WorkerRegistryPanel revision={revision} onChanged={() => load(true)} />
+      ) : view === "tasks" ? (
+        <TaskBoard
+          board={board}
+          selectedProject={selectedDetail}
+          taskDetail={taskDetail}
+          selectedTaskId={selectedTaskId}
+          revision={revision}
+          onSelectTask={setSelectedTaskId}
+          onSelectProject={selectProject}
+          onOpenConversation={openConversation}
+          onOpenWorker={openWorker}
+          {...(onOpenVmConsole ? { onOpenVmConsole } : {})}
+          onChanged={() => load(true)}
+        />
       ) : (
         <>
-          <RouterPanel revision={revision} onChanged={() => load(true)} />
           <ProjectManager
             projects={projects}
             vms={board?.vms ?? []}
@@ -187,6 +235,7 @@ export function WorkManager({ onOpenVmConsole }: WorkManagerProps = {}): React.J
           />
           {selectedDetail && selectedDetail.project.archivedAt === null && (
             <>
+              <FileInboxPanel projectId={selectedDetail.project.id} revision={revision} />
               <ProjectBackupPanel
                 project={selectedDetail}
                 revision={revision}
@@ -200,20 +249,6 @@ export function WorkManager({ onOpenVmConsole }: WorkManagerProps = {}): React.J
               />
             </>
           )}
-          <TaskBoard
-            board={board}
-            selectedProject={selectedDetail}
-            taskDetail={taskDetail}
-            selectedTaskId={selectedTaskId}
-            revision={revision}
-            onSelectTask={setSelectedTaskId}
-            onSelectProject={selectProject}
-            onOpenConversation={openConversation}
-            onOpenWorker={openWorker}
-            {...(onOpenVmConsole ? { onOpenVmConsole } : {})}
-            onChanged={() => load(true)}
-          />
-          <WorkerRegistryPanel revision={revision} onChanged={() => load(true)} />
         </>
       )}
     </section>

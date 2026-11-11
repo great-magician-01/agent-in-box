@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { smokeAuthHeaders } from "./smoke-auth.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
 const port = Number(process.env.SMOKE_PORT ?? "3981");
@@ -91,7 +92,7 @@ async function stopControlPlane() {
 async function json(method, route, body) {
   const response = await fetch(`${baseUrl}${route}`, {
     method,
-    headers: body ? { "content-type": "application/json" } : undefined,
+    headers: smokeAuthHeaders(configDirectory, body ? { "content-type": "application/json" } : {}),
     body: body ? JSON.stringify(body) : undefined,
     signal: AbortSignal.timeout(20_000),
   });
@@ -144,7 +145,7 @@ async function main() {
 
   const invalidResponse = await fetch(`${baseUrl}/api/v1/storage/validate`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: smokeAuthHeaders(configDirectory, { "content-type": "application/json" }),
     body: JSON.stringify({ path: "relative/path" }),
   });
   assert.equal(invalidResponse.status, 200);
@@ -154,7 +155,7 @@ async function main() {
 
   const malformedResponse = await fetch(`${baseUrl}/api/v1/storage/validate`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: smokeAuthHeaders(configDirectory, { "content-type": "application/json" }),
     body: JSON.stringify([]),
   });
   assert.equal(malformedResponse.status, 400);

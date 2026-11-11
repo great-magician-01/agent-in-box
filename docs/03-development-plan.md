@@ -23,7 +23,8 @@
 - **阶段 8 完成（代码、自动化与真实本地进程 Smoke）**：Worker Registry/Active Roster、可搜索 Archive Registry、空闲自动归档及阻塞条件；宿主 Pi Router 仅持有项目/任务/Worker/看板/归档工具，工具调用审计、短期 Router 模型/工具令牌；Native Resume、版本不兼容时的摘要语义恢复和新 Worker 加载归档摘要，恢复时注入最新截图与离开期间环境变化。`pnpm smoke:phase8` 10 项通过。真实 QEMU/WHPX、真实 Router Pi/模型决策质量和人工 UI 仍未验收，详见 [`tests/phase8/summary.md`](../tests/phase8/summary.md)。
 - **阶段 9 完成（代码、自动化与真实本地进程 Smoke）**：Resource Manager 统一宿主内存/运行 VM/软预算报告，`when_needed` 自动启动/恢复、`waiting_resources` 和资源通知，空闲休眠只作用于无任务/无 Worker/无 Lease 的 VM；共享 VM 整机快照影响预览与确认、独立项目目录备份/恢复、VM/项目删除依赖检查；看板/VM/项目页统一资源与队列快照、任务跳转控制台/Worker 会话、Worker 恢复环境增量摘要。`pnpm smoke:phase9` 10 项通过。真实 QEMU 快照、真实 Guest workspace 归档、真实 Pi/模型和人工 UI 仍未验收，详见 [`tests/phase9/summary.md`](../tests/phase9/summary.md)。
 - **阶段 10 完成（代码、自动化与真实本地进程 Smoke）**：Bot Connector 持久 Ingress（事件与去重同事务落库后再 ACK）、连接/心跳/重连状态、平台身份一次性绑定码、用户/群白名单与管理员/只读权限；飞书官方 SDK WebSocket + Open API、QQ Bot API v2 WebSocket Intents + REST；机器人自然语言进入同一主 Router 会话，任务/审批/Router 回复回传来源会话，敏感操作二次确认。`pnpm smoke:phase10` 13 项通过。真实飞书/QQ 应用凭据、平台权限矩阵和长时连接仍未验收，详见 [`tests/phase10/summary.md`](../tests/phase10/summary.md)。
-- **下一步**：进入阶段 11（Web、Electron 和安装体验完善）。真实 QEMU/WHPX 与 noVNC 回归、真实 Pi/模型 Computer Use 任务评测、Windows NSIS 安装包与干净 Windows Smoke Test、真实飞书/QQ 和长时稳定性作为发布前验收门槛持续跟踪。
+- **阶段 11 完成（代码、自动化与真实本地进程 Smoke）**：本机访问密钥登录、SQLite 会话、HttpOnly/SameSite Cookie、CSRF、Host/Origin/Sec-Fetch-Site 校验、无宽松 CORS 和事件 WebSocket 认证；总览/主会话/项目/任务/VM/归档/通知/设置导航、统一通知中心、文件拖放投递、响应式与基础可访问性；Electron 托盘、原生通知、开机启动、后台服务启动/停止、更新检查/下载/SHA-256/数据库与资源备份/回滚，以及 NSIS 卸载默认保留数据的显式选择。`pnpm smoke:phase11` 12 项通过，阶段 2～10 Smoke 重跑通过。真实浏览器/Electron 人工 UI、Windows NSIS 干净安装、真实更新源和远程 Relay 仍未验收，详见 [`tests/phase11/summary.md`](../tests/phase11/summary.md)。
+- **下一步**：进入阶段 12（Linux 安全、故障、升级与全链路验收）。真实 QEMU/WHPX 与 noVNC 回归、真实 Pi/模型 Computer Use 任务评测、Windows NSIS 安装包与干净 Windows Smoke Test、真实飞书/QQ、真实更新源和长时稳定性作为发布前验收门槛持续跟踪。
 
 1. 先验证 Hypervisor、镜像、Pi Computer Use 和模型代理等高风险链路，再大规模开发 UI。
 2. 每个阶段形成可运行、可测试的纵向能力，避免一次性生成大量空模块。

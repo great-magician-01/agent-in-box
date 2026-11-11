@@ -10,15 +10,19 @@ import { EventsService } from "./events/events.service";
 import { attachUpgradeFallback } from "./http/upgrade-fallback";
 
 const ALLOWED_HOSTNAMES = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
 
 async function bootstrap(): Promise<void> {
   const config = controlPlaneConfigFromEnv();
+  if (!LOOPBACK_HOSTS.has(config.host)) {
+    throw new Error(
+      `CONTROL_PLANE_HOST=${config.host} 不是回环地址。阶段 11 的本地 Web 只允许本机访问；远程访问必须通过后续单独实现并授权的加密 Relay。`,
+    );
+  }
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
-  app.enableCors({
-    origin: [/^http:\/\/127\.0\.0\.1:\d+$/, /^http:\/\/localhost:\d+$/],
-    methods: ["GET", "POST", "PATCH", "DELETE"],
-  });
+  // No CORS: Web and Electron always use the same origin. A malicious page on
+  // another local port therefore cannot read responses or send custom headers.
   app.useGlobalFilters(new ApiExceptionFilter());
 
   // DNS-rebinding guard: loopback-only services should not answer arbitrary
@@ -34,6 +38,16 @@ async function bootstrap(): Promise<void> {
     }
     response.setHeader("X-Content-Type-Options", "nosniff");
     response.setHeader("Referrer-Policy", "no-referrer");
+    response.setHeader("X-Frame-Options", "DENY");
+    response.setHeader("Cross-Origin-Resource-Policy", "same-origin");
+    response.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+    response.setHeader(
+      "Permissions-Policy",
+      "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+    );
+    if (request.path.startsWith("/api/")) {
+      response.setHeader("Cache-Control", "no-store");
+    }
     next();
   });
 
@@ -48,9 +62,11 @@ async function bootstrap(): Promise<void> {
           "default-src 'self'",
           "script-src 'self'",
           "style-src 'self' 'unsafe-inline'",
-          "img-src 'self' data:",
+          "img-src 'self' data: blob:",
           "font-src 'self' data:",
-          "connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:*",
+          "connect-src 'self' ws://127.0.0.1:* ws://localhost:*",
+          "object-src 'none'",
+          "form-action 'self'",
           "base-uri 'none'",
           "frame-ancestors 'none'",
         ].join("; "),

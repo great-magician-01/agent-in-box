@@ -102,6 +102,20 @@ jobs:
         env:
           AGENT_IN_BOX_PHASE10_RESULT: ${{ runner.temp }}/phase10-smoke.json
 
+      - name: Run phase 11 local Web auth, notifications and inbox smoke test
+        run: pnpm smoke:phase11
+        env:
+          AGENT_IN_BOX_PHASE11_RESULT: ${{ runner.temp }}/phase11-smoke.json
+
+      - name: Upload phase 11 smoke result
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase11-smoke-${{ runner.os }}
+          path: ${{ runner.temp }}/phase11-smoke.json
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload phase 10 smoke result
         if: success()
         uses: actions/upload-artifact@v4

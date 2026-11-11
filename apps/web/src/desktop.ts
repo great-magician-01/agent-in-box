@@ -4,6 +4,8 @@ import type {
   DesktopAppStatus,
   DesktopBridge,
   DesktopCredentialStatus,
+  DesktopPreferences,
+  DesktopPreferencesPatch,
 } from "@agent-in-box/protocol";
 
 export function desktopBridge(): DesktopBridge | null {
@@ -63,23 +65,30 @@ export async function chooseDirectory(
   return bridge.dialog.chooseDirectory(input);
 }
 
-export async function readCloseBehavior(
+export async function readPreferences(
   bridge: DesktopBridge | null,
-): Promise<CloseBehavior | null> {
+): Promise<DesktopPreferences | null> {
   if (!bridge) {
     return null;
   }
-  return bridge.config.getCloseBehavior();
+  return bridge.config.getPreferences();
+}
+
+export async function savePreferences(
+  bridge: DesktopBridge | null,
+  patch: DesktopPreferencesPatch,
+): Promise<DesktopPreferences | null> {
+  if (!bridge) {
+    return null;
+  }
+  return bridge.config.setPreferences(patch);
 }
 
 export async function saveCloseBehavior(
   bridge: DesktopBridge | null,
   value: CloseBehavior,
 ): Promise<void> {
-  if (!bridge) {
-    return;
-  }
-  await bridge.config.setCloseBehavior(value);
+  await savePreferences(bridge, { closeBehavior: value });
 }
 
 export async function credentialStatus(

@@ -1,7 +1,11 @@
+import fs from "node:fs";
 import http from "node:http";
+import os from "node:os";
+import path from "node:path";
 import { once } from "node:events";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
+import { AuthService, SESSION_COOKIE_NAME } from "../auth/auth.service";
 import { OutboxRepository } from "../persistence/repositories/outbox-repository";
 import { TaskRepository } from "../persistence/repositories/task-repository";
 import { TaskService } from "../persistence/services/task-service";
@@ -13,13 +17,22 @@ let events: EventsService;
 let server: http.Server;
 let port: number;
 let tasks: TaskService;
+let sessionCookie: string;
+let authDirectory: string;
 const sockets = new Set<WebSocket>();
 
 beforeEach(async () => {
   ctx = await createTestContext();
+  authDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "agent-in-box-events-auth-"));
+  const auth = new AuthService(ctx.app.db, {
+    accessKeyPath: path.join(authDirectory, "web-access-key"),
+  });
+  await auth.onModuleInit();
+  const login = await auth.login({ accessKey: auth.ensureAccessKey() });
+  sessionCookie = `${SESSION_COOKIE_NAME}=${login.token}`;
   const outbox = new OutboxRepository(ctx.app.db);
   tasks = new TaskService(ctx.app.db, new TaskRepository(ctx.app.db), outbox);
-  events = new EventsService(outbox, ctx.app.db);
+  events = new EventsService(outbox, ctx.app.db, auth);
   events.onModuleInit();
   server = http.createServer();
   events.attach(server);
@@ -36,13 +49,17 @@ afterEach(async () => {
   events.onModuleDestroy();
   await new Promise<void>((resolve) => server.close(() => resolve()));
   await ctx.close();
+  fs.rmSync(authDirectory, { recursive: true, force: true });
 });
 
 async function connect(
   origin = `http://127.0.0.1:${port}`,
   messages?: Array<Record<string, unknown>>,
 ): Promise<WebSocket> {
-  const socket = new WebSocket(`ws://127.0.0.1:${port}/api/v1/events/ws`, { origin });
+  const socket = new WebSocket(`ws://127.0.0.1:${port}/api/v1/events/ws`, {
+    origin,
+    headers: { cookie: sessionCookie },
+  });
   sockets.add(socket);
   if (messages) {
     socket.on("message", (data) =>
@@ -96,10 +113,20 @@ describe("EventsService", () => {
   it("rejects non-loopback browser origins", async () => {
     const socket = new WebSocket(`ws://127.0.0.1:${port}/api/v1/events/ws`, {
       origin: "http://malicious.example",
+      headers: { cookie: sessionCookie },
     });
     sockets.add(socket);
     const [error] = (await once(socket, "error")) as [Error];
     expect(error.message).toContain("403");
+  });
+
+  it("rejects an authenticated-origin connection without a session", async () => {
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/api/v1/events/ws`, {
+      origin: `http://127.0.0.1:${port}`,
+    });
+    sockets.add(socket);
+    const [error] = (await once(socket, "error")) as [Error];
+    expect(error.message).toContain("401");
   });
 });
 

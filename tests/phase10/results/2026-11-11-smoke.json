@@ -1,12 +1,12 @@
 {
   "phase": 10,
-  "startedAt": "2026-11-11T13:42:56.286Z",
-  "finishedAt": "2026-11-11T13:43:07.698Z",
+  "startedAt": "2026-11-11T14:06:31.563Z",
+  "finishedAt": "2026-11-11T14:06:42.953Z",
   "checks": [
     {
       "name": "控制平面启动并暴露机器人状态与持久设备身份",
       "passed": true,
-      "detail": "device=47993573-1fcb-4e9a-bf38-d149a9122f75"
+      "detail": "device=f1db82b9-449e-4700-ac6e-835afe6ebb40"
     },
     {
       "name": "绑定本机为唯一活跃执行电脑",
@@ -43,7 +43,7 @@
     {
       "name": "机器人消息进入主 Router 会话，Router 创建持久任务并回传任务通知",
       "passed": true,
-      "detail": "task=97c23c36-ddca-43ce-b12d-627076b63087 turn=completed"
+      "detail": "task=f4e1a603-1e28-4fff-b98c-e97bb542c83e turn=completed"
     },
     {
       "name": "平台重推同一事件 ID 不会重复创建任务或回复",
@@ -61,8 +61,8 @@
   "passed": 13,
   "failed": 0,
   "accounts": {
-    "qq": "69530f03-ba76-4e7c-b7bf-fe8a38c63224",
-    "feishu": "5d513437-9ed2-4398-83ab-6abbc843e4ca"
+    "qq": "c25f2652-d5b4-4739-bf19-b8ac6ed9353c",
+    "feishu": "a045750a-fbae-4c84-83f3-5045aeb10467"
   },
-  "taskId": "97c23c36-ddca-43ce-b12d-627076b63087"
+  "taskId": "f4e1a603-1e28-4fff-b98c-e97bb542c83e"
 }

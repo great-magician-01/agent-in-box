@@ -1485,6 +1485,77 @@ const migrations: Record<string, MigrationDefinition> = {
       }
     },
   },
+  "010_phase11_web_desktop": {
+    async up(db: Kysely<DatabaseSchema>): Promise<void> {
+      await db.schema
+        .createTable("auth_sessions")
+        .addColumn("id", "text", (column) => column.primaryKey())
+        .addColumn("user_id", "text", (column) => column.notNull())
+        .addColumn("role", "text", (column) => column.notNull())
+        .addColumn("csrf_token", "text", (column) => column.notNull())
+        .addColumn("label", "text", (column) => column.notNull())
+        .addColumn("created_at", "text", (column) => column.notNull())
+        .addColumn("last_seen_at", "text", (column) => column.notNull())
+        .addColumn("expires_at", "text", (column) => column.notNull())
+        .execute();
+      await db.schema
+        .createIndex("auth_sessions_expires_idx")
+        .on("auth_sessions")
+        .columns(["expires_at"])
+        .execute();
+
+      await db.schema
+        .createTable("notifications")
+        .addColumn("id", "text", (column) => column.primaryKey())
+        .addColumn("source_event_id", "integer", (column) => column.unique())
+        .addColumn("kind", "text", (column) => column.notNull())
+        .addColumn("severity", "text", (column) => column.notNull())
+        .addColumn("title", "text", (column) => column.notNull())
+        .addColumn("body", "text", (column) => column.notNull())
+        .addColumn("project_id", "text")
+        .addColumn("task_id", "text")
+        .addColumn("vm_id", "text")
+        .addColumn("worker_id", "text")
+        .addColumn("created_at", "text", (column) => column.notNull())
+        .addColumn("read_at", "text")
+        .addColumn("dismissed_at", "text")
+        .execute();
+      await db.schema
+        .createIndex("notifications_created_idx")
+        .on("notifications")
+        .columns(["created_at"])
+        .execute();
+      await db.schema
+        .createIndex("notifications_unread_idx")
+        .on("notifications")
+        .columns(["read_at", "dismissed_at"])
+        .execute();
+
+      await db.schema
+        .createTable("inbox_files")
+        .addColumn("id", "text", (column) => column.primaryKey())
+        .addColumn("original_name", "text", (column) => column.notNull())
+        .addColumn("content_type", "text", (column) => column.notNull())
+        .addColumn("size_bytes", "integer", (column) => column.notNull())
+        .addColumn("sha256", "text", (column) => column.notNull())
+        .addColumn("stored_path", "text", (column) => column.notNull())
+        .addColumn("project_id", "text")
+        .addColumn("created_at", "text", (column) => column.notNull())
+        .addColumn("deleted_at", "text")
+        .execute();
+      await db.schema
+        .createIndex("inbox_files_project_idx")
+        .on("inbox_files")
+        .columns(["project_id", "created_at"])
+        .execute();
+    },
+
+    async down(db: Kysely<DatabaseSchema>): Promise<void> {
+      for (const table of ["inbox_files", "notifications", "auth_sessions"]) {
+        await db.schema.dropTable(table).ifExists().execute();
+      }
+    },
+  },
 };
 
 export async function migrateToLatest(db: Kysely<DatabaseSchema>): Promise<string[]> {

@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { Injectable, type OnModuleDestroy, type OnModuleInit } from "@nestjs/common";
 import {
   ensureStorageLayout,
@@ -9,6 +11,8 @@ import {
 import type { Kysely } from "kysely";
 import { AppDatabase } from "./database";
 import type { DatabaseSchema } from "./schema";
+
+export const DATA_ROOT_MARKER_FILENAME = ".agent-in-box-data-root";
 
 @Injectable()
 export class DatabaseService implements OnModuleInit, OnModuleDestroy {
@@ -27,6 +31,7 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     this.layout = storageLayout(this.dataRoot);
     try {
       ensureStorageLayout(this.layout);
+      this.writeDataRootMarker();
     } catch (error) {
       throw new Error(
         `无法初始化数据目录 ${this.dataRoot}: ${
@@ -40,6 +45,22 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
 
   get db(): Kysely<DatabaseSchema> {
     return this.appDatabase.db;
+  }
+
+  /**
+   * Uninstall cleanup must never delete an arbitrary user-selected folder.
+   * The marker is the proof that this directory is an Agent-in-Box data root.
+   */
+  private writeDataRootMarker(): void {
+    const marker = path.join(this.dataRoot, DATA_ROOT_MARKER_FILENAME);
+    if (fs.existsSync(marker)) {
+      return;
+    }
+    fs.writeFileSync(
+      marker,
+      `${JSON.stringify({ product: "Agent-in-Box", version: 1, kind: "data-root" }, null, 2)}\n`,
+      { mode: 0o600 },
+    );
   }
 
   async onModuleInit(): Promise<void> {

@@ -2,11 +2,13 @@
 import { useCallback, useEffect, useState } from "react";
 import type {
   AutoStartPolicy,
-  CloseBehavior,
   ControlPlaneState,
   DesktopBridge,
+  DesktopPreferences,
+  DesktopUpdateStatus,
   HealthResponse,
   HostInspectionReport,
+  LocalAuthSessionView,
   OnboardingState,
   RuntimeInfo,
   SettingsView,
@@ -14,10 +16,11 @@ import type {
   StorageReport,
   StorageValidation,
 } from "@agent-in-box/protocol";
+import type { AppView } from "./App";
 import { api, ApiRequestError } from "./api";
-import { chooseDirectory, saveCloseBehavior } from "./desktop";
+import { chooseDirectory, savePreferences } from "./desktop";
 import { VmManager, type ConsoleRequest } from "./VmManager";
-import { WorkManager } from "./WorkManager";
+import { WorkManager, type WorkView } from "./WorkManager";
 import { BotManager } from "./BotManager";
 import {
   CONTROL_PLANE_STATE_LABELS,
@@ -36,21 +39,27 @@ export interface RestartRequest {
 }
 
 interface DashboardProps {
+  view: Exclude<AppView, "notifications">;
   onboarding: OnboardingState;
   runtime: RuntimeInfo;
   health: HealthResponse;
   bridge: DesktopBridge | null;
+  authInfo: LocalAuthSessionView;
   controlPlaneState: ControlPlaneState | null;
+  onNavigate(view: string): void;
   onChanged(): Promise<void>;
   onRestartRequired(request: RestartRequest): void;
 }
 
 export function Dashboard({
+  view,
   onboarding,
   runtime,
   health,
   bridge,
+  authInfo,
   controlPlaneState,
+  onNavigate,
   onChanged,
   onRestartRequired,
 }: DashboardProps): React.JSX.Element {
@@ -77,7 +86,14 @@ export function Dashboard({
   const [policyMessage, setPolicyMessage] = useState<string | null>(null);
 
   const [cleanupMessage, setCleanupMessage] = useState<string | null>(null);
-  const [closeBehavior, setCloseBehavior] = useState<CloseBehavior | null>(null);
+  const [preferences, setPreferences] = useState<DesktopPreferences | null>(null);
+  const [preferencesMessage, setPreferencesMessage] = useState<string | null>(null);
+  const [updateFeedDraft, setUpdateFeedDraft] = useState("");
+  const [updateStatus, setUpdateStatus] = useState<DesktopUpdateStatus | null>(null);
+  const [updateBusy, setUpdateBusy] = useState(false);
+  const [updateMessage, setUpdateMessage] = useState<string | null>(null);
+  const [rotateBusy, setRotateBusy] = useState(false);
+  const [rotateMessage, setRotateMessage] = useState<string | null>(null);
   const [showMigration, setShowMigration] = useState(false);
   const [targetRoot, setTargetRoot] = useState("");
   const [migrationValidation, setMigrationValidation] = useState<StorageValidation | null>(null);
@@ -121,9 +137,19 @@ export function Dashboard({
       return;
     }
     void bridge.config
-      .getCloseBehavior()
-      .then(setCloseBehavior)
+      .getPreferences()
+      .then((next) => {
+        setPreferences(next);
+        setUpdateFeedDraft(next.updateFeedUrl ?? "");
+      })
       .catch(() => undefined);
+    void bridge.updates
+      .status()
+      .then(setUpdateStatus)
+      .catch(() => undefined);
+    return bridge.app.onStatus((status) => {
+      setUpdateStatus(status.update);
+    });
   }, [bridge]);
 
   async function savePolicy(): Promise<void> {
@@ -241,12 +267,114 @@ export function Dashboard({
     }
   }
 
-  async function changeCloseBehavior(value: CloseBehavior): Promise<void> {
-    setCloseBehavior(value);
+  async function changeCloseBehavior(value: DesktopPreferences["closeBehavior"]): Promise<void> {
+    if (!preferences) return;
+    setPreferences({ ...preferences, closeBehavior: value });
     try {
-      await saveCloseBehavior(bridge, value);
+      const next = await savePreferences(bridge, { closeBehavior: value });
+      if (next) setPreferences(next);
     } catch (error) {
       setPolicyMessage(errorMessage(error));
+    }
+  }
+
+  async function saveDesktopPreferences(): Promise<void> {
+    if (!preferences) return;
+    setPreferencesMessage(null);
+    try {
+      const next = await savePreferences(bridge, {
+        launchAtLogin: preferences.launchAtLogin,
+        notificationsEnabled: preferences.notificationsEnabled,
+        autoUpdateCheck: preferences.autoUpdateCheck,
+        updateFeedUrl: updateFeedDraft.trim() ? updateFeedDraft.trim() : null,
+      });
+      if (next) {
+        setPreferences(next);
+        setUpdateFeedDraft(next.updateFeedUrl ?? "");
+      }
+      setPreferencesMessage("桌面与更新设置已保存");
+    } catch (error) {
+      setPreferencesMessage(errorMessage(error));
+    }
+  }
+
+  async function runUpdateAction(action: "check" | "download"): Promise<void> {
+    if (!bridge || updateBusy) return;
+    setUpdateBusy(true);
+    setUpdateMessage(null);
+    try {
+      const next =
+        action === "check" ? await bridge.updates.check() : await bridge.updates.download();
+      setUpdateStatus(next);
+      if (next.state === "error") setUpdateMessage(next.error);
+      else if (next.state === "up_to_date") setUpdateMessage("当前已是最新版本");
+      else if (next.state === "available") setUpdateMessage(`发现新版本 ${next.availableVersion}`);
+      else if (next.state === "ready") setUpdateMessage("更新已下载并通过 SHA-256 校验，可安装");
+    } catch (error) {
+      setUpdateMessage(errorMessage(error));
+    } finally {
+      setUpdateBusy(false);
+    }
+  }
+
+  async function runUpdateInstall(): Promise<void> {
+    if (!bridge || updateBusy) return;
+    if (
+      !window.confirm(
+        "安装更新会先停止本地服务，备份 SQLite 数据库和当前应用资源，然后退出并启动安装程序。继续吗？",
+      )
+    ) {
+      return;
+    }
+    setUpdateBusy(true);
+    setUpdateMessage(null);
+    try {
+      await bridge.updates.install();
+    } catch (error) {
+      setUpdateMessage(errorMessage(error));
+    } finally {
+      setUpdateBusy(false);
+    }
+  }
+
+  async function runUpdateRollback(): Promise<void> {
+    if (!bridge || updateBusy) return;
+    if (
+      !window.confirm("回滚会停止本地服务，恢复上一版本的资源和数据库备份，然后重启应用。继续吗？")
+    ) {
+      return;
+    }
+    setUpdateBusy(true);
+    setUpdateMessage(null);
+    try {
+      await bridge.updates.rollback();
+    } catch (error) {
+      setUpdateMessage(errorMessage(error));
+    } finally {
+      setUpdateBusy(false);
+    }
+  }
+
+  async function rotateAccessKey(): Promise<void> {
+    if (rotateBusy) return;
+    if (
+      !window.confirm(
+        "更换本机访问密钥会让其他浏览器会话立即失效（当前会话保留）。请准备好重新读取密钥文件。继续吗？",
+      )
+    ) {
+      return;
+    }
+    setRotateBusy(true);
+    setRotateMessage(null);
+    try {
+      const result = await api.rotateAccessKey();
+      setRotateMessage(
+        `已更换访问密钥并撤销 ${result.revokedSessions} 个其他会话。新密钥文件：${result.accessKeyPath}`,
+      );
+    } catch (error) {
+      setRotateMessage(errorMessage(error));
+    } finally {
+      setRotateBusy(false);
     }
   }
 
@@ -258,442 +386,775 @@ export function Dashboard({
         )
       : 0;
 
+  const workView: WorkView | null =
+    view === "session" || view === "projects" || view === "tasks" || view === "archive"
+      ? view
+      : null;
+
   return (
     <div className="dashboard">
-      {loadError && <div className="notice">{loadError}</div>}
+      {loadError && (
+        <div className="notice" role="alert">
+          {loadError}
+        </div>
+      )}
 
-      <section className="grid dashboard-grid">
-        <article className="card">
-          <div className="card-title">
-            <h2>本地控制平面</h2>
-            <span
-              className={`pill ${controlPlaneState === "running" || !controlPlaneState ? "ok" : "warn"}`}
+      {view === "overview" && (
+        <section className="grid dashboard-grid" aria-label="本机总览">
+          <article className="card">
+            <div className="card-title">
+              <h2>本地控制平面</h2>
+              <span
+                className={`pill ${controlPlaneState === "running" || !controlPlaneState ? "ok" : "warn"}`}
+              >
+                {controlPlaneState ? CONTROL_PLANE_STATE_LABELS[controlPlaneState] : "运行中"}
+              </span>
+            </div>
+            <dl>
+              <div>
+                <dt>协议版本</dt>
+                <dd>{health.protocolVersion}</dd>
+              </div>
+              <div>
+                <dt>启动时间</dt>
+                <dd>{formatDate(health.startedAt)}</dd>
+              </div>
+              <div>
+                <dt>数据目录来源</dt>
+                <dd>{DATA_ROOT_SOURCE_LABELS[runtime.dataRootSource]}</dd>
+              </div>
+              <div>
+                <dt>数据库</dt>
+                <dd className="truncate" title={runtime.databasePath}>
+                  {runtime.databasePath}
+                </dd>
+              </div>
+            </dl>
+          </article>
+
+          <article className="card">
+            <div className="card-title">
+              <h2>宿主机</h2>
+              <span className={`pill ${host?.ready ? "ok" : "warn"}`}>
+                {host ? (host.ready ? "就绪" : "待修复") : "检查中"}
+              </span>
+            </div>
+            {host ? (
+              <>
+                <dl>
+                  <div>
+                    <dt>系统</dt>
+                    <dd>
+                      {host.platform} · {host.release}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>内存</dt>
+                    <dd>{formatBytes(host.totalMemoryBytes)}</dd>
+                  </div>
+                  <div>
+                    <dt>存储可用</dt>
+                    <dd>{formatBytes(host.freeDiskBytes)}</dd>
+                  </div>
+                  <div>
+                    <dt>建议 Provider</dt>
+                    <dd>{host.recommendedProvider ?? "—"}</dd>
+                  </div>
+                </dl>
+                <ul className="mini-checks">
+                  {host.checks.map((check) => (
+                    <li key={check.id} className={check.status}>
+                      <span>{HOST_CHECK_STATUS_LABELS[check.status]}</span>
+                      {check.id}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : (
+              <p className="muted">正在读取宿主机信息…</p>
+            )}
+          </article>
+
+          <article className="card">
+            <div className="card-title">
+              <h2>本机身份与安全</h2>
+              <span className="pill ok">管理员</span>
+            </div>
+            <dl>
+              <div>
+                <dt>显示名称</dt>
+                <dd>
+                  {settings?.onboarding.localUser?.displayName ??
+                    onboarding.localUser?.displayName ??
+                    "—"}
+                </dd>
+              </div>
+              <div>
+                <dt>敏感操作审批</dt>
+                <dd>{approval ? "开启" : "关闭"}</dd>
+              </div>
+              <div>
+                <dt>模型凭据</dt>
+                <dd>
+                  {onboarding.credentialsConfigured
+                    ? (onboarding.preferredModelProvider ?? "已配置")
+                    : "未配置"}
+                </dd>
+              </div>
+              <div>
+                <dt>凭据存储</dt>
+                <dd>{bridge ? "系统安全存储" : "仅桌面应用可用"}</dd>
+              </div>
+            </dl>
+          </article>
+        </section>
+      )}
+
+      {workView && (
+        <WorkManager
+          view={workView}
+          onOpenVmConsole={(vmId) => {
+            setConsoleRequest((current) => ({ vmId, nonce: (current?.nonce ?? 0) + 1 }));
+            onNavigate("vms");
+          }}
+        />
+      )}
+
+      {view === "settings" && <BotManager bridge={bridge} />}
+
+      {view === "vms" && (
+        <VmManager
+          host={host}
+          consoleRequest={consoleRequest}
+          hostReserveBytes={
+            settings?.resourcePolicy.hostReserveBytes ?? onboarding.resourcePolicy.hostReserveBytes
+          }
+        />
+      )}
+
+      {view === "settings" && (
+        <section className="panel" aria-labelledby="storage-title">
+          <div className="panel-heading">
+            <h2 id="storage-title">存储</h2>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => void reload()}
+              disabled={busy}
             >
-              {controlPlaneState ? CONTROL_PLANE_STATE_LABELS[controlPlaneState] : "运行中"}
-            </span>
+              重新检查
+            </button>
           </div>
-          <dl>
-            <div>
-              <dt>协议版本</dt>
-              <dd>{health.protocolVersion}</dd>
-            </div>
-            <div>
-              <dt>启动时间</dt>
-              <dd>{formatDate(health.startedAt)}</dd>
-            </div>
-            <div>
-              <dt>数据目录来源</dt>
-              <dd>{DATA_ROOT_SOURCE_LABELS[runtime.dataRootSource]}</dd>
-            </div>
-            <div>
-              <dt>数据库</dt>
-              <dd className="truncate" title={runtime.databasePath}>
-                {runtime.databasePath}
-              </dd>
-            </div>
-          </dl>
-        </article>
-
-        <article className="card">
-          <div className="card-title">
-            <h2>宿主机</h2>
-            <span className={`pill ${host?.ready ? "ok" : "warn"}`}>
-              {host ? (host.ready ? "就绪" : "待修复") : "检查中"}
-            </span>
-          </div>
-          {host ? (
+          {storage ? (
             <>
-              <dl>
+              <div className="storage-summary">
                 <div>
-                  <dt>系统</dt>
-                  <dd>
-                    {host.platform} · {host.release}
-                  </dd>
+                  <span className="muted small">数据根目录</span>
+                  <code>{storage.root}</code>
                 </div>
                 <div>
-                  <dt>内存</dt>
-                  <dd>{formatBytes(host.totalMemoryBytes)}</dd>
+                  <span className="muted small">可用 / 总量</span>
+                  <strong>
+                    {formatBytes(storage.freeBytes)} / {formatBytes(storage.totalBytes)}
+                  </strong>
                 </div>
-                <div>
-                  <dt>存储可用</dt>
-                  <dd>{formatBytes(host.freeDiskBytes)}</dd>
-                </div>
-                <div>
-                  <dt>建议 Provider</dt>
-                  <dd>{host.recommendedProvider ?? "—"}</dd>
-                </div>
-              </dl>
-              <ul className="mini-checks">
-                {host.checks.map((check) => (
-                  <li key={check.id} className={check.status}>
-                    <span>{HOST_CHECK_STATUS_LABELS[check.status]}</span>
-                    {check.id}
+              </div>
+              <div className="meter" aria-hidden="true">
+                <span style={{ width: `${usedPercent}%` }} />
+              </div>
+              <ul className="usage-list">
+                {storage.categories.map((category) => (
+                  <li key={category.category}>
+                    <span>{STORAGE_CATEGORY_LABELS[category.category]}</span>
+                    <span className="muted">{category.files} 个文件</span>
+                    <strong>{formatBytes(category.bytes)}</strong>
                   </li>
                 ))}
+                <li>
+                  <span>数据库</span>
+                  <span className="muted">元数据</span>
+                  <strong>{formatBytes(storage.databaseBytes)}</strong>
+                </li>
               </ul>
+              {storage.lock && (
+                <div className="notice small">
+                  存储锁：{storage.lock.operation} · {storage.lock.owner} · pid {storage.lock.pid}
+                </div>
+              )}
+              {storage.pendingMigration && (
+                <div className="notice small">
+                  检测到未完成迁移：{storage.pendingMigration.targetRoot}（
+                  {formatDate(storage.pendingMigration.startedAt)}）。请重新执行迁移或检查日志。
+                </div>
+              )}
+              <div className="action-row">
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => void cleanupDownloads()}
+                  disabled={busy}
+                >
+                  清理下载缓存
+                </button>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => setShowMigration((value) => !value)}
+                  disabled={runtime.dataRootSource === "environment"}
+                >
+                  {showMigration ? "收起迁移" : "迁移存储位置"}
+                </button>
+              </div>
+              {runtime.dataRootSource === "environment" && (
+                <p className="muted small">
+                  数据根目录由 AGENT_IN_BOX_DATA_ROOT 管理，当前界面不允许迁移。
+                </p>
+              )}
+              {cleanupMessage && <p className="muted small">{cleanupMessage}</p>}
+
+              {showMigration && (
+                <div className="migration-box">
+                  <h3>迁移到新目录</h3>
+                  <p className="muted small">
+                    迁移会在存储锁保护下复制镜像、VM、快照和产物，校验文件哈希与 SQLite
+                    完整性，最后更新配置。旧目录不会自动删除。迁移期间不要运行 VM。
+                  </p>
+                  <div className="input-row">
+                    <input
+                      value={targetRoot}
+                      onChange={(event) => {
+                        setTargetRoot(event.target.value);
+                        setMigrationValidation(null);
+                      }}
+                      placeholder="例如 D:\\AgentInBox"
+                      spellCheck={false}
+                    />
+                    {bridge && (
+                      <button
+                        type="button"
+                        className="secondary"
+                        onClick={() => void browseTarget()}
+                      >
+                        浏览…
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() => void validateTarget()}
+                      disabled={migrationBusy}
+                    >
+                      检查目标
+                    </button>
+                  </div>
+                  {migrationValidation && (
+                    <div className={`validation-box ${migrationValidation.ok ? "ok" : "bad"}`}>
+                      <strong>{migrationValidation.ok ? "目标可用" : "目标不可用"}</strong>
+                      <span className="muted small">{migrationValidation.resolvedPath}</span>
+                      <span className="muted small">
+                        可用 {formatBytes(migrationValidation.freeBytes)}
+                      </span>
+                      {migrationValidation.errors.map((error) => (
+                        <span key={error} className="error-line">
+                          {error}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <label className="toggle">
+                    <input
+                      type="checkbox"
+                      checked={migrationAcknowledged}
+                      onChange={(event) => setMigrationAcknowledged(event.target.checked)}
+                    />
+                    <span>我确认迁移期间没有运行中的 VM，并理解完成后需要重启本地服务。</span>
+                  </label>
+                  {migrationError && <div className="notice">{migrationError}</div>}
+                  <button
+                    type="button"
+                    className="primary"
+                    onClick={() => void migrate()}
+                    disabled={migrationBusy || !migrationValidation?.ok || !migrationAcknowledged}
+                  >
+                    {migrationBusy ? "正在迁移…" : "开始迁移"}
+                  </button>
+                </div>
+              )}
             </>
           ) : (
-            <p className="muted">正在读取宿主机信息…</p>
+            <p className="muted">正在读取存储信息…</p>
           )}
-        </article>
+        </section>
+      )}
 
-        <article className="card">
-          <div className="card-title">
-            <h2>本机身份与安全</h2>
-            <span className="pill ok">管理员</span>
+      {view === "settings" && (
+        <section className="panel" aria-labelledby="resource-title">
+          <div className="panel-heading">
+            <h2 id="resource-title">资源策略</h2>
+            <span className="muted small">
+              宿主机内存 {host ? formatBytes(host.totalMemoryBytes) : "未知"}
+            </span>
           </div>
-          <dl>
+          <div className="policy-grid">
+            <label className="field">
+              <span>Host Reserve（GB）</span>
+              <input
+                type="number"
+                min="0"
+                step="0.5"
+                value={reserveGb}
+                onChange={(event) => setReserveGb(event.target.value)}
+              />
+            </label>
+            <label className="field">
+              <span>自动启动</span>
+              <select
+                value={autoStart}
+                onChange={(event) => setAutoStart(event.target.value as AutoStartPolicy)}
+              >
+                <option value="manual">仅手动启动</option>
+                <option value="when_needed">有任务时自动启动</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>Soft Memory Budget（GB，0 = 自动）</span>
+              <input
+                type="number"
+                min="0"
+                step="0.5"
+                value={softBudgetGb}
+                onChange={(event) => setSoftBudgetGb(event.target.value)}
+              />
+            </label>
+            <label className="toggle policy-toggle">
+              <input
+                type="checkbox"
+                checked={idleSuspend}
+                onChange={(event) => setIdleSuspend(event.target.checked)}
+              />
+              <span>VM 空闲后自动休眠</span>
+            </label>
+            <label className="field">
+              <span>VM 空闲休眠（分钟）</span>
+              <input
+                type="number"
+                min="5"
+                max="1440"
+                step="1"
+                value={idleSuspendMinutes}
+                onChange={(event) => setIdleSuspendMinutes(event.target.value)}
+                disabled={!idleSuspend}
+              />
+            </label>
+            <label className="toggle policy-toggle">
+              <input
+                type="checkbox"
+                checked={approval}
+                onChange={(event) => setApproval(event.target.checked)}
+              />
+              <span>敏感操作需要审批</span>
+            </label>
+            <label className="toggle policy-toggle">
+              <input
+                type="checkbox"
+                checked={autoArchive}
+                onChange={(event) => setAutoArchive(event.target.checked)}
+              />
+              <span>Worker 空闲后自动归档</span>
+            </label>
+            <label className="field">
+              <span>Worker 空闲归档（分钟）</span>
+              <input
+                type="number"
+                min="1"
+                max="1440"
+                step="1"
+                value={idleMinutes}
+                onChange={(event) => setIdleMinutes(event.target.value)}
+                disabled={!autoArchive}
+              />
+            </label>
+          </div>
+          <p className="muted small">
+            有运行任务、待审批、排队消息或 Execution Lease 的 Worker 不会被归档；归档只停止 Worker
+            会话，不停止 VM。
+          </p>
+          <div className="action-row">
+            <button
+              type="button"
+              className="primary"
+              onClick={() => void savePolicy()}
+              disabled={busy}
+            >
+              {busy ? "保存中…" : "保存设置"}
+            </button>
+            {policyMessage && <span className="muted small">{policyMessage}</span>}
+          </div>
+        </section>
+      )}
+
+      {view === "settings" && (
+        <section className="panel muted-panel" aria-labelledby="runtime-title">
+          <div className="panel-heading">
+            <h2 id="runtime-title">运行信息</h2>
+            <span className="muted small">本机诊断</span>
+          </div>
+          <dl className="runtime-list">
             <div>
-              <dt>显示名称</dt>
+              <dt>配置文件</dt>
               <dd>
-                {settings?.onboarding.localUser?.displayName ??
-                  onboarding.localUser?.displayName ??
-                  "—"}
+                <code>{runtime.configPath}</code>
               </dd>
             </div>
             <div>
-              <dt>敏感操作审批</dt>
-              <dd>{approval ? "开启" : "关闭"}</dd>
-            </div>
-            <div>
-              <dt>模型凭据</dt>
+              <dt>数据根目录</dt>
               <dd>
-                {onboarding.credentialsConfigured
-                  ? (onboarding.preferredModelProvider ?? "已配置")
-                  : "未配置"}
+                <code>{runtime.dataRoot}</code>
               </dd>
             </div>
             <div>
-              <dt>凭据存储</dt>
-              <dd>{bridge ? "系统安全存储" : "仅桌面应用可用"}</dd>
+              <dt>镜像 / 下载</dt>
+              <dd>
+                <code>{runtime.storage.images}</code>
+              </dd>
+            </div>
+            <div>
+              <dt>VM / 快照</dt>
+              <dd>
+                <code>{runtime.storage.vms}</code>
+              </dd>
             </div>
           </dl>
-        </article>
+          {bridge && (
+            <div className="action-row">
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => void bridge.app.openLogs()}
+              >
+                打开日志目录
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => void bridge.app.restartControlPlane()}
+              >
+                重启本地服务
+              </button>
+            </div>
+          )}
+        </section>
+      )}
+
+      {view === "settings" && (
+        <DesktopSettingsPanels
+          bridge={bridge}
+          preferences={preferences}
+          setPreferences={setPreferences}
+          preferencesMessage={preferencesMessage}
+          updateFeedDraft={updateFeedDraft}
+          setUpdateFeedDraft={setUpdateFeedDraft}
+          updateStatus={updateStatus}
+          updateBusy={updateBusy}
+          updateMessage={updateMessage}
+          onSavePreferences={() => void saveDesktopPreferences()}
+          onUpdateAction={(action) => void runUpdateAction(action)}
+          onInstall={() => void runUpdateInstall()}
+          onRollback={() => void runUpdateRollback()}
+          onCloseBehaviorChange={(value) => void changeCloseBehavior(value)}
+          authInfo={authInfo}
+          rotateBusy={rotateBusy}
+          rotateMessage={rotateMessage}
+          onRotate={() => void rotateAccessKey()}
+          controlPlaneState={controlPlaneState}
+        />
+      )}
+    </div>
+  );
+}
+
+interface DesktopSettingsPanelsProps {
+  bridge: DesktopBridge | null;
+  preferences: DesktopPreferences | null;
+  setPreferences(value: DesktopPreferences): void;
+  preferencesMessage: string | null;
+  updateFeedDraft: string;
+  setUpdateFeedDraft(value: string): void;
+  updateStatus: DesktopUpdateStatus | null;
+  updateBusy: boolean;
+  updateMessage: string | null;
+  onSavePreferences(): void;
+  onUpdateAction(action: "check" | "download"): void;
+  onInstall(): void;
+  onRollback(): void;
+  onCloseBehaviorChange(value: DesktopPreferences["closeBehavior"]): void;
+  authInfo: LocalAuthSessionView;
+  rotateBusy: boolean;
+  rotateMessage: string | null;
+  onRotate(): void;
+  controlPlaneState: ControlPlaneState | null;
+}
+
+function DesktopSettingsPanels({
+  bridge,
+  preferences,
+  setPreferences,
+  preferencesMessage,
+  updateFeedDraft,
+  setUpdateFeedDraft,
+  updateStatus,
+  updateBusy,
+  updateMessage,
+  onSavePreferences,
+  onUpdateAction,
+  onInstall,
+  onRollback,
+  onCloseBehaviorChange,
+  authInfo,
+  rotateBusy,
+  rotateMessage,
+  onRotate,
+  controlPlaneState,
+}: DesktopSettingsPanelsProps): React.JSX.Element {
+  return (
+    <>
+      <section className="panel" aria-labelledby="desktop-settings-title">
+        <div className="panel-heading">
+          <div>
+            <h2 id="desktop-settings-title">桌面与后台服务</h2>
+            <p className="muted small">这些选项只在 Electron 桌面应用中可用。</p>
+          </div>
+          <span className="pill ok">
+            {controlPlaneState ? CONTROL_PLANE_STATE_LABELS[controlPlaneState] : "运行中"}
+          </span>
+        </div>
+        {!bridge || !preferences ? (
+          <p className="muted">
+            当前通过浏览器访问；桌面服务管理、开机启动和原生通知仅桌面应用可用。
+          </p>
+        ) : (
+          <>
+            <div className="policy-grid">
+              <label className="field">
+                <span>关闭窗口时</span>
+                <select
+                  value={preferences.closeBehavior}
+                  onChange={(event) =>
+                    onCloseBehaviorChange(event.target.value as DesktopPreferences["closeBehavior"])
+                  }
+                >
+                  <option value="keep_running">后台继续运行</option>
+                  <option value="quit">停止服务并退出</option>
+                </select>
+              </label>
+              <label className="toggle policy-toggle">
+                <input
+                  type="checkbox"
+                  checked={preferences.launchAtLogin}
+                  onChange={(event) =>
+                    setPreferences({ ...preferences, launchAtLogin: event.target.checked })
+                  }
+                />
+                <span>开机时启动（隐藏到托盘）</span>
+              </label>
+              <label className="toggle policy-toggle">
+                <input
+                  type="checkbox"
+                  checked={preferences.notificationsEnabled}
+                  onChange={(event) =>
+                    setPreferences({
+                      ...preferences,
+                      notificationsEnabled: event.target.checked,
+                    })
+                  }
+                />
+                <span>任务和审批使用桌面通知</span>
+              </label>
+              <label className="toggle policy-toggle">
+                <input
+                  type="checkbox"
+                  checked={preferences.autoUpdateCheck}
+                  onChange={(event) =>
+                    setPreferences({ ...preferences, autoUpdateCheck: event.target.checked })
+                  }
+                />
+                <span>启动后自动检查更新</span>
+              </label>
+              <label className="field">
+                <span>更新源（HTTPS Manifest）</span>
+                <input
+                  value={updateFeedDraft}
+                  placeholder="https://updates.example.com/latest.json"
+                  spellCheck={false}
+                  onChange={(event) => setUpdateFeedDraft(event.target.value)}
+                />
+              </label>
+            </div>
+            <div className="action-row">
+              <button type="button" className="primary" onClick={onSavePreferences}>
+                保存桌面设置
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => void bridge.app.restartControlPlane()}
+              >
+                重启本地服务
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => void bridge.app.stopControlPlane()}
+              >
+                停止本地服务
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => void bridge.app.startControlPlane()}
+              >
+                启动本地服务
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => void bridge.app.openLogs()}
+              >
+                打开日志目录
+              </button>
+            </div>
+            {preferencesMessage && <p className="muted small">{preferencesMessage}</p>}
+          </>
+        )}
       </section>
 
-      <WorkManager
-        onOpenVmConsole={(vmId) =>
-          setConsoleRequest((current) => ({ vmId, nonce: (current?.nonce ?? 0) + 1 }))
-        }
-      />
-
-      <BotManager bridge={bridge} />
-
-      <VmManager
-        host={host}
-        consoleRequest={consoleRequest}
-        hostReserveBytes={
-          settings?.resourcePolicy.hostReserveBytes ?? onboarding.resourcePolicy.hostReserveBytes
-        }
-      />
-
-      <section className="panel">
+      <section className="panel" aria-labelledby="updates-title">
         <div className="panel-heading">
-          <h2>存储</h2>
-          <button type="button" className="secondary" onClick={() => void reload()} disabled={busy}>
-            重新检查
-          </button>
+          <div>
+            <h2 id="updates-title">更新与回滚</h2>
+            <p className="muted small">
+              安装前备份 SQLite 数据库和当前应用资源；更新失败可在本页回到上一版本。
+            </p>
+          </div>
+          <span className={`pill ${updateStatus?.state === "error" ? "warn" : "ok"}`}>
+            {updateStatus?.currentVersion ?? "—"}
+          </span>
         </div>
-        {storage ? (
+        {!bridge ? (
+          <p className="muted">更新只适用于桌面安装版。</p>
+        ) : (
           <>
-            <div className="storage-summary">
+            <dl className="runtime-list">
               <div>
-                <span className="muted small">数据根目录</span>
-                <code>{storage.root}</code>
+                <dt>当前版本</dt>
+                <dd>{updateStatus?.currentVersion ?? "—"}</dd>
               </div>
               <div>
-                <span className="muted small">可用 / 总量</span>
-                <strong>
-                  {formatBytes(storage.freeBytes)} / {formatBytes(storage.totalBytes)}
-                </strong>
+                <dt>可用版本</dt>
+                <dd>{updateStatus?.availableVersion ?? "—"}</dd>
               </div>
-            </div>
-            <div className="meter" aria-hidden="true">
-              <span style={{ width: `${usedPercent}%` }} />
-            </div>
-            <ul className="usage-list">
-              {storage.categories.map((category) => (
-                <li key={category.category}>
-                  <span>{STORAGE_CATEGORY_LABELS[category.category]}</span>
-                  <span className="muted">{category.files} 个文件</span>
-                  <strong>{formatBytes(category.bytes)}</strong>
-                </li>
-              ))}
-              <li>
-                <span>数据库</span>
-                <span className="muted">元数据</span>
-                <strong>{formatBytes(storage.databaseBytes)}</strong>
-              </li>
-            </ul>
-            {storage.lock && (
-              <div className="notice small">
-                存储锁：{storage.lock.operation} · {storage.lock.owner} · pid {storage.lock.pid}
+              <div>
+                <dt>状态</dt>
+                <dd>{updateStatus?.state ?? "idle"}</dd>
+              </div>
+            </dl>
+            {updateStatus?.notes && <p className="muted small">{updateStatus.notes}</p>}
+            {updateStatus?.downloadProgress !== null &&
+              updateStatus?.downloadProgress !== undefined && (
+                <div
+                  className="meter"
+                  role="progressbar"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(updateStatus.downloadProgress * 100)}
+                  aria-label={`下载进度 ${Math.round(updateStatus.downloadProgress * 100)}%`}
+                >
+                  <span style={{ width: `${Math.round(updateStatus.downloadProgress * 100)}%` }} />
+                </div>
+              )}
+            {updateStatus?.error && (
+              <div className="notice" role="alert">
+                {updateStatus.error}
               </div>
             )}
-            {storage.pendingMigration && (
-              <div className="notice small">
-                检测到未完成迁移：{storage.pendingMigration.targetRoot}（
-                {formatDate(storage.pendingMigration.startedAt)}）。请重新执行迁移或检查日志。
-              </div>
+            {updateMessage && (
+              <p className="muted small" role="status">
+                {updateMessage}
+              </p>
             )}
             <div className="action-row">
               <button
                 type="button"
                 className="secondary"
-                onClick={() => void cleanupDownloads()}
-                disabled={busy}
+                disabled={updateBusy}
+                onClick={() => onUpdateAction("check")}
               >
-                清理下载缓存
+                检查更新
               </button>
               <button
                 type="button"
                 className="secondary"
-                onClick={() => setShowMigration((value) => !value)}
-                disabled={runtime.dataRootSource === "environment"}
+                disabled={updateBusy || updateStatus?.state !== "available"}
+                onClick={() => onUpdateAction("download")}
               >
-                {showMigration ? "收起迁移" : "迁移存储位置"}
+                下载并校验
+              </button>
+              <button
+                type="button"
+                className="primary"
+                disabled={updateBusy || !updateStatus?.readyToInstall}
+                onClick={onInstall}
+              >
+                安装并重启
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                disabled={updateBusy || !updateStatus?.rollbackAvailable}
+                onClick={onRollback}
+              >
+                回滚到上一版本
               </button>
             </div>
-            {runtime.dataRootSource === "environment" && (
+            {updateStatus?.rollbackAvailable && (
               <p className="muted small">
-                数据根目录由 AGENT_IN_BOX_DATA_ROOT 管理，当前界面不允许迁移。
+                可回滚版本：{updateStatus.rollbackAvailable.version} · 数据库备份：
+                {updateStatus.rollbackAvailable.databaseBackupPath ?? "无"}
               </p>
             )}
-            {cleanupMessage && <p className="muted small">{cleanupMessage}</p>}
-
-            {showMigration && (
-              <div className="migration-box">
-                <h3>迁移到新目录</h3>
-                <p className="muted small">
-                  迁移会在存储锁保护下复制镜像、VM、快照和产物，校验文件哈希与 SQLite
-                  完整性，最后更新配置。旧目录不会自动删除。迁移期间不要运行 VM。
-                </p>
-                <div className="input-row">
-                  <input
-                    value={targetRoot}
-                    onChange={(event) => {
-                      setTargetRoot(event.target.value);
-                      setMigrationValidation(null);
-                    }}
-                    placeholder="例如 D:\\AgentInBox"
-                    spellCheck={false}
-                  />
-                  {bridge && (
-                    <button type="button" className="secondary" onClick={() => void browseTarget()}>
-                      浏览…
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    className="secondary"
-                    onClick={() => void validateTarget()}
-                    disabled={migrationBusy}
-                  >
-                    检查目标
-                  </button>
-                </div>
-                {migrationValidation && (
-                  <div className={`validation-box ${migrationValidation.ok ? "ok" : "bad"}`}>
-                    <strong>{migrationValidation.ok ? "目标可用" : "目标不可用"}</strong>
-                    <span className="muted small">{migrationValidation.resolvedPath}</span>
-                    <span className="muted small">
-                      可用 {formatBytes(migrationValidation.freeBytes)}
-                    </span>
-                    {migrationValidation.errors.map((error) => (
-                      <span key={error} className="error-line">
-                        {error}
-                      </span>
-                    ))}
-                  </div>
-                )}
-                <label className="toggle">
-                  <input
-                    type="checkbox"
-                    checked={migrationAcknowledged}
-                    onChange={(event) => setMigrationAcknowledged(event.target.checked)}
-                  />
-                  <span>我确认迁移期间没有运行中的 VM，并理解完成后需要重启本地服务。</span>
-                </label>
-                {migrationError && <div className="notice">{migrationError}</div>}
-                <button
-                  type="button"
-                  className="primary"
-                  onClick={() => void migrate()}
-                  disabled={migrationBusy || !migrationValidation?.ok || !migrationAcknowledged}
-                >
-                  {migrationBusy ? "正在迁移…" : "开始迁移"}
-                </button>
-              </div>
-            )}
           </>
-        ) : (
-          <p className="muted">正在读取存储信息…</p>
         )}
       </section>
 
-      <section className="panel">
+      <section className="panel" aria-labelledby="auth-settings-title">
         <div className="panel-heading">
-          <h2>资源策略</h2>
-          <span className="muted small">
-            宿主机内存 {host ? formatBytes(host.totalMemoryBytes) : "未知"}
-          </span>
-        </div>
-        <div className="policy-grid">
-          <label className="field">
-            <span>Host Reserve（GB）</span>
-            <input
-              type="number"
-              min="0"
-              step="0.5"
-              value={reserveGb}
-              onChange={(event) => setReserveGb(event.target.value)}
-            />
-          </label>
-          <label className="field">
-            <span>自动启动</span>
-            <select
-              value={autoStart}
-              onChange={(event) => setAutoStart(event.target.value as AutoStartPolicy)}
-            >
-              <option value="manual">仅手动启动</option>
-              <option value="when_needed">有任务时自动启动</option>
-            </select>
-          </label>
-          <label className="field">
-            <span>Soft Memory Budget（GB，0 = 自动）</span>
-            <input
-              type="number"
-              min="0"
-              step="0.5"
-              value={softBudgetGb}
-              onChange={(event) => setSoftBudgetGb(event.target.value)}
-            />
-          </label>
-          <label className="toggle policy-toggle">
-            <input
-              type="checkbox"
-              checked={idleSuspend}
-              onChange={(event) => setIdleSuspend(event.target.checked)}
-            />
-            <span>VM 空闲后自动休眠</span>
-          </label>
-          <label className="field">
-            <span>VM 空闲休眠（分钟）</span>
-            <input
-              type="number"
-              min="5"
-              max="1440"
-              step="1"
-              value={idleSuspendMinutes}
-              onChange={(event) => setIdleSuspendMinutes(event.target.value)}
-              disabled={!idleSuspend}
-            />
-          </label>
-          {bridge && closeBehavior && (
-            <label className="field">
-              <span>关闭窗口时</span>
-              <select
-                value={closeBehavior}
-                onChange={(event) => void changeCloseBehavior(event.target.value as CloseBehavior)}
-              >
-                <option value="keep_running">后台继续运行</option>
-                <option value="quit">停止服务并退出</option>
-              </select>
-            </label>
-          )}
-          <label className="toggle policy-toggle">
-            <input
-              type="checkbox"
-              checked={approval}
-              onChange={(event) => setApproval(event.target.checked)}
-            />
-            <span>敏感操作需要审批</span>
-          </label>
-          <label className="toggle policy-toggle">
-            <input
-              type="checkbox"
-              checked={autoArchive}
-              onChange={(event) => setAutoArchive(event.target.checked)}
-            />
-            <span>Worker 空闲后自动归档</span>
-          </label>
-          <label className="field">
-            <span>Worker 空闲归档（分钟）</span>
-            <input
-              type="number"
-              min="1"
-              max="1440"
-              step="1"
-              value={idleMinutes}
-              onChange={(event) => setIdleMinutes(event.target.value)}
-              disabled={!autoArchive}
-            />
-          </label>
-        </div>
-        <p className="muted small">
-          有运行任务、待审批、排队消息或 Execution Lease 的 Worker 不会被归档；归档只停止 Worker
-          会话，不停止 VM。
-        </p>
-        <div className="action-row">
-          <button
-            type="button"
-            className="primary"
-            onClick={() => void savePolicy()}
-            disabled={busy}
-          >
-            {busy ? "保存中…" : "保存设置"}
-          </button>
-          {policyMessage && <span className="muted small">{policyMessage}</span>}
-        </div>
-      </section>
-
-      <section className="panel muted-panel">
-        <div className="panel-heading">
-          <h2>运行信息</h2>
-          <span className="muted small">本机诊断</span>
+          <h2 id="auth-settings-title">本机身份与认证</h2>
+          <span className="pill ok">{authInfo.user?.displayName ?? "本机管理员"}</span>
         </div>
         <dl className="runtime-list">
           <div>
-            <dt>配置文件</dt>
+            <dt>访问密钥文件</dt>
             <dd>
-              <code>{runtime.configPath}</code>
+              <code>{authInfo.accessKeyPath}</code>
             </dd>
           </div>
           <div>
-            <dt>数据根目录</dt>
-            <dd>
-              <code>{runtime.dataRoot}</code>
-            </dd>
-          </div>
-          <div>
-            <dt>镜像 / 下载</dt>
-            <dd>
-              <code>{runtime.storage.images}</code>
-            </dd>
-          </div>
-          <div>
-            <dt>VM / 快照</dt>
-            <dd>
-              <code>{runtime.storage.vms}</code>
-            </dd>
+            <dt>会话过期</dt>
+            <dd>{authInfo.expiresAt ? formatDate(authInfo.expiresAt) : "—"}</dd>
           </div>
         </dl>
-        {bridge && (
-          <div className="action-row">
-            <button type="button" className="secondary" onClick={() => void bridge.app.openLogs()}>
-              打开日志目录
-            </button>
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => void bridge.app.restartControlPlane()}
-            >
-              重启本地服务
-            </button>
-          </div>
-        )}
+        <p className="muted small">
+          控制平面只接受回环地址和同源请求，写操作需要 CSRF
+          令牌。更换访问密钥会使其他浏览器会话立即失效。
+        </p>
+        <div className="action-row">
+          <button type="button" className="secondary" disabled={rotateBusy} onClick={onRotate}>
+            {rotateBusy ? "正在更换…" : "更换本机访问密钥"}
+          </button>
+          {rotateMessage && <span className="muted small">{rotateMessage}</span>}
+        </div>
       </section>
-    </div>
+    </>
   );
 }
 

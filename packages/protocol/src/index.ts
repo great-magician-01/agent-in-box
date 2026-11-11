@@ -626,6 +626,7 @@ export interface RuntimeInfo {
     snapshots: string;
     artifacts: string;
     archives: string;
+    inbox: string;
   };
 }
 
@@ -636,6 +637,7 @@ export const STORAGE_CATEGORIES = [
   "snapshots",
   "artifacts",
   "archives",
+  "inbox",
 ] as const;
 export type StorageCategory = (typeof STORAGE_CATEGORIES)[number];
 
@@ -648,6 +650,7 @@ export interface StorageLayoutInfo {
   snapshots: string;
   artifacts: string;
   archives: string;
+  inbox: string;
 }
 
 export interface StorageValidation {
@@ -730,9 +733,62 @@ export interface ControlPlaneStatus {
   restarts: number;
 }
 
+export type DesktopUpdateState =
+  | "idle"
+  | "checking"
+  | "up_to_date"
+  | "available"
+  | "downloading"
+  | "ready"
+  | "installing"
+  | "error";
+
+export interface DesktopUpdateRollbackView {
+  version: string;
+  installerPath: string;
+  databaseBackupPath: string | null;
+  createdAt: IsoTimestamp;
+}
+
+export interface DesktopUpdateStatus {
+  state: DesktopUpdateState;
+  currentVersion: string;
+  availableVersion: string | null;
+  notes: string | null;
+  downloadProgress: number | null;
+  error: string | null;
+  readyToInstall: boolean;
+  rollbackAvailable: DesktopUpdateRollbackView | null;
+  checkedAt: IsoTimestamp | null;
+}
+
+export interface DesktopPreferences {
+  closeBehavior: CloseBehavior;
+  launchAtLogin: boolean;
+  notificationsEnabled: boolean;
+  autoUpdateCheck: boolean;
+  updateFeedUrl: string | null;
+}
+
+export interface DesktopPreferencesPatch {
+  closeBehavior?: CloseBehavior;
+  launchAtLogin?: boolean;
+  notificationsEnabled?: boolean;
+  autoUpdateCheck?: boolean;
+  updateFeedUrl?: string | null;
+}
+
+export interface DesktopNotificationRequest {
+  notificationId: Id;
+  title: string;
+  body: string;
+}
+
 export interface DesktopAppStatus {
   controlPlane: ControlPlaneStatus;
   closeBehavior: CloseBehavior;
+  preferences: DesktopPreferences;
+  update: DesktopUpdateStatus;
   configDirectory: string;
   logDirectory: string;
   version: string;
@@ -772,6 +828,9 @@ export interface DesktopBridge {
     status(): Promise<DesktopAppStatus>;
     onStatus(listener: (status: DesktopAppStatus) => void): () => void;
     restartControlPlane(): Promise<DesktopAppStatus>;
+    startControlPlane(): Promise<DesktopAppStatus>;
+    stopControlPlane(): Promise<DesktopAppStatus>;
+    onNavigate(listener: (view: string) => void): () => void;
     quit(): Promise<void>;
     openLogs(): Promise<void>;
   };
@@ -779,8 +838,19 @@ export interface DesktopBridge {
     chooseDirectory(input?: { title?: string; defaultPath?: string }): Promise<string | null>;
   };
   config: {
-    getCloseBehavior(): Promise<CloseBehavior>;
-    setCloseBehavior(value: CloseBehavior): Promise<CloseBehavior>;
+    getPreferences(): Promise<DesktopPreferences>;
+    setPreferences(patch: DesktopPreferencesPatch): Promise<DesktopPreferences>;
+  };
+  updates: {
+    status(): Promise<DesktopUpdateStatus>;
+    check(): Promise<DesktopUpdateStatus>;
+    download(): Promise<DesktopUpdateStatus>;
+    install(): Promise<void>;
+    rollback(): Promise<void>;
+  };
+  notifications: {
+    show(request: DesktopNotificationRequest): Promise<boolean>;
+    onClick(listener: (notificationId: Id) => void): () => void;
   };
   credentials: {
     status(): Promise<DesktopCredentialStatus>;
@@ -2081,4 +2151,88 @@ export function isWorkerStatus(value: unknown): value is WorkerStatus {
 
 export function isVmPowerState(value: unknown): value is VmPowerState {
   return typeof value === "string" && (VM_POWER_STATES as readonly string[]).includes(value);
+}
+
+/* ------------------------------------------------------------------------- */
+/* Phase 11: local browser authentication, notification center and inbox.     */
+/* ------------------------------------------------------------------------- */
+
+export type LocalAuthState = "authenticated" | "anonymous";
+
+export interface LocalAuthUser {
+  id: Id;
+  displayName: string;
+  role: LocalUserRole;
+}
+
+export interface LocalAuthSessionView {
+  state: LocalAuthState;
+  user: LocalAuthUser | null;
+  csrfToken: string | null;
+  expiresAt: IsoTimestamp | null;
+  /** Absolute path of the local access-key file shown on the unlock screen. */
+  accessKeyPath: string;
+  /** Only true when the desktop shell exposes its trusted-session bridge. */
+  desktopShell: boolean;
+}
+
+export interface LocalAuthLoginRequest {
+  accessKey: string;
+  label?: string;
+}
+
+export interface LocalAuthRotateResult {
+  accessKeyPath: string;
+  rotatedAt: IsoTimestamp;
+  revokedSessions: number;
+}
+
+export const NOTIFICATION_KINDS = [
+  "task",
+  "approval",
+  "worker",
+  "vm",
+  "resource",
+  "router",
+  "bot",
+  "system",
+] as const;
+export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
+
+export const NOTIFICATION_SEVERITIES = ["info", "success", "warning", "danger"] as const;
+export type NotificationSeverity = (typeof NOTIFICATION_SEVERITIES)[number];
+
+export interface NotificationRecord {
+  id: Id;
+  kind: NotificationKind;
+  severity: NotificationSeverity;
+  title: string;
+  body: string;
+  projectId: Id | null;
+  taskId: Id | null;
+  vmId: Id | null;
+  workerId: Id | null;
+  createdAt: IsoTimestamp;
+  readAt: IsoTimestamp | null;
+  dismissedAt: IsoTimestamp | null;
+}
+
+export interface NotificationCenterView {
+  items: NotificationRecord[];
+  unreadCount: number;
+  snapshotAt: IsoTimestamp;
+}
+
+export interface InboxFileRecord {
+  id: Id;
+  originalName: string;
+  contentType: string;
+  sizeBytes: number;
+  sha256: string;
+  projectId: Id | null;
+  createdAt: IsoTimestamp;
+}
+
+export interface InboxFileListResponse {
+  items: InboxFileRecord[];
 }

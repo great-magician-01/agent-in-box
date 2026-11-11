@@ -14,6 +14,15 @@ if (!fs.existsSync(sessionFile)) fs.writeFileSync(sessionFile, "");
 if (process.env.FAKE_PI_ARGS_LOG) {
   fs.writeFileSync(process.env.FAKE_PI_ARGS_LOG, JSON.stringify(args));
 }
+if (process.env.FAKE_PI_ENV_LOG) {
+  fs.writeFileSync(
+    process.env.FAKE_PI_ENV_LOG,
+    JSON.stringify({
+      cuaUrl: process.env.AGENT_IN_BOX_CUA_URL || "",
+      cuaToken: process.env.AGENT_IN_BOX_CUA_TOKEN || "",
+    }),
+  );
+}
 
 function write(record) {
   process.stdout.write(JSON.stringify(record) + "\n");

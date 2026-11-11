@@ -312,6 +312,23 @@ describe("TaskService", () => {
     expect((await service.claimNext(ctx.vmId))?.id).toBe(task.id);
   });
 
+  it("requeues a blocked task without replaying its old execution", async () => {
+    await setVmRunning();
+    const { task } = await service.create(taskInput());
+    await service.claimNext(ctx.vmId);
+    const blocked = await service.block(task.id, "cua_no_progress", "no progress");
+    expect(blocked.status).toBe("blocked");
+    const requeued = await service.requeue(task.id);
+    expect(requeued).toMatchObject({
+      status: "queued",
+      assignedWorkerId: null,
+      errorCode: null,
+      startedAt: null,
+    });
+    expect((await service.claimNext(ctx.vmId))?.attemptCount).toBe(2);
+    await expect(service.requeue(task.id)).rejects.toBeInstanceOf(InvalidTransitionError);
+  });
+
   it("revalidates project archive, binding and VM state when retrying", async () => {
     await setVmRunning();
     const { task } = await service.create(taskInput());

@@ -175,6 +175,7 @@ export function WorkManager(): React.JSX.Element {
             selectedProject={selectedDetail}
             taskDetail={taskDetail}
             selectedTaskId={selectedTaskId}
+            revision={revision}
             onSelectTask={setSelectedTaskId}
             onSelectProject={selectProject}
             onOpenConversation={openConversation}

@@ -23,6 +23,24 @@ import (
 //	go build -ldflags "-X main.version=<version>"
 var version = "0.1.0"
 
+func defaultVerifyRoots() string {
+	if value := strings.TrimSpace(os.Getenv("AGENT_IN_BOX_VERIFY_ROOTS")); value != "" {
+		return value
+	}
+	return "/home:/tmp"
+}
+
+func splitVerifyRoots(value string) []string {
+	parts := strings.Split(value, ":")
+	roots := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			roots = append(roots, trimmed)
+		}
+	}
+	return roots
+}
+
 func defaultUpdateDir() string {
 	if configDir, err := os.UserConfigDir(); err == nil && strings.TrimSpace(configDir) != "" {
 		return filepath.Join(configDir, "agent-in-box", "guest-agent", "updates")
@@ -37,6 +55,7 @@ func main() {
 	actionTimeout := flag.Duration("action-timeout", 30*time.Second, "maximum time allowed for one input action (capped at 30s)")
 	updateDir := flag.String("update-dir", defaultUpdateDir(), "directory for verified staged updates; empty disables update staging")
 	maxUpdateBytes := flag.Int64("update-max-bytes", 128<<20, "largest guest-agent update that may be staged")
+	verifyRoots := flag.String("verify-roots", defaultVerifyRoots(), "colon-separated absolute guest roots allowed for read-only completion file evidence")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
@@ -69,6 +88,7 @@ func main() {
 		ActionTimeout:  *actionTimeout,
 		UpdateDir:      *updateDir,
 		MaxUpdateBytes: *maxUpdateBytes,
+		VerifyRoots:    splitVerifyRoots(*verifyRoots),
 	})
 	mux := http.NewServeMux()
 	mux.Handle("/healthz", healthHandler)

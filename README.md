@@ -1,6 +1,6 @@
 # Agent-in-Box
 
-面向个人用户的本地 AI 虚拟机工作平台。当前仓库已完成 **开发计划阶段 1（工程骨架、协议和本地持久化）**、**阶段 2（Electron、本地服务与自定义存储）**、**阶段 3（镜像服务、VM 生命周期与管理 UI）**、**阶段 4（Guest Agent、noVNC 实时控制台与统一 Execution Lease）**、**阶段 5（项目、多 VM 绑定、持久任务队列与任务看板）** 和 **阶段 6（Pi Worker Runtime、Model Broker 与 Worker Engine Adapter）**。包含无特权 Electron 壳、控制平面进程监管、首次启动向导、自定义数据目录、可续传镜像服务、受 ACL 保护的 Go VM Supervisor、QEMU/WHPX 生命周期、认证 Guest 管理通道、AI/人工互斥桌面输入、跨项目串行的 VM 任务内核，以及认证 Guest Worker RPC、短期模型令牌、流式 Broker、Worker 心跳/归档/恢复和项目 Worker 会话面板。真实 QEMU/WHPX、Linux Golden Image、真实 Pi/模型和浏览器/Electron 人工交互验收仍按各阶段记录单独执行。
+面向个人用户的本地 AI 虚拟机工作平台。当前仓库已完成 **开发计划阶段 1（工程骨架、协议和本地持久化）**、**阶段 2（Electron、本地服务与自定义存储）**、**阶段 3（镜像服务、VM 生命周期与管理 UI）**、**阶段 4（Guest Agent、noVNC 实时控制台与统一 Execution Lease）**、**阶段 5（项目、多 VM 绑定、持久任务队列与任务看板）**、**阶段 6（Pi Worker Runtime、Model Broker 与 Worker Engine Adapter）** 和 **阶段 7（完整 Computer Use 执行器、执行保护、Policy/Approval 与完成校验）**。包含无特权 Electron 壳、控制平面进程监管、首次启动向导、自定义数据目录、可续传镜像服务、受 ACL 保护的 Go VM Supervisor、QEMU/WHPX 生命周期、认证 Guest 管理通道、AI/人工互斥桌面输入、跨项目串行的 VM 任务内核、认证 Guest Worker RPC、短期模型令牌、流式 Broker、Worker 心跳/归档/恢复、Host 侧 Computer Use Broker、动作/截图 Trace、人工审批和独立完成证据校验。真实 QEMU/WHPX、Linux Golden Image、真实 Pi/模型任务评测和浏览器/Electron 人工交互验收仍按各阶段记录单独执行。
 
 完整方案见：
 
@@ -12,7 +12,19 @@
 - [阶段 4 验收记录](tests/phase4/summary.md)
 - [阶段 5 验收记录](tests/phase5/summary.md)
 - [阶段 6 验收记录](tests/phase6/summary.md)
+- [阶段 7 验收记录](tests/phase7/summary.md)
 - [Linux Guest Worker 安装资产](images/linux/README.md)
+
+## 阶段 7 已落地
+
+- **Computer Use 工具集**：Host 侧回环 Computer Use Broker、短期 `cua_tokens` 和 Guest Pi `cua-extension.js`；截图、点击/双击、移动、输入、按键、滚动、拖拽、等待和完成工具。Guest 不持有 Guest Agent 令牌，Broker 每次请求校验 VM、Worker、任务和 Per-VM Execution Lease。
+- **动作审计与 Trace**：每个动作记录任务、Worker、VM、Lease、来源截图、屏幕宽高/DPI/缩放、前后截图、结果和错误；`GET /api/v1/tasks/:id/trace` 与看板 Trace/截图/审批视图。
+- **执行闭环保护**：最大步数、最长执行时间、无进展/重复动作检测、最新截图与分辨率变化校验、人工接管、任务取消和完成后的回合收敛；VM 重启/断线不重放旧动作。
+- **Policy/Approval**：项目级步数/时长、审批动作、文件证据根目录、网络白名单基础与 Guest 凭据策略；等待审批占用 VM 执行位，批准后只执行原存储动作，拒绝/超时/任务取消均不执行并记录工具结果和任务事件。
+- **独立完成校验**：Guest 只读文件/进程证据（大小、SHA-256、PID）或重新捕获的 completion 截图；连续失败会阻塞任务，模型自述不能直接把任务置为完成。
+- **验证边界**：`pnpm smoke:phase7` 使用真实控制平面/SQLite/HTTP Broker/Worker RPC 和伪造 Guest Agent 验证主链路；未执行真实 QEMU/WHPX、真实 Pi/模型任务集和真实 X11 中文/滚动/拖拽/DPI 回归。
+
+详见 [`tests/phase7/summary.md`](tests/phase7/summary.md)。
 
 ## 阶段 6 已落地
 
@@ -139,6 +151,9 @@ pnpm smoke:phase5
 # Worker RPC + 短期 Broker 令牌/撤销 + 事件映射/取消 Abort + 归档/重启恢复
 pnpm smoke:phase6
 
+# Computer Use Broker/Lease/截图 Trace + 审批 + 执行保护 + 完成证据校验
+pnpm smoke:phase7
+
 # 生成 Guest Worker Runtime 自包含 tar.gz 与 SHA-256
 pnpm package:worker-runtime
 
@@ -239,12 +254,18 @@ SQLite 数据库位于数据根目录下的 `agent-in-box.sqlite`，使用 WAL �
 已在当前开发环境实际执行：
 
 - `pnpm install`：成功；pnpm 11 仅允许 `esbuild`、`electron`、`better-sqlite3` 构建脚本
-- `pnpm check`：lint、typecheck、183 个 Vitest 测试、Go test、全部构建均通过；1 个环境依赖测试显式跳过
+- `pnpm check`：lint、typecheck、212 个 Vitest 测试、Go test、全部构建均通过；1 个环境依赖测试显式跳过
 - 控制平面 `GET /api/v1/health`、`GET /api/v1/runtime` 返回正常
-- 控制平面启动时创建 SQLite 数据库并应用 `001_initial_schema`、`002_phase2_settings`、`003_phase3_images`、`004_phase5_projects_tasks`、`005_phase6_workers_models`
+- 控制平面启动时创建 SQLite 数据库并应用 `001_initial_schema`、`002_phase2_settings`、`003_phase3_images`、`004_phase5_projects_tasks`、`005_phase6_workers_models`、`006_phase7_computer_use`
 - SQLite 表、WAL 模式和迁移记录在真实运行中验证通过
 - Web 开发服务器可访问，`/api` 代理到控制平面正常
 - VM Supervisor 与 Guest Agent 的 `/healthz`、`/readyz` 正常
+
+### 阶段 7 验证（2026-11-11）
+
+- `pnpm smoke:phase7`：真实控制平面/SQLite、HTTP Computer Use Broker、Worker RPC 和伪造 Guest Agent，15 项检查通过：短期 CUA 令牌进入 Guest Pi 环境、无令牌/无观察/过期截图/分辨率变化拒绝、动作经 Lease 执行并记录前后截图、审批批准/拒绝/超时/任务取消、重复动作、最大步数、文件/进程完成证据、completion 截图和 Trace。
+- 测试 Pi 进程与 Guest Agent 是协议测试替身；`realGuestAgent=false`、`realPiProcess=false`、`realModel=false`、`realQemuWxpx=false`、`browserElectronUi=false`。
+- 详细证据、7.4 真实任务评测协议和未关闭门槛见 [`tests/phase7/summary.md`](tests/phase7/summary.md)。
 
 ### 阶段 6 验证（2026-11-11）
 

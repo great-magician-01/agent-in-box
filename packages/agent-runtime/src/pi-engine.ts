@@ -160,6 +160,12 @@ export class PiWorkerEngine implements WorkerEngine {
         ...this.options.env,
         HOME: homeDirectory,
         USERPROFILE: homeDirectory,
+        ...(spec?.computerUse
+          ? {
+              AGENT_IN_BOX_CUA_URL: spec.computerUse.baseUrl,
+              AGENT_IN_BOX_CUA_TOKEN: spec.computerUse.token,
+            }
+          : {}),
       },
     });
     await process.start();
@@ -513,6 +519,7 @@ function summarizeMessages(messages: unknown[], sessionId: string): string {
 }
 
 function sanitizeSpec(spec: WorkerSessionSpec): WorkerSessionSpec {
+  // Never write short-lived broker tokens into the persistent session manifest.
   return {
     workerId: spec.workerId,
     projectId: spec.projectId,

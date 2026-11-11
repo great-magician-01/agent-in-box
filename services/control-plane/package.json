@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@agent-in-box/agent-runtime": "workspace:*",
+    "@agent-in-box/computer-use": "workspace:*",
     "@agent-in-box/config": "workspace:*",
     "@agent-in-box/domain": "workspace:*",
     "@agent-in-box/protocol": "workspace:*",

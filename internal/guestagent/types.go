@@ -37,6 +37,44 @@ type ActionResult struct {
 	ErrorCode string `json:"errorCode,omitempty"`
 }
 
+// VerifyCheck is a read-only evidence check used to verify task completion.
+// The guest agent never returns file contents.
+type VerifyCheck struct {
+	Type      string `json:"type"`
+	Path      string `json:"path,omitempty"`
+	SHA256    string `json:"sha256,omitempty"`
+	SizeBytes *int64 `json:"sizeBytes,omitempty"`
+	Name      string `json:"name,omitempty"`
+}
+
+// VerifyRequest is bounded independently from input actions.
+type VerifyRequest struct {
+	ActionID      string        `json:"actionId,omitempty"`
+	TimeoutMillis int           `json:"timeoutMs,omitempty"`
+	Checks        []VerifyCheck `json:"checks"`
+}
+
+// VerifyCheckResult reports metadata for one independent completion check.
+type VerifyCheckResult struct {
+	Type       string `json:"type"`
+	OK         bool   `json:"ok"`
+	ErrorCode  string `json:"errorCode,omitempty"`
+	Error      string `json:"error,omitempty"`
+	Path       string `json:"path,omitempty"`
+	SizeBytes  int64  `json:"sizeBytes,omitempty"`
+	SHA256     string `json:"sha256,omitempty"`
+	ModifiedAt string `json:"modifiedAt,omitempty"`
+	PIDs       []int  `json:"pids,omitempty"`
+}
+
+// VerifyResult aggregates the independent checks for a completion request.
+type VerifyResult struct {
+	ActionID string              `json:"actionId"`
+	OK       bool                `json:"ok"`
+	Checks   []VerifyCheckResult `json:"checks"`
+	Error    string              `json:"error,omitempty"`
+}
+
 // DesktopInfo describes the active guest display.
 type DesktopInfo struct {
 	DisplayServer string  `json:"displayServer"`

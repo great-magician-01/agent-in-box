@@ -418,6 +418,19 @@ function validateSpec(value: unknown): WorkerSessionSpec {
       throw new RpcHttpError(400, "bad_request", "modelBroker is invalid", false);
     }
   }
+  if (spec.computerUse !== undefined) {
+    const cua = spec.computerUse as Record<string, unknown>;
+    if (
+      typeof cua !== "object" ||
+      cua === null ||
+      typeof cua.baseUrl !== "string" ||
+      !cua.baseUrl.trim() ||
+      typeof cua.token !== "string" ||
+      !cua.token
+    ) {
+      throw new RpcHttpError(400, "bad_request", "computerUse is invalid", false);
+    }
+  }
   return spec as unknown as WorkerSessionSpec;
 }
 

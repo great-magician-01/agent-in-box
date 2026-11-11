@@ -1,6 +1,8 @@
 /* eslint-disable react-hooks/set-state-in-effect -- selected server records initialize edit forms */
 import { useEffect, useMemo, useState } from "react";
 import type {
+  ComputerActionType,
+  CuaPolicyView,
   ProjectBindingView,
   ProjectDetail,
   ProjectView,
@@ -38,6 +40,12 @@ export function ProjectManager({
   const [bindPath, setBindPath] = useState("/home/worker/workspace");
   const [bindPrimary, setBindPrimary] = useState(false);
   const [conversationTitle, setConversationTitle] = useState("");
+  const [policyView, setPolicyView] = useState<CuaPolicyView | null>(null);
+  const [policyMaxSteps, setPolicyMaxSteps] = useState("80");
+  const [policyMinutes, setPolicyMinutes] = useState("15");
+  const [policyApproval, setPolicyApproval] = useState<ComputerActionType[]>([]);
+  const [policyHosts, setPolicyHosts] = useState("");
+  const [policyRoots, setPolicyRoots] = useState("/home, /tmp");
 
   useEffect(() => {
     if (!detail) return;
@@ -45,6 +53,62 @@ export function ProjectManager({
     setEditDescription(detail.project.description);
     setEditWorkspace(detail.project.workspaceConfig.defaultGuestWorkspacePath);
   }, [detail]);
+
+  useEffect(() => {
+    if (!detail) {
+      setPolicyView(null);
+      return;
+    }
+    let active = true;
+    void api
+      .projectPolicy(detail.project.id)
+      .then((view) => {
+        if (!active) return;
+        setPolicyView(view);
+        setPolicyMaxSteps(String(view.policy.maxSteps));
+        setPolicyMinutes(String(Math.round(view.policy.maxDurationMs / 60_000)));
+        setPolicyApproval(view.policy.approvalActionTypes);
+        setPolicyHosts(view.policy.network.allowedHosts.join(", "));
+        setPolicyRoots(view.policy.fileExchange.allowedRoots.join(", "));
+      })
+      .catch((cause: unknown) => {
+        if (active) setError(errorMessage(cause));
+      });
+    return () => {
+      active = false;
+    };
+  }, [detail]);
+
+  async function savePolicy(event: React.FormEvent): Promise<void> {
+    event.preventDefault();
+    if (!detail) return;
+    const updated = await run(() =>
+      api.updateProjectPolicy(detail.project.id, {
+        maxSteps: Number(policyMaxSteps),
+        maxDurationMs: Number(policyMinutes) * 60_000,
+        approvalActionTypes: policyApproval,
+        network: {
+          allowedHosts: policyHosts
+            .split(",")
+            .map((value) => value.trim())
+            .filter(Boolean),
+        },
+        fileExchange: {
+          allowedRoots: policyRoots
+            .split(",")
+            .map((value) => value.trim())
+            .filter(Boolean),
+        },
+      }),
+    );
+    if (updated) setPolicyView(updated);
+  }
+
+  function toggleApproval(action: ComputerActionType): void {
+    setPolicyApproval((current) =>
+      current.includes(action) ? current.filter((value) => value !== action) : [...current, action],
+    );
+  }
 
   const availableVms = useMemo(() => {
     const bound = new Set(detail?.bindings.map((item) => item.vm.id) ?? []);
@@ -331,6 +395,97 @@ export function ProjectManager({
                   <button type="submit" className="secondary" disabled={busy || !selectedBindVm}>
                     绑定
                   </button>
+                </form>
+              )}
+            </section>
+
+            <section className="subsection" aria-labelledby="cua-policy-title">
+              <div className="section-heading">
+                <h4 id="cua-policy-title">Computer Use 策略</h4>
+                <span className="muted small">
+                  {policyView?.source === "project" ? "项目覆盖默认策略" : "使用全局默认策略"}
+                </span>
+              </div>
+              <p className="muted small">
+                Worker 动作必须持有 Execution Lease。敏感动作可要求人工审批；完成必须由 Guest
+                文件/进程证据或新截图独立验证，模型自述不算完成。
+              </p>
+              {policyView && (
+                <form className="stack compact-form" onSubmit={(event) => void savePolicy(event)}>
+                  <div className="project-columns">
+                    <label className="field">
+                      <span>最大步数</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={1000}
+                        value={policyMaxSteps}
+                        disabled={archived || busy}
+                        onChange={(event) => setPolicyMaxSteps(event.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>最长执行（分钟）</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={1440}
+                        value={policyMinutes}
+                        disabled={archived || busy}
+                        onChange={(event) => setPolicyMinutes(event.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>允许的 Provider/网络主机（逗号分隔）</span>
+                      <input
+                        value={policyHosts}
+                        disabled={archived || busy}
+                        placeholder="models.example.test"
+                        onChange={(event) => setPolicyHosts(event.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>文件证据允许根目录（逗号分隔）</span>
+                      <input
+                        value={policyRoots}
+                        disabled={archived || busy}
+                        onChange={(event) => setPolicyRoots(event.target.value)}
+                      />
+                    </label>
+                  </div>
+                  <div className="field">
+                    <span>必须人工审批的动作</span>
+                    <div className="button-row">
+                      {(
+                        [
+                          "type_text",
+                          "keypress",
+                          "drag",
+                          "click",
+                          "move",
+                          "scroll",
+                        ] as ComputerActionType[]
+                      ).map((action) => (
+                        <label key={action} className="toggle compact-toggle">
+                          <input
+                            type="checkbox"
+                            checked={policyApproval.includes(action)}
+                            disabled={archived || busy}
+                            onChange={() => toggleApproval(action)}
+                          />
+                          <span>{action}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="button-row">
+                    <button type="submit" className="secondary" disabled={archived || busy}>
+                      保存策略
+                    </button>
+                    <span className="muted small">
+                      网络策略默认 broker_only；文件交换与凭据策略按项目配置审计。
+                    </span>
+                  </div>
                 </form>
               )}
             </section>

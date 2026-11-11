@@ -342,6 +342,71 @@ export class TaskService {
     });
   }
 
+  /**
+   * Returns a blocked task to the VM queue after the user resolved the blocker.
+   * The task keeps its history and evidence; a new Worker turn must observe the
+   * VM again, and old desktop actions are never replayed.
+   */
+  async requeue(taskId: string): Promise<TaskRecord> {
+    return this.db.transaction().execute(async (trx) => {
+      const current = await this.tasks.getTask(taskId, trx);
+      if (!current) throw new NotFoundError(`任务不存在：${taskId}`);
+      if (current.status !== "blocked") {
+        throw new InvalidTransitionError("只有 Blocked 任务可以重新排队");
+      }
+      const [project, binding, vm] = await Promise.all([
+        trx
+          .selectFrom("projects")
+          .select("archived_at")
+          .where("id", "=", current.projectId)
+          .executeTakeFirstOrThrow(),
+        trx
+          .selectFrom("project_vm_bindings")
+          .select("id")
+          .where("project_id", "=", current.projectId)
+          .where("vm_id", "=", current.vmId)
+          .executeTakeFirst(),
+        trx
+          .selectFrom("vm_instances")
+          .select("power_state")
+          .where("id", "=", current.vmId)
+          .executeTakeFirstOrThrow(),
+      ]);
+      if (project.archived_at) {
+        throw new PersistenceError("conflict", "已归档项目不能重新排队任务");
+      }
+      if (!binding) {
+        throw new PersistenceError("conflict", "目标 VM 已解绑，不能重新排队任务");
+      }
+      const dependenciesReady = await this.dependenciesCompleted(taskId, trx);
+      const target: TaskStatus = !dependenciesReady
+        ? "created"
+        : vm.power_state === "running"
+          ? "queued"
+          : "waiting_vm";
+      return this.transitionInTransaction(
+        taskId,
+        target,
+        {
+          summary: !dependenciesReady
+            ? "已重新排队，等待依赖任务完成"
+            : target === "queued"
+              ? "已重新排队，等待 Worker 重新观察 VM"
+              : "已重新排队，等待目标 VM 启动",
+        },
+        {
+          assignedWorkerId: null,
+          startedAt: null,
+          completedAt: null,
+          result: null,
+          errorCode: null,
+          errorMessage: null,
+        },
+        trx,
+      );
+    });
+  }
+
   async setPriority(taskId: string, value: number): Promise<TaskRecord> {
     if (typeof value !== "number" || !Number.isFinite(value)) {
       throw new PersistenceError("validation_failed", "优先级必须是有限数字");

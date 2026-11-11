@@ -234,6 +234,98 @@ export interface ConversationMessagesTable {
   created_at: string;
 }
 
+export interface ProjectPoliciesTable {
+  project_id: string;
+  policy_json: string;
+  updated_at: string;
+}
+
+export interface TaskExecutionStateTable {
+  task_id: string;
+  worker_id: string;
+  vm_id: string;
+  started_at: string;
+  deadline_at: string;
+  step_count: number;
+  action_count: number;
+  no_progress_streak: number;
+  duplicate_streak: number;
+  completion_attempts: number;
+  requires_observation: number;
+  last_action_signature: string | null;
+  last_action_at: string | null;
+  ended_at: string | null;
+  outcome: string | null;
+}
+
+export interface CuaScreenshotsTable {
+  id: string;
+  task_id: string;
+  worker_id: string;
+  vm_id: string;
+  kind: string;
+  width: number;
+  height: number;
+  dpi: number | null;
+  scale_factor: number | null;
+  sha256: string;
+  file_path: string;
+  size_bytes: number;
+  captured_at: string;
+}
+
+export interface CuaActionsTable {
+  id: string;
+  task_id: string;
+  worker_id: string;
+  vm_id: string;
+  lease_id: string;
+  action_type: string;
+  action_json: string;
+  source_screenshot_id: string | null;
+  before_screenshot_id: string | null;
+  after_screenshot_id: string | null;
+  display_json: string;
+  status: string;
+  result_json: string | null;
+  error_code: string | null;
+  error_message: string | null;
+  approval_id: string | null;
+  created_at: string;
+  executed_at: string | null;
+  duration_ms: number | null;
+}
+
+export interface CuaApprovalsTable {
+  id: string;
+  task_id: string;
+  worker_id: string;
+  action_id: string;
+  action_type: string;
+  action_json: string;
+  context_summary: string;
+  status: string;
+  requested_at: string;
+  expires_at: string;
+  resolved_at: string | null;
+  resolved_by: string | null;
+  resolution_note: string | null;
+}
+
+export interface CuaTokensTable {
+  id: string;
+  token_hash: string;
+  worker_id: string;
+  vm_id: string;
+  session_id: string;
+  task_id: string | null;
+  expires_at: string;
+  revoked_at: string | null;
+  revoke_reason: string | null;
+  created_at: string;
+  last_used_at: string | null;
+}
+
 export interface SchemaMigrationsTable {
   id: string;
   applied_at: string;
@@ -289,4 +381,10 @@ export interface DatabaseSchema {
   model_tokens: ModelTokensTable;
   model_requests: ModelRequestsTable;
   conversation_messages: ConversationMessagesTable;
+  project_policies: ProjectPoliciesTable;
+  task_execution_state: TaskExecutionStateTable;
+  cua_screenshots: CuaScreenshotsTable;
+  cua_actions: CuaActionsTable;
+  cua_approvals: CuaApprovalsTable;
+  cua_tokens: CuaTokensTable;
 }

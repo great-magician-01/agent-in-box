@@ -678,6 +678,210 @@ const migrations: Record<string, MigrationDefinition> = {
       }
     },
   },
+
+  "006_phase7_computer_use": {
+    async up(db: Kysely<DatabaseSchema>): Promise<void> {
+      await db.schema
+        .createTable("project_policies")
+        .addColumn("project_id", "text", (column) => column.primaryKey())
+        .addColumn("policy_json", "text", (column) => column.notNull())
+        .addColumn("updated_at", "text", (column) => column.notNull())
+        .addForeignKeyConstraint(
+          "project_policies_project_fk",
+          ["project_id"],
+          "projects",
+          ["id"],
+          (c) => c.onDelete("cascade"),
+        )
+        .execute();
+
+      await db.schema
+        .createTable("task_execution_state")
+        .addColumn("task_id", "text", (column) => column.primaryKey())
+        .addColumn("worker_id", "text", (column) => column.notNull())
+        .addColumn("vm_id", "text", (column) => column.notNull())
+        .addColumn("started_at", "text", (column) => column.notNull())
+        .addColumn("deadline_at", "text", (column) => column.notNull())
+        .addColumn("step_count", "integer", (column) => column.notNull().defaultTo(0))
+        .addColumn("action_count", "integer", (column) => column.notNull().defaultTo(0))
+        .addColumn("no_progress_streak", "integer", (column) => column.notNull().defaultTo(0))
+        .addColumn("duplicate_streak", "integer", (column) => column.notNull().defaultTo(0))
+        .addColumn("completion_attempts", "integer", (column) => column.notNull().defaultTo(0))
+        .addColumn("requires_observation", "integer", (column) => column.notNull().defaultTo(1))
+        .addColumn("last_action_signature", "text")
+        .addColumn("last_action_at", "text")
+        .addColumn("ended_at", "text")
+        .addColumn("outcome", "text")
+        .addForeignKeyConstraint(
+          "task_execution_state_task_fk",
+          ["task_id"],
+          "tasks",
+          ["id"],
+          (c) => c.onDelete("cascade"),
+        )
+        .addForeignKeyConstraint(
+          "task_execution_state_worker_fk",
+          ["worker_id"],
+          "workers",
+          ["id"],
+          (c) => c.onDelete("cascade"),
+        )
+        .addForeignKeyConstraint(
+          "task_execution_state_vm_fk",
+          ["vm_id"],
+          "vm_instances",
+          ["id"],
+          (c) => c.onDelete("cascade"),
+        )
+        .execute();
+
+      await db.schema
+        .createTable("cua_screenshots")
+        .addColumn("id", "text", (column) => column.primaryKey())
+        .addColumn("task_id", "text", (column) => column.notNull())
+        .addColumn("worker_id", "text", (column) => column.notNull())
+        .addColumn("vm_id", "text", (column) => column.notNull())
+        .addColumn("kind", "text", (column) => column.notNull())
+        .addColumn("width", "integer", (column) => column.notNull())
+        .addColumn("height", "integer", (column) => column.notNull())
+        .addColumn("dpi", "real")
+        .addColumn("scale_factor", "real")
+        .addColumn("sha256", "text", (column) => column.notNull())
+        .addColumn("file_path", "text", (column) => column.notNull())
+        .addColumn("size_bytes", "integer", (column) => column.notNull())
+        .addColumn("captured_at", "text", (column) => column.notNull())
+        .addForeignKeyConstraint("cua_screenshots_task_fk", ["task_id"], "tasks", ["id"], (c) =>
+          c.onDelete("cascade"),
+        )
+        .addForeignKeyConstraint(
+          "cua_screenshots_worker_fk",
+          ["worker_id"],
+          "workers",
+          ["id"],
+          (c) => c.onDelete("cascade"),
+        )
+        .addForeignKeyConstraint("cua_screenshots_vm_fk", ["vm_id"], "vm_instances", ["id"], (c) =>
+          c.onDelete("cascade"),
+        )
+        .execute();
+      await db.schema
+        .createIndex("cua_screenshots_task_idx")
+        .on("cua_screenshots")
+        .columns(["task_id", "captured_at"])
+        .execute();
+
+      await db.schema
+        .createTable("cua_actions")
+        .addColumn("id", "text", (column) => column.primaryKey())
+        .addColumn("task_id", "text", (column) => column.notNull())
+        .addColumn("worker_id", "text", (column) => column.notNull())
+        .addColumn("vm_id", "text", (column) => column.notNull())
+        .addColumn("lease_id", "text", (column) => column.notNull())
+        .addColumn("action_type", "text", (column) => column.notNull())
+        .addColumn("action_json", "text", (column) => column.notNull())
+        .addColumn("source_screenshot_id", "text")
+        .addColumn("before_screenshot_id", "text")
+        .addColumn("after_screenshot_id", "text")
+        .addColumn("display_json", "text", (column) => column.notNull())
+        .addColumn("status", "text", (column) => column.notNull())
+        .addColumn("result_json", "text")
+        .addColumn("error_code", "text")
+        .addColumn("error_message", "text")
+        .addColumn("approval_id", "text")
+        .addColumn("created_at", "text", (column) => column.notNull())
+        .addColumn("executed_at", "text")
+        .addColumn("duration_ms", "integer")
+        .addForeignKeyConstraint("cua_actions_task_fk", ["task_id"], "tasks", ["id"], (c) =>
+          c.onDelete("cascade"),
+        )
+        .addForeignKeyConstraint("cua_actions_worker_fk", ["worker_id"], "workers", ["id"], (c) =>
+          c.onDelete("cascade"),
+        )
+        .addForeignKeyConstraint("cua_actions_vm_fk", ["vm_id"], "vm_instances", ["id"], (c) =>
+          c.onDelete("cascade"),
+        )
+        .execute();
+      await db.schema
+        .createIndex("cua_actions_task_idx")
+        .on("cua_actions")
+        .columns(["task_id", "created_at", "id"])
+        .execute();
+
+      await db.schema
+        .createTable("cua_approvals")
+        .addColumn("id", "text", (column) => column.primaryKey())
+        .addColumn("task_id", "text", (column) => column.notNull())
+        .addColumn("worker_id", "text", (column) => column.notNull())
+        .addColumn("action_id", "text", (column) => column.notNull())
+        .addColumn("action_type", "text", (column) => column.notNull())
+        .addColumn("action_json", "text", (column) => column.notNull())
+        .addColumn("context_summary", "text", (column) => column.notNull())
+        .addColumn("status", "text", (column) => column.notNull())
+        .addColumn("requested_at", "text", (column) => column.notNull())
+        .addColumn("expires_at", "text", (column) => column.notNull())
+        .addColumn("resolved_at", "text")
+        .addColumn("resolved_by", "text")
+        .addColumn("resolution_note", "text")
+        .addForeignKeyConstraint("cua_approvals_task_fk", ["task_id"], "tasks", ["id"], (c) =>
+          c.onDelete("cascade"),
+        )
+        .addForeignKeyConstraint(
+          "cua_approvals_action_fk",
+          ["action_id"],
+          "cua_actions",
+          ["id"],
+          (c) => c.onDelete("cascade"),
+        )
+        .execute();
+      await db.schema
+        .createIndex("cua_approvals_status_idx")
+        .on("cua_approvals")
+        .columns(["status", "requested_at"])
+        .execute();
+
+      await db.schema
+        .createTable("cua_tokens")
+        .addColumn("id", "text", (column) => column.primaryKey())
+        .addColumn("token_hash", "text", (column) => column.notNull().unique())
+        .addColumn("worker_id", "text", (column) => column.notNull())
+        .addColumn("vm_id", "text", (column) => column.notNull())
+        .addColumn("session_id", "text", (column) => column.notNull())
+        .addColumn("task_id", "text")
+        .addColumn("expires_at", "text", (column) => column.notNull())
+        .addColumn("revoked_at", "text")
+        .addColumn("revoke_reason", "text")
+        .addColumn("created_at", "text", (column) => column.notNull())
+        .addColumn("last_used_at", "text")
+        .addForeignKeyConstraint("cua_tokens_worker_fk", ["worker_id"], "workers", ["id"], (c) =>
+          c.onDelete("cascade"),
+        )
+        .addForeignKeyConstraint("cua_tokens_vm_fk", ["vm_id"], "vm_instances", ["id"], (c) =>
+          c.onDelete("cascade"),
+        )
+        .addForeignKeyConstraint("cua_tokens_task_fk", ["task_id"], "tasks", ["id"], (c) =>
+          c.onDelete("set null"),
+        )
+        .execute();
+      await db.schema
+        .createIndex("cua_tokens_worker_idx")
+        .on("cua_tokens")
+        .columns(["worker_id", "created_at"])
+        .execute();
+    },
+
+    async down(db: Kysely<DatabaseSchema>): Promise<void> {
+      for (const table of [
+        "cua_tokens",
+        "cua_approvals",
+        "cua_actions",
+        "cua_screenshots",
+        "task_execution_state",
+        "project_policies",
+      ]) {
+        await db.schema.dropTable(table).ifExists().execute();
+      }
+    },
+  },
 };
 
 export async function migrateToLatest(db: Kysely<DatabaseSchema>): Promise<string[]> {

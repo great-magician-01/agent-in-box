@@ -17,7 +17,7 @@ const TASK_TRANSITIONS: Record<TaskStatus, readonly TaskStatus[]> = {
   queued: ["running", "waiting_vm", "cancelled", "blocked"],
   running: ["waiting_approval", "completed", "failed", "cancelled", "blocked"],
   waiting_approval: ["running", "blocked", "cancelled", "failed"],
-  blocked: ["queued", "cancelled", "failed"],
+  blocked: ["created", "waiting_vm", "queued", "cancelled", "failed"],
   completed: [],
   failed: ["created", "waiting_vm", "queued"],
   cancelled: [],

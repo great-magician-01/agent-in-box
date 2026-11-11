@@ -124,6 +124,9 @@ importers:
       '@agent-in-box/agent-runtime':
         specifier: workspace:*
         version: link:../../packages/agent-runtime
+      '@agent-in-box/computer-use':
+        specifier: workspace:*
+        version: link:../../packages/computer-use
       '@agent-in-box/config':
         specifier: workspace:*
         version: link:../../packages/config

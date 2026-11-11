@@ -75,6 +75,11 @@ export class TaskController {
     return this.tasks.retry(id);
   }
 
+  @Post(":id/requeue")
+  requeue(@Param("id") id: string): Promise<TaskRecord> {
+    return this.tasks.requeue(id);
+  }
+
   @Post(":id/artifacts/:artifactId/verify")
   verifyArtifact(
     @Param("id") id: string,

@@ -291,7 +291,7 @@ created_at, started_at, completed_at
 
 ### 5.7 阶段 5 持久化与接口实现（2026-11-11）
 
-Migration `004_phase5_projects_tasks` 增加 `task_dependencies`、`task_artifacts`、`project_activities`，并为项目工作区和任务结果、错误详情、尝试次数、更新时间补充字段。`tasks_single_execution_idx` 是 SQLite 部分唯一索引：同一 `vm_id` 最多存在一个 `running` 或 `waiting_approval` 任务。等待审批仍视为占用当前执行位置。
+Migration `004_phase5_projects_tasks` 增加 `task_dependencies`、`task_artifacts`、`project_activities`，并为项目工作区和任务结果、错误详情、尝试次数、更新时间补充字段。`tasks_single_execution_idx` 是 SQLite 部分唯一索引：同一 `vm_id` 最多存在一个 `running` 或 `waiting_approval` 任务。等待审批仍视为占用当前执行位置。Migration `006_phase7_computer_use` 增加 `project_policies`、`task_execution_state`、`cua_screenshots`、`cua_actions`、`cua_approvals` 和 `cua_tokens`，为动作审计、截图引用、审批、执行限制计数和短期 Broker 令牌提供持久化。
 
 `TaskService.claimNext(vmId)` 在事务中检查活动执行、依赖状态和 `priority DESC, created_at ASC, id ASC` 队列顺序，并在最后复核 VM 必须运行、项目未归档且绑定仍存在。认领成功后持久化 `running` 和 `attempt_count`；控制平面重启不会把该记录重置为新任务，也不会自动再次认领。不同 VM 可以独立认领。VM 停止时依赖就绪的 `queued` 会退回 `waiting_vm`；重试根据依赖和 VM 状态进入 `created`、`waiting_vm` 或 `queued`，并重新检查项目/绑定。项目 Worker 遇到其他项目的队首任务返回空，不抢走该任务。阶段 6 的 Worker Runtime 必须在此基础上补充进程对账、Abort 和 Lease 生命周期，不能把持久化 `running` 误认为 Pi 进程仍健康。
 
@@ -558,6 +558,8 @@ wait
 8. 检查是否无进展、重复、超时或被用户打断；
 9. 继续、等待审批或完成；
 10. 完成前通过屏幕、文件、进程或测试结果验证目标。
+
+**阶段 7 实现（2026-11-11）**：新增 Host 侧 Computer Use Broker（默认回环 `6720`，Guest 通过 `10.0.2.2` 访问）和短期 `cua_tokens`。Guest Pi 的 `cua-extension.js` 只调用 Broker，不持有 Guest Agent 令牌；Broker 每次请求重新校验令牌、VM 状态、Worker 当前任务和 Per-VM Execution Lease，再通过 Guest Agent 执行。`cua_actions`、`cua_screenshots`、`task_execution_state` 和 `cua_approvals` 保存动作、前后截图、显示元数据、审批和限制计数，`GET /api/v1/tasks/:id/trace` 提供任务 Trace。动作必须引用最新截图；分辨率变化、无观察、过期截图或 Lease 失效都会在执行前拒绝。执行保护包括最大步数、最长执行时间、无进展/重复动作和完成证据校验；完成必须通过 Guest 文件/进程只读校验或重新截图，模型自述不会使任务完成。项目策略（`project_policies`）约束审批动作、步数/时长、文件交换根目录、网络白名单基础和 Guest 凭据禁止策略，默认敏感动作来自全局审批设置。
 
 ## 10. Pi 与 Worker Engine 适配
 

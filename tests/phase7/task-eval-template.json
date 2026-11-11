@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "description": "Phase 7.4 real task evaluation record. Fill only with real QEMU/WHPX, real Pi and real model evidence.",
+  "environment": {
+    "hostOs": "",
+    "qemuVersion": "",
+    "accelerator": "whpx",
+    "guestImageVersion": "",
+    "guestAgentVersion": "",
+    "piVersion": "1.5.1",
+    "modelProvider": "",
+    "model": "",
+    "cuaBrokerPort": 6720
+  },
+  "repeat": 2,
+  "tasks": [
+    {
+      "id": "PI-REAL-001",
+      "objective": "",
+      "engine": "pi-rpc",
+      "result": "not_run",
+      "attempts": [],
+      "metrics": {
+        "stepCount": null,
+        "durationMs": null,
+        "stuck": false,
+        "humanTakeover": false,
+        "approvalCount": 0,
+        "completionEvidenceVerified": false
+      },
+      "artifacts": []
+    }
+  ],
+  "summary": {
+    "successRate": null,
+    "humanTakeoverRate": null,
+    "averageSteps": null,
+    "stuckRate": null,
+    "resultVerificationRate": null,
+    "notes": "No real baseline was produced in the phase 7 implementation environment."
+  }
+}

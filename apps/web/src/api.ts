@@ -31,6 +31,10 @@ import type {
   TaskListFilters,
   TaskRecord,
   TaskStreamState,
+  TaskTraceView,
+  CuaApprovalRecord,
+  CuaPolicyUpdateRequest,
+  CuaPolicyView,
   VmConsole,
   VmConsoleSession,
   VmControlView,
@@ -375,11 +379,36 @@ export const api = {
     }),
   retryTask: (id: string) =>
     apiFetch<TaskRecord>(`/api/v1/tasks/${encodeURIComponent(id)}/retry`, { method: "POST" }),
+  requeueTask: (id: string) =>
+    apiFetch<TaskRecord>(`/api/v1/tasks/${encodeURIComponent(id)}/requeue`, { method: "POST" }),
   verifyTaskArtifact: (taskId: string, artifactId: string) =>
     apiFetch<TaskArtifactRecord>(
       `/api/v1/tasks/${encodeURIComponent(taskId)}/artifacts/${encodeURIComponent(artifactId)}/verify`,
       { method: "POST" },
     ),
+  taskTrace: (taskId: string) =>
+    apiFetch<TaskTraceView>(`/api/v1/tasks/${encodeURIComponent(taskId)}/trace`),
+  approvals: (taskId?: string) =>
+    apiFetch<CuaApprovalRecord[]>(
+      `/api/v1/approvals${taskId ? `?taskId=${encodeURIComponent(taskId)}` : ""}`,
+    ),
+  approveApproval: (id: string, note?: string) =>
+    apiFetch<CuaApprovalRecord>(`/api/v1/approvals/${encodeURIComponent(id)}/approve`, {
+      method: "POST",
+      body: JSON.stringify(note ? { note } : {}),
+    }),
+  rejectApproval: (id: string, note?: string) =>
+    apiFetch<CuaApprovalRecord>(`/api/v1/approvals/${encodeURIComponent(id)}/reject`, {
+      method: "POST",
+      body: JSON.stringify(note ? { note } : {}),
+    }),
+  projectPolicy: (projectId: string) =>
+    apiFetch<CuaPolicyView>(`/api/v1/projects/${encodeURIComponent(projectId)}/policy`),
+  updateProjectPolicy: (projectId: string, body: CuaPolicyUpdateRequest) =>
+    apiFetch<CuaPolicyView>(`/api/v1/projects/${encodeURIComponent(projectId)}/policy`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
   images: () => apiFetch<ImageCatalog>("/api/v1/images"),
   refreshImageManifest: () =>
     apiFetch<ImageCatalog>("/api/v1/images/manifest/refresh", { method: "POST" }),

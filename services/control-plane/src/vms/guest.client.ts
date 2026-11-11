@@ -8,6 +8,8 @@ import type {
   GuestHeartbeat,
   GuestInputAction,
   GuestScreenshot,
+  GuestVerifyRequest,
+  GuestVerifyResult,
   GuestVersionHandshake,
 } from "@agent-in-box/protocol";
 import { GUEST_PROTOCOL_VERSION } from "@agent-in-box/protocol";
@@ -101,6 +103,18 @@ export class GuestClient {
       startedAt: result.startedAt ?? startedAt,
       durationMs: result.durationMs ?? Math.round(performance.now() - started),
     };
+  }
+
+  async verify(target: GuestTarget, request: GuestVerifyRequest): Promise<GuestVerifyResult> {
+    const result = await this.request<GuestVerifyResult>(target, "/v1/verify", request);
+    if (
+      typeof result?.actionId !== "string" ||
+      typeof result.ok !== "boolean" ||
+      !Array.isArray(result.checks)
+    ) {
+      throw new PersistenceError("unavailable", "Guest Agent 返回了无效的校验结果");
+    }
+    return result;
   }
 
   private async request<T>(target: GuestTarget, route: string, body?: unknown): Promise<T> {

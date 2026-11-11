@@ -2160,3 +2160,24 @@ button.danger:disabled {
 .provider-form button {
   justify-self: start;
 }
+
+.trace-screenshots {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 0.55rem;
+  margin: 0.6rem 0;
+}
+
+.trace-screenshots a {
+  display: block;
+  overflow: hidden;
+  border: 1px solid rgba(24, 32, 28, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.trace-screenshots img {
+  display: block;
+  width: 100%;
+  height: auto;
+}

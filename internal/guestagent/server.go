@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -52,7 +53,10 @@ type ServerOptions struct {
 	UpdateDir        string
 	MaxUpdateBytes   int64
 	UpdateHTTPClient *http.Client
-	Now              func() time.Time
+	// VerifyRoots bounds read-only completion evidence to explicit guest roots.
+	// When empty, file evidence is rejected rather than silently allowed.
+	VerifyRoots []string
+	Now         func() time.Time
 }
 
 // Server exposes authenticated guest desktop RPC over HTTP.
@@ -67,6 +71,7 @@ type Server struct {
 	maxUpdateBytes   int64
 	updateTimeout    time.Duration
 	updateHTTPClient *http.Client
+	verifyRoots      []string
 	startedAt        time.Time
 	now              func() time.Time
 	actions          *actionTracker
@@ -116,10 +121,27 @@ func NewServerWithOptions(options ServerOptions) *Server {
 		maxUpdateBytes:   maxUpdateBytes,
 		updateTimeout:    defaultUpdateTimeout,
 		updateHTTPClient: options.UpdateHTTPClient,
+		verifyRoots:      normalizeVerifyRoots(options.VerifyRoots),
 		startedAt:        now(),
 		now:              now,
 		actions:          newActionTracker(now),
 	}
+}
+
+func normalizeVerifyRoots(roots []string) []string {
+	normalized := make([]string, 0, len(roots))
+	for _, root := range roots {
+		root = strings.TrimSpace(root)
+		if root == "" {
+			continue
+		}
+		cleaned := filepath.Clean(root)
+		if !filepath.IsAbs(cleaned) || cleaned == "/" {
+			continue
+		}
+		normalized = append(normalized, cleaned)
+	}
+	return normalized
 }
 
 func (s *Server) Handler() http.Handler {
@@ -130,6 +152,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/desktop", s.desktopInfo)
 	mux.HandleFunc("GET /v1/screenshot", s.screenshot)
 	mux.HandleFunc("POST /v1/input", s.input)
+	mux.HandleFunc("POST /v1/verify", s.verify)
 	mux.HandleFunc("POST /v1/update", s.update)
 	return s.authenticate(mux)
 }

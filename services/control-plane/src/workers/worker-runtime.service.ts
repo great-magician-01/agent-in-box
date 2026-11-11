@@ -35,6 +35,9 @@ import { KYSELY } from "../persistence/tokens";
 import { ModelBrokerService } from "../models/model-broker.service";
 import { ModelProviderService } from "../models/model-provider.service";
 import { ModelTokenService } from "../models/model-token.service";
+import { CuaBrokerService } from "../computer-use/cua-broker.service";
+import { CuaExecutionService } from "../computer-use/cua-execution.service";
+import { CuaTokenService } from "../computer-use/cua-token.service";
 import { LeaseRepository } from "../persistence/repositories/lease-repository";
 import { LeaseService } from "../persistence/services/lease-service";
 import { TaskService } from "../persistence/services/task-service";
@@ -77,6 +80,7 @@ export interface WorkerRuntimeOptions {
   heartbeatIntervalMs?: number;
   heartbeatFailureThreshold?: number;
   brokerBaseUrl?: string;
+  cuaBrokerBaseUrl?: string;
   systemPrompt?: string;
   now?: () => Date;
 }
@@ -88,6 +92,7 @@ interface ActiveWorker {
   sessionVersion: string;
   unsubscribe: () => void;
   tokenId: string;
+  cuaTokenId: string;
   leaseId: string | null;
   taskId: string | null;
   textBuffer: string;
@@ -95,6 +100,8 @@ interface ActiveWorker {
   heartbeatFailures: number;
   lastHeartbeatAt: number;
   lastRenewAt: number;
+  lastLeaseRenewAt: number;
+  completedTaskAt: number | null;
 }
 
 const DEFAULT_SYSTEM_PROMPT = [
@@ -116,6 +123,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
   private readonly now: () => Date;
   private readonly systemPrompt: string;
   private readonly brokerBaseUrlOverride?: string;
+  private readonly cuaBrokerBaseUrlOverride?: string;
   private timer: NodeJS.Timeout | null = null;
   private ticking = false;
   private stopped = false;
@@ -131,6 +139,9 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     private readonly providers: ModelProviderService,
     private readonly tokens: ModelTokenService,
     private readonly broker: ModelBrokerService,
+    private readonly cuaTokens: CuaTokenService,
+    private readonly cua: CuaExecutionService,
+    private readonly cuaBrokerService: CuaBrokerService,
     @Optional() @Inject(WORKER_RUNTIME_OPTIONS) options: WorkerRuntimeOptions = {},
   ) {
     this.tickIntervalMs = Math.max(250, options.tickIntervalMs ?? 750);
@@ -139,6 +150,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     this.systemPrompt = options.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
     this.now = options.now ?? (() => new Date());
     if (options.brokerBaseUrl) this.brokerBaseUrlOverride = options.brokerBaseUrl;
+    if (options.cuaBrokerBaseUrl) this.cuaBrokerBaseUrlOverride = options.cuaBrokerBaseUrl;
     if (options.connectorFactory) {
       this.connectorFactory = options.connectorFactory;
     } else {
@@ -246,6 +258,12 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
       model: model.model.id,
       taskId: null,
     });
+    const cuaToken = await this.cuaTokens.issue({
+      workerId: worker.id,
+      vmId: worker.vmId,
+      sessionId: "pending",
+      taskId: null,
+    });
     try {
       const handle = await connection.startSession({
         workerId: worker.id,
@@ -267,8 +285,15 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
           api: model.provider.api,
           reasoning: model.model.reasoning === true,
         },
+        computerUse: {
+          baseUrl: this.cuaBrokerBaseUrl(),
+          token: cuaToken.token,
+        },
       });
-      await this.tokens.bindSession(token.context.id, handle.sessionId);
+      await Promise.all([
+        this.tokens.bindSession(token.context.id, handle.sessionId),
+        this.cuaTokens.bindSession(cuaToken.context.id, handle.sessionId),
+      ]);
       const updated = await this.workers.updateRuntime(worker.id, {
         status: "idle",
         agentSessionRef: handle.archiveRef ?? null,
@@ -280,11 +305,14 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
         providerId: model.provider.id,
         modelId: model.model.id,
       });
-      this.attach(worker.id, connection, handle, token.context.id);
+      this.attach(worker.id, connection, handle, token.context.id, cuaToken.context.id);
       this.scheduleTick();
       return this.view(updated ?? worker);
     } catch (error) {
-      await this.tokens.revoke(token.context.id, "worker_start_failed");
+      await Promise.all([
+        this.tokens.revoke(token.context.id, "worker_start_failed"),
+        this.cuaTokens.revoke(cuaToken.context.id, "worker_start_failed"),
+      ]);
       await this.workers.updateRuntime(worker.id, {
         status: "failed",
         lastErrorCode: "worker_start_failed",
@@ -380,7 +408,10 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     const archived = await active.connection.archive(active.sessionId);
     active.unsubscribe();
     this.active.delete(workerId);
-    await this.tokens.revoke(active.tokenId, "worker_archived");
+    await Promise.all([
+      this.tokens.revoke(active.tokenId, "worker_archived"),
+      this.cuaTokens.revoke(active.cuaTokenId, "worker_archived"),
+    ]);
     if (active.leaseId) await this.leases.release(worker.vmId, active.leaseId);
     const updated = await this.workers.updateRuntime(workerId, {
       status: "archived",
@@ -441,6 +472,12 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
       model: model.model.id,
       taskId: null,
     });
+    const cuaToken = await this.cuaTokens.issue({
+      workerId,
+      vmId: worker.vmId,
+      sessionId: "pending",
+      taskId: null,
+    });
     try {
       const spec = this.sessionSpec(
         worker,
@@ -448,11 +485,15 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
         model.provider.id,
         model.model.id,
         token.token,
+        cuaToken.token,
         model.provider.api,
         model.model.reasoning === true,
       );
       const handle = await connection.resume(worker.agentSessionRef, spec);
-      await this.tokens.bindSession(token.context.id, handle.sessionId);
+      await Promise.all([
+        this.tokens.bindSession(token.context.id, handle.sessionId),
+        this.cuaTokens.bindSession(cuaToken.context.id, handle.sessionId),
+      ]);
       const updated = await this.workers.updateRuntime(workerId, {
         status: "idle",
         currentTaskId: null,
@@ -468,7 +509,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
         .set({ archived_at: null })
         .where("id", "=", workerId)
         .execute();
-      this.attach(workerId, connection, handle, token.context.id);
+      this.attach(workerId, connection, handle, token.context.id, cuaToken.context.id);
       await this.outbox.append(
         "worker.resumed",
         { workerId, restoreMode: handle.mode === "summary" ? "summary" : "native" },
@@ -477,7 +518,10 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
       this.scheduleTick();
       return this.view(updated ?? worker);
     } catch (error) {
-      await this.tokens.revoke(token.context.id, "worker_resume_failed");
+      await Promise.all([
+        this.tokens.revoke(token.context.id, "worker_resume_failed"),
+        this.cuaTokens.revoke(cuaToken.context.id, "worker_resume_failed"),
+      ]);
       await this.workers.updateRuntime(workerId, {
         status: "failed",
         lastErrorCode: "worker_resume_failed",
@@ -586,12 +630,18 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     return `http://10.0.2.2:${this.broker.port}`;
   }
 
+  private cuaBrokerBaseUrl(): string {
+    if (this.cuaBrokerBaseUrlOverride) return this.cuaBrokerBaseUrlOverride;
+    return this.cuaBrokerService.guestBaseUrl();
+  }
+
   private sessionSpec(
     worker: WorkerRecord,
     workspacePath: string,
     providerId: string,
     modelId: string,
     brokerToken: string,
+    cuaToken: string,
     providerApi: "openai-completions" | "anthropic-messages" = "openai-completions",
     reasoning = false,
   ): WorkerSessionSpec {
@@ -615,6 +665,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
         api: providerApi,
         reasoning,
       },
+      computerUse: { baseUrl: this.cuaBrokerBaseUrl(), token: cuaToken },
     };
   }
 
@@ -623,6 +674,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     connection: WorkerGuestConnection,
     handle: WorkerSessionHandle,
     tokenId: string,
+    cuaTokenId: string,
   ): void {
     const previous = this.active.get(workerId);
     previous?.unsubscribe();
@@ -633,6 +685,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
       sessionVersion: handle.sessionVersion ?? PI_SESSION_FORMAT_VERSION,
       unsubscribe: () => undefined,
       tokenId,
+      cuaTokenId,
       leaseId: null,
       taskId: null,
       textBuffer: "",
@@ -640,6 +693,8 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
       heartbeatFailures: 0,
       lastHeartbeatAt: Date.now(),
       lastRenewAt: Date.now(),
+      lastLeaseRenewAt: Date.now(),
+      completedTaskAt: null,
     };
     active.unsubscribe = connection.subscribe(handle.sessionId, (event) => {
       void this.handleEvent(workerId, event).catch((error: unknown) => {
@@ -720,7 +775,9 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
       active.leaseId = null;
     }
     if (active.tokenId) await this.tokens.bindTask(active.tokenId, null);
+    if (active.cuaTokenId) await this.cuaTokens.bindTask(active.cuaTokenId, null);
     active.taskId = null;
+    active.completedTaskAt = null;
     await this.workers.updateRuntime(workerId, {
       status: "idle",
       currentTaskId: null,
@@ -728,6 +785,10 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     });
     if (taskId) {
       const task = await this.tasks.get(taskId);
+      if (task?.status === "completed") {
+        await this.cua.finishExecution(taskId, "completed");
+        return;
+      }
       if (task && (task.status === "running" || task.status === "waiting_approval")) {
         await this.tasks.recordWorkerEvent(taskId, "worker.turn_finished", {
           summary: summary || null,
@@ -737,9 +798,10 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
           interruptedCode ?? "awaiting_verification",
           interruptedCode
             ? "Worker 回合异常结束，需要重新观察 VM 后再重试"
-            : "Pi 回合已结束；在阶段 7 完成校验实现前任务保持 Blocked",
+            : "Worker 回合结束但没有通过独立完成校验，任务保持 Blocked",
           summary || undefined,
         );
+        await this.cua.finishExecution(taskId, interruptedCode ? "failed" : "blocked");
       }
     }
   }
@@ -768,12 +830,23 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
       active.leaseId = null;
     }
     if (active.tokenId) await this.tokens.bindTask(active.tokenId, null);
+    if (active.cuaTokenId) await this.cuaTokens.bindTask(active.cuaTokenId, null);
     active.taskId = null;
-    if (taskId && !alreadyTerminal) {
+    active.completedTaskAt = null;
+    if (taskId) {
       const task = await this.tasks.get(taskId);
-      if (task && (task.status === "running" || task.status === "waiting_approval")) {
+      if (
+        !alreadyTerminal &&
+        task &&
+        (task.status === "running" || task.status === "waiting_approval")
+      ) {
         await this.tasks.recordWorkerEvent(taskId, "worker.aborted", { code, message });
         await this.tasks.block(taskId, code, message, partial || undefined);
+        await this.cua.finishExecution(taskId, "blocked");
+      } else if (task?.status === "cancelled") {
+        await this.cua.finishExecution(taskId, "cancelled");
+      } else if (task?.status === "completed") {
+        await this.cua.finishExecution(taskId, "completed");
       }
     }
     await this.workers.updateRuntime(worker.id, {
@@ -788,6 +861,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     active: ActiveWorker,
     code: string,
     message: string,
+    taskOutcome: "fail" | "block" = "fail",
   ): Promise<void> {
     const worker = await this.workers.getWorker(workerId);
     if (!worker) return;
@@ -795,11 +869,20 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     this.active.delete(workerId);
     if (active.leaseId) await this.leases.release(worker.vmId, active.leaseId);
     if (active.tokenId) await this.tokens.revoke(active.tokenId, code);
+    await this.cuaTokens.revoke(active.cuaTokenId, code);
     if (active.taskId) {
       const task = await this.tasks.get(active.taskId);
       if (task && (task.status === "running" || task.status === "waiting_approval")) {
         await this.tasks.recordWorkerEvent(active.taskId, "worker.failed", { code, message });
-        await this.tasks.fail(active.taskId, code, message);
+        if (taskOutcome === "block") {
+          await this.tasks.block(active.taskId, code, message, message);
+          await this.cua.finishExecution(active.taskId, "blocked");
+        } else {
+          await this.tasks.fail(active.taskId, code, message);
+          await this.cua.finishExecution(active.taskId, "failed");
+        }
+      } else {
+        await this.cua.finishExecution(active.taskId, "failed");
       }
     }
     await this.workers.updateRuntime(workerId, {
@@ -827,6 +910,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
         lastErrorCode: "control_plane_restarted",
         lastErrorMessage: "控制平面重启；Guest Pi 进程状态未知，绑定已保留，可显式恢复会话",
       });
+      await this.cuaTokens.revokeWorker(row.id, "control_plane_restarted");
       const taskId = row.current_task_id;
       if (taskId) {
         const task = await this.tasks.get(taskId);
@@ -842,6 +926,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
         }
         const lease = await this.leaseRepository.getByVm(row.vm_id);
         if (lease && lease.taskId === taskId) await this.leases.release(row.vm_id, lease.id);
+        await this.cua.finishExecution(taskId, "failed");
       }
     }
   }
@@ -876,7 +961,34 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     const now = Date.now();
     if (active.taskId) {
       const task = await this.tasks.get(active.taskId);
-      if (!task || !["running", "waiting_approval"].includes(task.status)) {
+      if (task && ["running", "waiting_approval"].includes(task.status)) {
+        const expired = await this.cua.expireIfNeeded(task.id);
+        if (expired) {
+          await this.abortTurn(
+            worker,
+            active,
+            "cua_execution_timeout",
+            "任务超过最大执行时间，Worker 已停止工具执行",
+            true,
+          );
+          return;
+        }
+        active.completedTaskAt = null;
+      } else if (task?.status === "completed") {
+        // The completion verifier already closed the task. Let Pi settle
+        // normally; only force it down if the turn hangs after completion.
+        active.completedTaskAt ??= now;
+        if (now - active.completedTaskAt > 60_000) {
+          await this.abortTurn(
+            worker,
+            active,
+            "task_completed",
+            "任务已完成，Worker 回合结束",
+            true,
+          );
+          return;
+        }
+      } else {
         const reason =
           task?.status === "cancelled"
             ? "任务已取消，Worker 已停止工具执行"
@@ -895,7 +1007,8 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
         worker.id,
         active,
         "worker_vm_stopped",
-        "目标 VM 已停止；不会重放旧的桌面动作",
+        "目标 VM 已停止；任务已 Blocked，启动 VM 后可重新排队并重新观察",
+        "block",
       );
       return;
     }
@@ -906,8 +1019,15 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
         active.lastHeartbeatAt = now;
         await this.workers.updateRuntime(worker.id, { lastHeartbeatAt: nowIso() });
         if (!active.aborting && now - active.lastRenewAt >= 30_000) {
-          await this.tokens.renew(active.tokenId);
+          await Promise.all([
+            this.tokens.renew(active.tokenId),
+            this.cuaTokens.renew(active.cuaTokenId),
+          ]);
           active.lastRenewAt = now;
+        }
+        if (active.leaseId && now - active.lastLeaseRenewAt >= 10_000) {
+          await this.leases.renew(active.leaseId, 30_000);
+          active.lastLeaseRenewAt = now;
         }
       } catch (error) {
         active.heartbeatFailures += 1;
@@ -942,7 +1062,17 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
       active.leaseId = lease.id;
       active.taskId = claimed.id;
       active.textBuffer = "";
-      await this.tokens.bindTask(active.tokenId, claimed.id);
+      active.completedTaskAt = null;
+      active.lastLeaseRenewAt = Date.now();
+      await Promise.all([
+        this.tokens.bindTask(active.tokenId, claimed.id),
+        this.cuaTokens.bindTask(active.cuaTokenId, claimed.id),
+      ]);
+      await this.cua.startExecution({
+        taskId: claimed.id,
+        workerId: worker.id,
+        vmId: worker.vmId,
+      });
       await this.workers.updateRuntime(worker.id, {
         status: "running",
         currentTaskId: claimed.id,
@@ -959,6 +1089,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
         active.leaseId = null;
       }
       if (active.tokenId) await this.tokens.bindTask(active.tokenId, null);
+      if (active.cuaTokenId) await this.cuaTokens.bindTask(active.cuaTokenId, null);
       active.taskId = null;
       const task = await this.tasks.get(claimed.id);
       if (task && task.status === "running") {
@@ -968,8 +1099,10 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
             "human_control_active",
             "人工正在控制该 VM，任务等待用户恢复",
           );
+          await this.cua.finishExecution(claimed.id, "blocked");
         } else {
           await this.tasks.fail(claimed.id, "worker_prompt_failed", errorMessage(error));
+          await this.cua.finishExecution(claimed.id, "failed");
         }
       }
       await this.workers.updateRuntime(worker.id, {

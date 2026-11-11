@@ -90,8 +90,10 @@ bash /opt/agent-in-box/provision/install.sh \
   --worker-sha256 __WORKER_BUNDLE_SHA256__ \
   --unit-file /opt/agent-in-box/provision/agent-in-box-worker.service \
   [--rpc-token-file /run/agent-in-box/rpc-token] \
-  [--cua-extension /opt/agent-in-box/provision/cua-extension.js]
+  --cua-extension /opt/agent-in-box/provision/cua-extension.js
 ```
+
+阶段 7 起，真实 Computer Use Worker 需要安装 `worker-runtime/cua-extension.js`（构建时复制到 provision 目录）；它只使用 Host 会话注入的 `AGENT_IN_BOX_CUA_URL/TOKEN`，不读取 Guest Agent token。
 
 安全规则：
 
@@ -193,4 +195,5 @@ systemd-analyze verify images/linux/worker-runtime/agent-in-box-worker.service
 
 - 本目录只提供安装/运行资产，不实现 Worker RPC 协议、Session Format 版本检查、Model Broker 或 Host 侧 token 签发。这些由阶段 6 的 `packages/agent-runtime`、控制平面和 provisioning 流程实现。
 - Pi 的依赖来自 npm registry；真正可离线复现的 Golden Image 必须在受控构建阶段完成安装并把产物/校验和固化到部署 manifest。
-- CUA extension 是可选件；`--cua-extension` 只复制单个自包含文件，extension 其余依赖必须由 Pi 安装或 extension 自身提供。其 Guest Agent 地址/token 与 RPC token、Broker token 均不同，需单独受控注入。
+- CUA extension 是 GUI Worker 的必需件（安装参数仍可选，便于无桌面的普通 Worker）；`--cua-extension` 只复制单个自包含文件，extension 其余依赖必须由 Pi 安装或 extension 自身提供。阶段 7 的 [`worker-runtime/cua-extension.js`](worker-runtime/cua-extension.js) 只调用 Host Computer Use Broker（`AGENT_IN_BOX_CUA_URL/TOKEN`，由 Host session spec 注入），**不读取 Guest Agent token**。Guest Agent token 与 RPC token、Model Broker token、CUA Broker token 均不同；不要把任一 token 写进镜像。
+- 阶段 7 的 Computer Use 依赖宿主控制平面的 CUA Broker（默认回环 `6720`）和 Guest 侧安装该 extension。未安装 extension 时 Pi 只有通用工具，不能执行 GUI 动作；CUA Broker 仍会拒绝无 Lease/无观察/过期截图的请求。

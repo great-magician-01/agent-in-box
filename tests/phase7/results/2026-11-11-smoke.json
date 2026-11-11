@@ -1,0 +1,80 @@
+{
+  "name": "agent-in-box-phase7-smoke",
+  "startedAt": "2026-11-11T10:36:58.832Z",
+  "finishedAt": "2026-11-11T10:37:05.794Z",
+  "status": "passed",
+  "checks": [
+    {
+      "name": "真实控制平面应用阶段 7 迁移并启动 Computer Use Broker",
+      "passed": true
+    },
+    {
+      "name": "Guest Worker 会话收到短期 Computer Use Broker 令牌",
+      "passed": true,
+      "detail": "worker=24f38629-2f9a-4871-91c1-8d2037657d9a"
+    },
+    {
+      "name": "Computer Use Broker 拒绝无令牌请求",
+      "passed": true
+    },
+    {
+      "name": "动作经 Execution Lease 执行并审计到任务、Worker 和前后截图",
+      "passed": true
+    },
+    {
+      "name": "无观察或无有效 Lease 的动作不会执行",
+      "passed": true
+    },
+    {
+      "name": "分辨率变化使旧截图坐标失效并要求重新观察",
+      "passed": true
+    },
+    {
+      "name": "敏感动作在人工批准前不执行，批准后按存储的动作执行",
+      "passed": true
+    },
+    {
+      "name": "拒绝审批后动作不执行并产生明确工具结果与任务事件",
+      "passed": true
+    },
+    {
+      "name": "任务取消会立即取消等待中的审批，动作不执行",
+      "passed": true
+    },
+    {
+      "name": "审批超时会拒绝动作并保留可审计的超时记录",
+      "passed": true
+    },
+    {
+      "name": "重复动作且屏幕无变化会被检测并阻塞任务，不无限点击",
+      "passed": true
+    },
+    {
+      "name": "最大步数触发后任务阻塞，不会继续执行",
+      "passed": true
+    },
+    {
+      "name": "任务完成必须通过 Guest 文件/进程独立证据校验",
+      "passed": true
+    },
+    {
+      "name": "完成校验会重新捕获屏幕并记录 completion 截图",
+      "passed": true
+    },
+    {
+      "name": "任务 Trace 保留动作、截图、审批和执行统计",
+      "passed": true
+    }
+  ],
+  "boundaries": {
+    "realChildProcess": true,
+    "realControlPlane": true,
+    "realSqlite": true,
+    "realCuaBrokerHttp": true,
+    "realGuestAgent": false,
+    "realQemuWxpx": false,
+    "realPiProcess": false,
+    "realModel": false,
+    "browserElectronUi": false
+  }
+}

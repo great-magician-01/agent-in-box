@@ -12,6 +12,7 @@ import { ProjectModule } from "./projects/project.module";
 import { TaskModule } from "./tasks/task.module";
 import { EventsModule } from "./events/events.module";
 import { ModelsModule } from "./models/models.module";
+import { ComputerUseModule } from "./computer-use/computer-use.module";
 import { WorkerModule } from "./workers/worker.module";
 
 @Module({
@@ -27,6 +28,7 @@ import { WorkerModule } from "./workers/worker.module";
     TaskModule,
     EventsModule,
     ModelsModule,
+    ComputerUseModule,
     WorkerModule,
   ],
   controllers: [HealthController, RuntimeController],

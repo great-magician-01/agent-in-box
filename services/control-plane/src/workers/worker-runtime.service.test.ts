@@ -6,9 +6,16 @@ import type {
   WorkerSessionSpec,
 } from "@agent-in-box/agent-runtime";
 import type { SupervisorVmState } from "@agent-in-box/protocol";
+import type { ModelBrokerService } from "../models/model-broker.service";
 import { ModelProviderService } from "../models/model-provider.service";
 import { ModelTokenService } from "../models/model-token.service";
-import type { ModelBrokerService } from "../models/model-broker.service";
+import { ApprovalService } from "../computer-use/approval.service";
+import type { CuaBrokerService } from "../computer-use/cua-broker.service";
+import { CuaExecutionService } from "../computer-use/cua-execution.service";
+import { CuaPolicyService } from "../computer-use/cua-policy.service";
+import { CuaTokenService } from "../computer-use/cua-token.service";
+import { SettingsService } from "../settings/settings.service";
+import type { GuestService } from "../vms/guest.service";
 import { LeaseRepository } from "../persistence/repositories/lease-repository";
 import { OutboxRepository } from "../persistence/repositories/outbox-repository";
 import { TaskRepository } from "../persistence/repositories/task-repository";
@@ -164,6 +171,29 @@ async function createHarness(
       }) as unknown as SupervisorVmState,
   } as unknown as SupervisorClient;
   const broker = { port: 6719 } as unknown as ModelBrokerService;
+  const settings = new SettingsService(ctx.app.db);
+  const policies = new CuaPolicyService(ctx.app.db, settings);
+  const approvals = new ApprovalService(ctx.app.db, tasks);
+  const cuaTokens = new CuaTokenService(ctx.app.db, { ttlMs: 60_000 });
+  const cuaGuest = {
+    observe: async () => {
+      throw new Error("unexpected Guest observation in Worker runtime test");
+    },
+    desktop: async () => {
+      throw new Error("unexpected Guest desktop call in Worker runtime test");
+    },
+  } as unknown as GuestService;
+  const cua = new CuaExecutionService(
+    ctx.app.db,
+    cuaGuest,
+    tasks,
+    leaseRepository,
+    policies,
+    approvals,
+  );
+  const cuaBroker = {
+    guestBaseUrl: () => "http://10.0.2.2:6720",
+  } as CuaBrokerService;
   const service = new WorkerRuntimeService(
     ctx.app.db,
     workers,
@@ -175,6 +205,9 @@ async function createHarness(
     providers,
     tokens,
     broker,
+    cuaTokens,
+    cua,
+    cuaBroker,
     {
       connectorFactory: () => connection,
       tickIntervalMs: 300,
@@ -250,6 +283,22 @@ describe("WorkerRuntimeService", () => {
     const tokenRows = await harness.ctx.app.db.selectFrom("model_tokens").selectAll().execute();
     expect(tokenRows).toHaveLength(1);
     expect(tokenRows[0]).toMatchObject({ session_id: "fake-session", task_id: null });
+    const cuaRows = await harness.ctx.app.db.selectFrom("cua_tokens").selectAll().execute();
+    expect(cuaRows).toHaveLength(1);
+    expect(cuaRows[0]).toMatchObject({ session_id: "fake-session", task_id: null });
+    expect(harness.connection.specs[0]?.computerUse).toMatchObject({
+      baseUrl: "http://10.0.2.2:6720",
+    });
+    expect(harness.connection.specs[0]?.computerUse?.token).toBeTruthy();
+    expect(harness.connection.specs[0]?.computerUse?.token).not.toBe(
+      (tokenRows[0] as { token_hash?: string })?.token_hash,
+    );
+    const execution = await harness.ctx.app.db
+      .selectFrom("task_execution_state")
+      .selectAll()
+      .where("task_id", "=", prompted.taskId)
+      .executeTakeFirst();
+    expect(execution).toMatchObject({ worker_id: created.worker.id, requires_observation: 1 });
   });
 
   it("steers a running turn, maps Abort to a stopped task and releases the lease", async () => {
@@ -339,6 +388,41 @@ describe("WorkerRuntimeService", () => {
       .execute();
     expect(tokenRows.every((row) => row.revoked_at !== null)).toBe(true);
     await expect(harness.leases.getActive(harness.ctx.vmId)).resolves.toBeUndefined();
+  });
+
+  it("blocks the task instead of replaying actions when the VM stops", async () => {
+    const harness = await createHarness();
+    active = harness;
+    const created = await harness.service.create({
+      projectId: harness.ctx.projectId,
+      vmId: harness.ctx.vmId,
+    });
+    const prompted = await harness.service.prompt(created.worker.id, {
+      text: "[hold] VM stop task",
+    });
+    await waitFor(
+      async () => (await harness.tasks.get(prompted.taskId))?.status === "running",
+      "running task",
+    );
+    await harness.ctx.app.db
+      .updateTable("vm_instances")
+      .set({ power_state: "stopped" })
+      .where("id", "=", harness.ctx.vmId)
+      .execute();
+    await waitFor(
+      async () => (await harness.tasks.get(prompted.taskId))?.status === "blocked",
+      "blocked task",
+    );
+    expect((await harness.tasks.get(prompted.taskId))?.errorCode).toBe("worker_vm_stopped");
+    expect((await harness.workers.getWorker(created.worker.id))?.status).toBe("failed");
+    await expect(harness.leases.getActive(harness.ctx.vmId)).resolves.toBeUndefined();
+    await harness.ctx.app.db
+      .updateTable("vm_instances")
+      .set({ power_state: "running" })
+      .where("id", "=", harness.ctx.vmId)
+      .execute();
+    const requeued = await harness.tasks.requeue(prompted.taskId);
+    expect(requeued.status).toBe("queued");
   });
 
   it("reconciles a control-plane restart without losing the Worker binding and can resume", async () => {

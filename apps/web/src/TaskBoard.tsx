@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+/* eslint-disable react-hooks/set-state-in-effect -- task trace loads as a server snapshot */
+import { useEffect, useMemo, useState } from "react";
 import {
   ACTIVE_TASK_STATUSES,
   TASK_STATUSES,
@@ -7,6 +8,7 @@ import {
   type TaskBoardSnapshot,
   type TaskDetail,
   type TaskStatus,
+  type TaskTraceView,
 } from "@agent-in-box/protocol";
 import { api } from "./api";
 import { formatDate, TASK_STATUS_LABELS, VM_POWER_STATE_LABELS } from "./format";
@@ -16,6 +18,7 @@ interface TaskBoardProps {
   selectedProject: ProjectDetail | null;
   taskDetail: TaskDetail | null;
   selectedTaskId: string | null;
+  revision: number;
   onSelectTask(taskId: string | null): void;
   onSelectProject(projectId: string): void;
   onOpenConversation(projectId: string, conversationId: string): void;
@@ -27,6 +30,7 @@ export function TaskBoard({
   selectedProject,
   taskDetail,
   selectedTaskId,
+  revision,
   onSelectTask,
   onSelectProject,
   onOpenConversation,
@@ -43,6 +47,26 @@ export function TaskBoard({
   const [vmFilter, setVmFilter] = useState("");
   const [workerFilter, setWorkerFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [trace, setTrace] = useState<TaskTraceView | null>(null);
+
+  useEffect(() => {
+    if (!selectedTaskId) {
+      setTrace(null);
+      return;
+    }
+    let active = true;
+    void api
+      .taskTrace(selectedTaskId)
+      .then((next) => {
+        if (active) setTrace(next);
+      })
+      .catch((cause: unknown) => {
+        if (active) setError(errorMessage(cause));
+      });
+    return () => {
+      active = false;
+    };
+  }, [selectedTaskId, revision]);
 
   const primaryBinding =
     selectedProject?.bindings.find((item) => item.binding.isPrimary) ??
@@ -447,6 +471,121 @@ export function TaskBoard({
                   </ul>
                 </section>
               )}
+              {trace && (
+                <section className="subsection">
+                  <h4>Computer Use Trace</h4>
+                  {trace.execution && (
+                    <dl className="detail-facts">
+                      <div>
+                        <dt>步数 / 动作</dt>
+                        <dd>
+                          {trace.execution.stepCount} / {trace.execution.actionCount}
+                          （上限见项目策略）
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>执行窗口</dt>
+                        <dd>
+                          {formatDate(trace.execution.startedAt)} →{" "}
+                          {formatDate(trace.execution.deadlineAt)}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>无进展 / 重复</dt>
+                        <dd>
+                          {trace.execution.noProgressStreak} / {trace.execution.duplicateStreak}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>完成验证</dt>
+                        <dd>
+                          {trace.execution.completionAttempts} 次尝试 ·{" "}
+                          {trace.execution.outcome ?? "进行中"}
+                        </dd>
+                      </div>
+                    </dl>
+                  )}
+                  {trace.approvals.length > 0 && (
+                    <ul className="plain-list">
+                      {trace.approvals.map((approval) => (
+                        <li key={approval.id}>
+                          <div>
+                            <strong>{approval.actionType}</strong>{" "}
+                            <span className="muted small">{approval.status}</span>
+                            <p>{approval.contextSummary}</p>
+                          </div>
+                          {approval.status === "pending" && (
+                            <div className="button-row">
+                              <button
+                                type="button"
+                                className="primary"
+                                disabled={busy}
+                                onClick={() =>
+                                  void run(() => api.approveApproval(approval.id, "界面批准"))
+                                }
+                              >
+                                批准
+                              </button>
+                              <button
+                                type="button"
+                                className="secondary"
+                                disabled={busy}
+                                onClick={() =>
+                                  void run(() => api.rejectApproval(approval.id, "界面拒绝"))
+                                }
+                              >
+                                拒绝
+                              </button>
+                            </div>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {trace.screenshots.length > 0 && (
+                    <div className="trace-screenshots">
+                      {trace.screenshots.slice(-4).map((shot) => (
+                        <a
+                          key={shot.id}
+                          href={`/api/v1/tasks/${encodeURIComponent(detail.task.id)}/screenshots/${encodeURIComponent(shot.id)}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          title={`${shot.kind} ${shot.width}x${shot.height} ${formatDate(shot.capturedAt)}`}
+                        >
+                          <img
+                            src={`/api/v1/tasks/${encodeURIComponent(detail.task.id)}/screenshots/${encodeURIComponent(shot.id)}`}
+                            alt={`${shot.kind} screenshot`}
+                            loading="lazy"
+                          />
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                  {trace.actions.length > 0 && (
+                    <ol className="timeline">
+                      {trace.actions.map((action) => (
+                        <li key={action.id}>
+                          <span className="timeline-id">{action.type}</span>
+                          <div>
+                            <strong>{action.status}</strong>
+                            {action.errorCode && (
+                              <span className="muted small">
+                                {" "}
+                                {action.errorCode}: {action.errorMessage}
+                              </span>
+                            )}
+                            <span className="muted small">
+                              {" "}
+                              · {formatDate(action.createdAt)}
+                              {action.durationMs !== null ? ` · ${action.durationMs}ms` : ""}
+                            </span>
+                          </div>
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                </section>
+              )}
               <section className="subsection">
                 <h4>任务时间线</h4>
                 <ol className="timeline">
@@ -536,6 +675,16 @@ function TaskRow({
               onClick={() => void onAction(() => api.cancelTask(task.id, "用户从看板取消"))}
             >
               取消
+            </button>
+          )}
+          {task.status === "blocked" && (
+            <button
+              type="button"
+              className="secondary"
+              disabled={busy}
+              onClick={() => void onAction(() => api.requeueTask(task.id))}
+            >
+              重新排队
             </button>
           )}
           {task.status === "failed" && (

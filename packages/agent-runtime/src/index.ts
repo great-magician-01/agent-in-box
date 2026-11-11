@@ -20,6 +20,15 @@ export interface WorkerModelBrokerSpec {
   reasoning?: boolean;
 }
 
+/**
+ * Short-lived, task-scoped access to the host Computer Use broker. Like the
+ * Model Broker token, this is not an upstream credential and is never archived.
+ */
+export interface WorkerComputerUseSpec {
+  baseUrl: string;
+  token: string;
+}
+
 export interface WorkerSessionSpec {
   workerId: string;
   projectId: string;
@@ -33,6 +42,7 @@ export interface WorkerSessionSpec {
   provider?: string;
   model?: string;
   modelBroker?: WorkerModelBrokerSpec;
+  computerUse?: WorkerComputerUseSpec;
 }
 
 export interface WorkerInput {

@@ -6,6 +6,8 @@ import type {
   GuestDesktopInfo,
   GuestHeartbeat,
   GuestScreenshot,
+  GuestVerifyRequest,
+  GuestVerifyResult,
   GuestVersionHandshake,
 } from "@agent-in-box/protocol";
 import { PersistenceError } from "../persistence/errors";
@@ -48,6 +50,26 @@ export class GuestService {
 
   async screenshot(id: string): Promise<GuestScreenshot> {
     return this.guest.screenshot(await this.target(id));
+  }
+
+  /** Capture display metadata together with pixels for a Computer Use observation. */
+  async observe(id: string): Promise<{ desktop: GuestDesktopInfo; screenshot: GuestScreenshot }> {
+    const target = await this.target(id);
+    const [desktop, screenshot] = await Promise.all([
+      this.guest.desktop(target),
+      this.guest.screenshot(target),
+    ]);
+    if (desktop.width !== screenshot.width || desktop.height !== screenshot.height) {
+      throw new PersistenceError("unavailable", "Guest 显示信息与截图分辨率不一致");
+    }
+    return { desktop, screenshot };
+  }
+
+  async verify(id: string, request: GuestVerifyRequest): Promise<GuestVerifyResult> {
+    if (!request || !Array.isArray(request.checks) || request.checks.length === 0) {
+      throw new PersistenceError("validation_failed", "完成校验必须包含至少一项证据");
+    }
+    return this.guest.verify(await this.target(id), request);
   }
 
   async input(id: string, request: GuestActionRequest): Promise<GuestActionResult> {

@@ -894,6 +894,35 @@ export interface GuestScreenshot {
   dataBase64: string;
 }
 
+export type GuestVerifyCheck =
+  | { type: "file"; path: string; sha256?: string; sizeBytes?: number }
+  | { type: "process"; name: string };
+
+export interface GuestVerifyRequest {
+  actionId?: Id;
+  timeoutMs?: number;
+  checks: GuestVerifyCheck[];
+}
+
+export interface GuestVerifyCheckResult {
+  type: "file" | "process";
+  ok: boolean;
+  errorCode?: string;
+  error?: string;
+  path?: string;
+  sizeBytes?: number;
+  sha256?: string;
+  modifiedAt?: IsoTimestamp;
+  pids?: number[];
+}
+
+export interface GuestVerifyResult {
+  actionId: Id;
+  ok: boolean;
+  checks: GuestVerifyCheckResult[];
+  error?: string;
+}
+
 /* Phase 5: projects, durable per-VM queues and task board projections. */
 export interface ProjectActivityRecord {
   id: number;
@@ -1008,6 +1037,187 @@ export interface TaskCompletionInput {
   summary: string;
   result?: unknown;
   artifacts?: TaskArtifactInput[];
+}
+
+/* Phase 7: Computer Use policy, execution trace, approvals and evidence. */
+export const COMPUTER_ACTION_TYPES = [
+  "screenshot",
+  "click",
+  "move",
+  "scroll",
+  "type_text",
+  "keypress",
+  "drag",
+  "wait",
+] as const;
+export type ComputerActionType = (typeof COMPUTER_ACTION_TYPES)[number];
+
+export interface CuaNetworkPolicy {
+  /** broker_only means the VM may only reach the local Model Broker/CUA Broker. */
+  mode: "broker_only" | "unrestricted";
+  allowedHosts: string[];
+}
+
+export interface CuaFileExchangePolicy {
+  enabled: boolean;
+  maxBytes: number;
+  /** Absolute guest roots that completion file evidence may reference. */
+  allowedRoots: string[];
+}
+
+export interface CuaCredentialPolicy {
+  /** Long-lived provider credentials must never enter the guest when false. */
+  allowInGuest: boolean;
+}
+
+export interface CuaPolicy {
+  maxSteps: number;
+  maxDurationMs: number;
+  noProgressLimit: number;
+  duplicateActionLimit: number;
+  approvalTimeoutMs: number;
+  approvalActionTypes: ComputerActionType[];
+  network: CuaNetworkPolicy;
+  fileExchange: CuaFileExchangePolicy;
+  credentials: CuaCredentialPolicy;
+}
+
+export interface CuaPolicyView {
+  projectId: Id;
+  policy: CuaPolicy;
+  source: "default" | "project";
+  updatedAt: IsoTimestamp | null;
+}
+
+export type CuaActionStatus =
+  "pending_approval" | "executed" | "rejected" | "timed_out" | "cancelled" | "failed" | "blocked";
+
+export interface CuaActionRecord {
+  id: Id;
+  taskId: Id;
+  workerId: Id;
+  vmId: Id;
+  leaseId: Id;
+  type: ComputerActionType;
+  action: unknown;
+  sourceScreenshotId: Id | null;
+  beforeScreenshotId: Id | null;
+  afterScreenshotId: Id | null;
+  display: {
+    width: number;
+    height: number;
+    dpi: number | null;
+    scaleFactor: number | null;
+  };
+  status: CuaActionStatus;
+  result: unknown | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+  approvalId: Id | null;
+  createdAt: IsoTimestamp;
+  executedAt: IsoTimestamp | null;
+  durationMs: number | null;
+}
+
+export type CuaScreenshotKind = "observation" | "before" | "after" | "completion";
+
+export interface CuaScreenshotRecord {
+  id: Id;
+  taskId: Id;
+  workerId: Id;
+  vmId: Id;
+  kind: CuaScreenshotKind;
+  width: number;
+  height: number;
+  dpi: number | null;
+  scaleFactor: number | null;
+  sha256: string;
+  sizeBytes: number;
+  capturedAt: IsoTimestamp;
+}
+
+export type CuaApprovalStatus = "pending" | "approved" | "rejected" | "timed_out" | "cancelled";
+
+export interface CuaApprovalRecord {
+  id: Id;
+  taskId: Id;
+  workerId: Id;
+  actionId: Id;
+  actionType: ComputerActionType;
+  contextSummary: string;
+  status: CuaApprovalStatus;
+  requestedAt: IsoTimestamp;
+  expiresAt: IsoTimestamp;
+  resolvedAt: IsoTimestamp | null;
+  resolvedBy: string | null;
+  resolutionNote: string | null;
+}
+
+export interface CuaApprovalResolveRequest {
+  note?: string;
+}
+
+export interface TaskExecutionStateView {
+  taskId: Id;
+  workerId: Id;
+  vmId: Id;
+  startedAt: IsoTimestamp;
+  deadlineAt: IsoTimestamp;
+  stepCount: number;
+  actionCount: number;
+  noProgressStreak: number;
+  duplicateStreak: number;
+  completionAttempts: number;
+  requiresObservation: boolean;
+  endedAt: IsoTimestamp | null;
+  outcome: "completed" | "blocked" | "failed" | "cancelled" | null;
+}
+
+export interface TaskTraceView {
+  taskId: Id;
+  execution: TaskExecutionStateView | null;
+  actions: CuaActionRecord[];
+  screenshots: CuaScreenshotRecord[];
+  approvals: CuaApprovalRecord[];
+}
+
+export type CuaCompletionEvidence =
+  | { type: "screenshot"; screenshotId: Id }
+  | { type: "file"; path: string; sha256?: string; sizeBytes?: number }
+  | { type: "process"; name: string };
+
+export interface CuaCompleteRequest {
+  summary: string;
+  evidence: CuaCompletionEvidence[];
+}
+
+export interface CuaEvidenceResult {
+  type: CuaCompletionEvidence["type"];
+  verified: boolean;
+  detail: string;
+  screenshotId?: Id;
+  path?: string;
+  sha256?: string;
+  sizeBytes?: number;
+  pids?: number[];
+}
+
+export interface CuaCompleteResult {
+  taskId: Id;
+  completed: boolean;
+  evidence: CuaEvidenceResult[];
+}
+
+export interface CuaPolicyUpdateRequest {
+  maxSteps?: number;
+  maxDurationMs?: number;
+  noProgressLimit?: number;
+  duplicateActionLimit?: number;
+  approvalTimeoutMs?: number;
+  approvalActionTypes?: ComputerActionType[];
+  network?: Partial<CuaNetworkPolicy>;
+  fileExchange?: Partial<CuaFileExchangePolicy>;
+  credentials?: Partial<CuaCredentialPolicy>;
 }
 
 export interface TaskListFilters {

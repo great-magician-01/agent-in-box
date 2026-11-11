@@ -82,6 +82,20 @@ jobs:
         env:
           AGENT_IN_BOX_PHASE6_RESULT: ${{ runner.temp }}/phase6-smoke.json
 
+      - name: Run phase 7 Computer Use, policy and completion smoke test
+        run: pnpm smoke:phase7
+        env:
+          AGENT_IN_BOX_PHASE7_RESULT: ${{ runner.temp }}/phase7-smoke.json
+
+      - name: Upload phase 7 smoke result
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase7-smoke-${{ runner.os }}
+          path: ${{ runner.temp }}/phase7-smoke.json
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload phase 6 smoke result
         if: success()
         uses: actions/upload-artifact@v4

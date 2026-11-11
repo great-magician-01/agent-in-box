@@ -32,7 +32,8 @@ export default function registerComputerUse(pi) {
   pi.registerTool({
     name: "vm_screenshot",
     label: "VM Screenshot",
-    description: "Capture the current Linux VM desktop. Always observe before choosing coordinates.",
+    description:
+      "Capture the current Linux VM desktop. Always observe before choosing coordinates.",
     parameters: Type.Object({}),
     async execute(_id, _params, signal) {
       const response = await guestRpc("/v1/screenshot", undefined, signal);
@@ -60,7 +61,15 @@ export default function registerComputerUse(pi) {
       count: Type.Optional(Type.Number()),
     }),
     async execute(_id, params, signal) {
-      return inputResult({ type: "click", point: { x: params.x, y: params.y }, button: params.button, count: params.count }, signal);
+      return inputResult(
+        {
+          type: "click",
+          point: { x: params.x, y: params.y },
+          button: params.button,
+          count: params.count,
+        },
+        signal,
+      );
     },
   });
 
@@ -95,8 +104,12 @@ export default function registerComputerUse(pi) {
       y: Type.Optional(Type.Number()),
     }),
     async execute(_id, params, signal) {
-      const point = params.x === undefined || params.y === undefined ? undefined : { x: params.x, y: params.y };
-      return inputResult({ type: "scroll", deltaX: params.deltaX, deltaY: params.deltaY, point }, signal);
+      const point =
+        params.x === undefined || params.y === undefined ? undefined : { x: params.x, y: params.y };
+      return inputResult(
+        { type: "scroll", deltaX: params.deltaX, deltaY: params.deltaY, point },
+        signal,
+      );
     },
   });
 
@@ -111,16 +124,20 @@ export default function registerComputerUse(pi) {
       toY: Type.Number(),
     }),
     async execute(_id, params, signal) {
-      return inputResult({
-        type: "drag",
-        from: { x: params.fromX, y: params.fromY },
-        to: { x: params.toX, y: params.toY },
-      }, signal);
+      return inputResult(
+        {
+          type: "drag",
+          from: { x: params.fromX, y: params.fromY },
+          to: { x: params.toX, y: params.toY },
+        },
+        signal,
+      );
     },
   });
 
   pi.registerTool({
-    name: "vm_wait",    label: "VM Wait",
+    name: "vm_wait",
+    label: "VM Wait",
     description: "Wait before observing the VM again.",
     parameters: Type.Object({ milliseconds: Type.Number() }),
     async execute(_id, params, signal) {

@@ -52,13 +52,15 @@ const server = http.createServer(async (req, res) => {
       },
       body,
     });
-    console.log(JSON.stringify({
-      at: new Date().toISOString(),
-      model: parsed.model,
-      stream: Boolean(parsed.stream),
-      status: upstream.status,
-      requestBytes: body.length,
-    }));
+    console.log(
+      JSON.stringify({
+        at: new Date().toISOString(),
+        model: parsed.model,
+        stream: Boolean(parsed.stream),
+        status: upstream.status,
+        requestBytes: body.length,
+      }),
+    );
     res.writeHead(upstream.status, {
       "Content-Type": upstream.headers.get("content-type") || "application/json",
       "Cache-Control": "no-store",
@@ -69,7 +71,13 @@ const server = http.createServer(async (req, res) => {
       res.end();
     }
     res.on("finish", () => {
-      console.log(JSON.stringify({ at: new Date().toISOString(), durationMs: Date.now() - started, done: true }));
+      console.log(
+        JSON.stringify({
+          at: new Date().toISOString(),
+          durationMs: Date.now() - started,
+          done: true,
+        }),
+      );
     });
   } catch (error) {
     console.error(JSON.stringify({ at: new Date().toISOString(), error: String(error) }));

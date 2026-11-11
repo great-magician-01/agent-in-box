@@ -1,46 +1,85 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>cua-start</title>
-  <style>
-    body { height: 4000px; margin: 0; font-family: sans-serif; }
-    #box { position: fixed; top: 140px; left: 100px; width: 120px; height: 80px; background: #1677c8; color: white; display: flex; align-items: center; justify-content: center; }
-    #target { position: fixed; top: 340px; left: 560px; width: 180px; height: 110px; border: 4px dashed #168832; color: #168832; display: flex; align-items: center; justify-content: center; }
-    #bottom { position: absolute; top: 3800px; font-size: 32px; }
-  </style>
-</head>
-<body>
-  <div id="box" draggable="true">DRAG</div>
-  <div id="target">DROP HERE</div>
-  <div id="bottom">BOTTOM MARKER</div>
-  <script>
-    let bottomReached = false;
-    let dropped = false;
-    function updateTitle() {
-      if (bottomReached && dropped) {
-        document.title = "bottom-and-drag-ok";
+  <head>
+    <meta charset="utf-8" />
+    <title>cua-start</title>
+    <style>
+      body {
+        height: 4000px;
+        margin: 0;
+        font-family: sans-serif;
       }
-    }
-    addEventListener("scroll", () => {
-      if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 30) {
-        bottomReached = true;
-        document.title = "bottom-reached";
+      #box {
+        position: fixed;
+        top: 140px;
+        left: 100px;
+        width: 120px;
+        height: 80px;
+        background: #1677c8;
+        color: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      #target {
+        position: fixed;
+        top: 340px;
+        left: 560px;
+        width: 180px;
+        height: 110px;
+        border: 4px dashed #168832;
+        color: #168832;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      #bottom {
+        position: absolute;
+        top: 3800px;
+        font-size: 32px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="box" draggable="true">DRAG</div>
+    <div id="target">DROP HERE</div>
+    <div id="bottom">BOTTOM MARKER</div>
+    <script>
+      let bottomReached = false;
+      let dropped = false;
+      function updateTitle() {
+        if (bottomReached && dropped) {
+          document.title = "bottom-and-drag-ok";
+        }
+      }
+      addEventListener("scroll", () => {
+        if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 30) {
+          bottomReached = true;
+          document.title = "bottom-reached";
+          updateTitle();
+        }
+      });
+      const target = document.getElementById("target");
+      const box = document.getElementById("box");
+      box.addEventListener("mousedown", () => {
+        document.title = "box-mousedown";
+      });
+      box.addEventListener("dragstart", () => {
+        document.title = "drag-start";
+      });
+      target.addEventListener("dragenter", () => {
+        document.title = "drag-enter";
+      });
+      target.addEventListener("dragover", (event) => {
+        event.preventDefault();
+        document.title = "drag-over";
+      });
+      target.addEventListener("drop", (event) => {
+        event.preventDefault();
+        dropped = true;
+        document.title = "drag-ok";
         updateTitle();
-      }
-    });
-    const target = document.getElementById("target");
-    const box = document.getElementById("box");
-    box.addEventListener("mousedown", () => { document.title = "box-mousedown"; });
-    box.addEventListener("dragstart", () => { document.title = "drag-start"; });
-    target.addEventListener("dragenter", () => { document.title = "drag-enter"; });
-    target.addEventListener("dragover", (event) => { event.preventDefault(); document.title = "drag-over"; });
-    target.addEventListener("drop", (event) => {
-      event.preventDefault();
-      dropped = true;
-      document.title = "drag-ok";
-      updateTitle();
-    });
-  </script>
-</body>
+      });
+    </script>
+  </body>
 </html>

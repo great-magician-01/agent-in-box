@@ -41,9 +41,17 @@ process.stdin.on("data", (chunk) => {
       case "prompt":
         response(command.id, "prompt", { disposition: "started" });
         setImmediate(() => {
-          write({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "working" } });
+          write({
+            type: "message_update",
+            assistantMessageEvent: { type: "text_delta", delta: "working" },
+          });
           write({ type: "tool_execution_start", toolName: "vm_screenshot", args: {} });
-          write({ type: "tool_execution_end", toolName: "vm_screenshot", result: { ok: true }, isError: false });
+          write({
+            type: "tool_execution_end",
+            toolName: "vm_screenshot",
+            result: { ok: true },
+            isError: false,
+          });
           write({ type: "agent_settled" });
         });
         break;
@@ -56,7 +64,13 @@ process.stdin.on("data", (chunk) => {
         setImmediate(() => write({ type: "agent_settled" }));
         break;
       default:
-        write({ id: command.id, type: "response", command: command.type, success: false, error: "unsupported" });
+        write({
+          id: command.id,
+          type: "response",
+          command: command.type,
+          success: false,
+          error: "unsupported",
+        });
     }
   }
 });

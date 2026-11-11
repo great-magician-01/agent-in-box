@@ -75,7 +75,9 @@ export class PiRpcProcess {
           if (event.success === true) {
             entry.resolve(event.data);
           } else {
-            entry.reject(new Error(typeof event.error === "string" ? event.error : "Pi command failed"));
+            entry.reject(
+              new Error(typeof event.error === "string" ? event.error : "Pi command failed"),
+            );
           }
         }
         continue;

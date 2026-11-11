@@ -52,16 +52,22 @@ export class PiWorkerEngine implements WorkerEngine {
     return { sessionId: this.registerSession(session) };
   }
 
-  private async startPi(spec?: WorkerSessionSpec, resumeRef?: string): Promise<PiSession & { sessionId: string }> {
+  private async startPi(
+    spec?: WorkerSessionSpec,
+    resumeRef?: string,
+  ): Promise<PiSession & { sessionId: string }> {
     const workerId = spec?.workerId ?? `resume-${Date.now()}`;
     const directory = path.join(this.options.sessionRoot, workerId);
     await mkdir(directory, { recursive: true });
 
     const args: string[] = [
-      ...this.options.argsPrefix ?? [],
-      "--mode", "rpc",
-      "--session-dir", path.join(directory, "sessions"),
-      "--name", workerId,
+      ...(this.options.argsPrefix ?? []),
+      "--mode",
+      "rpc",
+      "--session-dir",
+      path.join(directory, "sessions"),
+      "--name",
+      workerId,
       "--no-mcp",
       "--no-skills",
       "--no-context-files",
@@ -156,7 +162,9 @@ export class PiWorkerEngine implements WorkerEngine {
     const state = await session.process.command<PiState>("get_state");
     const archiveRef = state.sessionFile ?? session.sessionFile;
     if (!archiveRef) {
-      throw new Error("Pi session has no persistent session file; refusing to claim a restorable archive");
+      throw new Error(
+        "Pi session has no persistent session file; refusing to claim a restorable archive",
+      );
     }
     const messages = await session.process.command<{ messages?: unknown[] }>("get_messages");
     const summary = summarizeMessages(messages.messages ?? [], sessionId);

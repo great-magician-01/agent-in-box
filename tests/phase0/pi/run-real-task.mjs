@@ -8,7 +8,10 @@ const execAsync = promisify(exec);
 const taskId = process.argv[2];
 const tasks = JSON.parse(fs.readFileSync(new URL("./real-tasks.json", import.meta.url), "utf8"));
 const task = tasks.find((entry) => entry.id === taskId);
-if (!task) throw new Error(`unknown real task ${taskId}; available: ${tasks.map((entry) => entry.id).join(", ")}`);
+if (!task)
+  throw new Error(
+    `unknown real task ${taskId}; available: ${tasks.map((entry) => entry.id).join(", ")}`,
+  );
 
 const work = process.env.AIB_PI_WORK || "/home/aib/pi-real-validation";
 const extension = process.env.AIB_PI_EXTENSION || "/home/aib/pi-validation/cua-extension.js";
@@ -33,13 +36,22 @@ const pending = new Map();
 const listeners = new Set();
 let exited = false;
 
-const child = spawn(piBinary, [
-  "--mode", "rpc",
-  "--session-dir", path.join(work, "sessions"),
-  "--provider", "broker",
-  "--model", model,
-  "-e", extension,
-], { env: process.env, stdio: ["pipe", "pipe", "inherit"] });
+const child = spawn(
+  piBinary,
+  [
+    "--mode",
+    "rpc",
+    "--session-dir",
+    path.join(work, "sessions"),
+    "--provider",
+    "broker",
+    "--model",
+    model,
+    "-e",
+    extension,
+  ],
+  { env: process.env, stdio: ["pipe", "pipe", "inherit"] },
+);
 
 child.on("exit", (code, signal) => {
   exited = true;
@@ -103,20 +115,30 @@ async function main() {
   await settled;
   result.checks.runSettled = true;
 
-  const verification = await execAsync(task.verify, { env: process.env, shell: "/bin/bash" }).catch((error) => ({
-    stdout: error.stdout || "",
-    stderr: error.stderr || "",
-    code: error.code || 1,
-  }));
+  const verification = await execAsync(task.verify, { env: process.env, shell: "/bin/bash" }).catch(
+    (error) => ({
+      stdout: error.stdout || "",
+      stderr: error.stderr || "",
+      code: error.code || 1,
+    }),
+  );
   result.verify = verification;
   if (task.verifyType === "sha256") {
     result.checks.taskVerified = verification.stdout?.startsWith(task.expectedSha256) || false;
   } else {
-    result.checks.taskVerified = Boolean(verification.stdout?.trim()) && (verification.code === 0 || verification.code === undefined);
+    result.checks.taskVerified =
+      Boolean(verification.stdout?.trim()) &&
+      (verification.code === 0 || verification.code === undefined);
   }
 
-  const events = fs.readFileSync(eventLog, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line));
-  result.toolExecutionStarts = events.filter((event) => event.type === "tool_execution_start").map((event) => event.toolName);
+  const events = fs
+    .readFileSync(eventLog, "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+  result.toolExecutionStarts = events
+    .filter((event) => event.type === "tool_execution_start")
+    .map((event) => event.toolName);
   result.checks.usedScreenshot = result.toolExecutionStarts.includes("vm_screenshot");
   result.status = Object.values(result.checks).every(Boolean) ? "passed" : "failed";
 }

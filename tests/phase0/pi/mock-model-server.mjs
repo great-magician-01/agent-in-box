@@ -22,13 +22,17 @@ function decide(body) {
   // messages after the last user is not a reliable run counter. Count actual
   // assistant tool-call messages instead.
   const assistantToolCalls = messages.filter(
-    (message) => message.role === "assistant" && Array.isArray(message.tool_calls) && message.tool_calls.length > 0,
+    (message) =>
+      message.role === "assistant" &&
+      Array.isArray(message.tool_calls) &&
+      message.tool_calls.length > 0,
   ).length;
   let slowIndex = -1;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (message.role !== "user") continue;
-    const text = typeof message.content === "string" ? message.content : JSON.stringify(message.content || "");
+    const text =
+      typeof message.content === "string" ? message.content : JSON.stringify(message.content || "");
     if (text.includes("slow")) {
       slowIndex = index;
       break;
@@ -37,7 +41,8 @@ function decide(body) {
   const slow = slowIndex >= 0;
   const plain = messages.some((message) => {
     if (message.role !== "user") return false;
-    const text = typeof message.content === "string" ? message.content : JSON.stringify(message.content || "");
+    const text =
+      typeof message.content === "string" ? message.content : JSON.stringify(message.content || "");
     return text.includes("plain");
   });
   if (plain && !slow) {
@@ -45,12 +50,16 @@ function decide(body) {
   }
 
   if (slow) {
-    const waitIssued = messages.slice(slowIndex + 1).some(
-      (message) => message.role === "assistant" && (message.tool_calls || []).some(
-        (call) => call.function?.name === "vm_wait",
-      ),
-    );
-    return waitIssued ? { text: "slow run finished" } : { tool: toolCall("vm_wait", { milliseconds: 30000 }) };
+    const waitIssued = messages
+      .slice(slowIndex + 1)
+      .some(
+        (message) =>
+          message.role === "assistant" &&
+          (message.tool_calls || []).some((call) => call.function?.name === "vm_wait"),
+      );
+    return waitIssued
+      ? { text: "slow run finished" }
+      : { tool: toolCall("vm_wait", { milliseconds: 30000 }) };
   }
   if (assistantToolCalls === 0) {
     return { tool: toolCall("vm_screenshot", {}) };
@@ -86,12 +95,28 @@ function sendStream(res, decision, model) {
     model,
   };
   const write = (delta, finishReason) => {
-    res.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta, finish_reason: finishReason }] })}\n\n`);
+    res.write(
+      `data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta, finish_reason: finishReason }] })}\n\n`,
+    );
   };
   write({ role: "assistant" }, null);
   if (decision.tool) {
-    write({ tool_calls: [{ index: 0, ...decision.tool, function: { name: decision.tool.function.name, arguments: "" } }] }, null);
-    write({ tool_calls: [{ index: 0, function: { arguments: decision.tool.function.arguments } }] }, null);
+    write(
+      {
+        tool_calls: [
+          {
+            index: 0,
+            ...decision.tool,
+            function: { name: decision.tool.function.name, arguments: "" },
+          },
+        ],
+      },
+      null,
+    );
+    write(
+      { tool_calls: [{ index: 0, function: { arguments: decision.tool.function.arguments } }] },
+      null,
+    );
     write({}, "tool_calls");
   } else {
     write({ content: decision.text }, null);

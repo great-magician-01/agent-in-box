@@ -47,7 +47,11 @@ describe.skipIf(!enabled)("PiWorkerEngine real Pi integration", () => {
       }),
     );
     mock = spawn(process.execPath, [mockServerPath], {
-      env: { ...process.env, MOCK_MODEL_PORT: String(port), MOCK_MODEL_LOG: path.join(root, "mock.jsonl") },
+      env: {
+        ...process.env,
+        MOCK_MODEL_PORT: String(port),
+        MOCK_MODEL_LOG: path.join(root, "mock.jsonl"),
+      },
       stdio: "ignore",
     });
     engine = new PiWorkerEngine({
@@ -90,7 +94,9 @@ describe.skipIf(!enabled)("PiWorkerEngine real Pi integration", () => {
     });
     await engine.prompt(session.sessionId, { text: "plain" });
     await finished;
-    expect(events.some((event) => event.type === "text_delta" && event.delta.includes("plain-ok"))).toBe(true);
+    expect(
+      events.some((event) => event.type === "text_delta" && event.delta.includes("plain-ok")),
+    ).toBe(true);
 
     const archive = await engine.archive(session.sessionId);
     expect(archive.archiveRef).toMatch(/\.jsonl$/);

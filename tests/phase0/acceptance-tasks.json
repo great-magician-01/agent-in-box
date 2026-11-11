@@ -66,11 +66,26 @@
       "title": "真实模型经 Model Broker 完成 Computer Use 任务",
       "category": "worker_engine",
       "level": "P0",
-      "preconditions": ["G2 桌面运行", "Guest Agent 认证可用", "Model Broker 持有上游凭据", "VM 仅持有本地 Broker 令牌"],
-      "steps": ["真实模型截图", "输入含中文的命令", "回车执行", "再次截图", "检查 Guest models.json"],
+      "preconditions": [
+        "G2 桌面运行",
+        "Guest Agent 认证可用",
+        "Model Broker 持有上游凭据",
+        "VM 仅持有本地 Broker 令牌"
+      ],
+      "steps": [
+        "真实模型截图",
+        "输入含中文的命令",
+        "回车执行",
+        "再次截图",
+        "检查 Guest models.json"
+      ],
       "completion": {
         "mode": "machine",
-        "checks": ["任务文件 SHA256 与预期一致", "实际调用 vm_screenshot", "Guest 配置不包含上游 API Key"]
+        "checks": [
+          "任务文件 SHA256 与预期一致",
+          "实际调用 vm_screenshot",
+          "Guest 配置不包含上游 API Key"
+        ]
       },
       "evidenceRequired": ["real-model-result", "screenshot-sha256", "secret-scan-result"]
     },
@@ -79,11 +94,27 @@
       "title": "Pi RPC 的 Computer Use 工具循环、取消与恢复",
       "category": "worker_engine",
       "level": "P0",
-      "preconditions": ["G2 桌面运行", "Guest Agent 认证可用", "Pi 固定版本已安装", "脚本化模型仅用于协议验证"],
-      "steps": ["Pi RPC 建立会话", "截图并回传图片", "点击与中文输入", "Abort 活跃工具", "关闭并恢复 Session"],
+      "preconditions": [
+        "G2 桌面运行",
+        "Guest Agent 认证可用",
+        "Pi 固定版本已安装",
+        "脚本化模型仅用于协议验证"
+      ],
+      "steps": [
+        "Pi RPC 建立会话",
+        "截图并回传图片",
+        "点击与中文输入",
+        "Abort 活跃工具",
+        "关闭并恢复 Session"
+      ],
       "completion": {
         "mode": "machine",
-        "checks": ["下一次模型请求包含截图 PNG", "Guest 文件 SHA256 与任务一致", "Abort 后达到 agent_settled", "恢复后消息数不减少"]
+        "checks": [
+          "下一次模型请求包含截图 PNG",
+          "Guest 文件 SHA256 与任务一致",
+          "Abort 后达到 agent_settled",
+          "恢复后消息数不减少"
+        ]
       },
       "evidenceRequired": ["rpc-events", "mock-model-log", "guest-file-sha256"]
     },
@@ -96,7 +127,11 @@
       "steps": ["无令牌访问", "能力查询", "截图", "点击与 ASCII 输入", "中文输入", "错误令牌访问"],
       "completion": {
         "mode": "machine",
-        "checks": ["无令牌和错误令牌均返回 401", "截图是可解码 PNG 且尺寸正确", "Guest 文件内容的 UTF-8 SHA256 与输入逐字一致"]
+        "checks": [
+          "无令牌和错误令牌均返回 401",
+          "截图是可解码 PNG 且尺寸正确",
+          "Guest 文件内容的 UTF-8 SHA256 与输入逐字一致"
+        ]
       },
       "evidenceRequired": ["http-status", "screenshot-sha256", "guest-file-sha256"]
     },
@@ -119,10 +154,20 @@
       "category": "computer_use",
       "level": "P0",
       "preconditions": ["G2 桌面已登录", "QEMU 配置 virtio-gpu 与 virtio-tablet"],
-      "steps": ["QMP screendump", "绝对鼠标移动到右下角", "点击终端", "send-key 输入命令", "Guest 内验证文件"],
+      "steps": [
+        "QMP screendump",
+        "绝对鼠标移动到右下角",
+        "点击终端",
+        "send-key 输入命令",
+        "Guest 内验证文件"
+      ],
       "completion": {
         "mode": "machine",
-        "checks": ["截图尺寸与 xdotool 分辨率一致", "绝对指针归一化坐标映射正确", "输入命令在 Guest 内产生预期文件"]
+        "checks": [
+          "截图尺寸与 xdotool 分辨率一致",
+          "绝对指针归一化坐标映射正确",
+          "输入命令在 Guest 内产生预期文件"
+        ]
       },
       "evidenceRequired": ["before-after-screenshots", "mouse-location", "guest-file-check"]
     },

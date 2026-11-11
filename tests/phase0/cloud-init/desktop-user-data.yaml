@@ -49,7 +49,11 @@ write_files:
       phase=0
       purpose=windows-host-whpx-linux-desktop
 runcmd:
-  - [sh, -c, "printf 'xset s off\nxset -dpms\n' > /home/aib/.xsessionrc && chown aib:aib /home/aib/.xsessionrc"]
+  - [
+      sh,
+      -c,
+      "printf 'xset s off\nxset -dpms\n' > /home/aib/.xsessionrc && chown aib:aib /home/aib/.xsessionrc",
+    ]
   # LightDM autologin does not complete with a locked password field in this image.
   # SSH password authentication remains disabled; this is a local validation VM only.
   - [passwd, -d, aib]

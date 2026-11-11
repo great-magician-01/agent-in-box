@@ -56,11 +56,16 @@ function startPi(sessionFile) {
   buffer = "";
   childEvents = new Set();
   const args = [
-    "--mode", "rpc",
-    "--session-dir", path.join(work, "sessions"),
-    "--provider", "mock",
-    "--model", "mock-cua",
-    "-e", extension,
+    "--mode",
+    "rpc",
+    "--session-dir",
+    path.join(work, "sessions"),
+    "--provider",
+    "mock",
+    "--model",
+    "mock-cua",
+    "-e",
+    extension,
   ];
   if (sessionFile) args.push("--session", sessionFile);
   child = spawn(piBinary, args, {
@@ -141,7 +146,8 @@ async function main() {
   if (resumeFile) {
     startPi(resumeFile);
     const resumed = await command("get_messages");
-    result.checks.sessionResume = resumed.messages.length >= beforeResume.messages.length && beforeResume.messages.length > 0;
+    result.checks.sessionResume =
+      resumed.messages.length >= beforeResume.messages.length && beforeResume.messages.length > 0;
     result.resumedMessageCount = resumed.messages.length;
   } else {
     result.errors.push("Pi did not report a session file");
@@ -149,12 +155,23 @@ async function main() {
 
   const mockLog = process.env.MOCK_MODEL_LOG || "/tmp/aib-mock-model.jsonl";
   if (fs.existsSync(mockLog)) {
-    const records = fs.readFileSync(mockLog, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
-    result.checks.screenshotReturnedToModel = records.some((record) => record.sawPngBase64 && record.toolResults >= 1);
-    result.checks.allCuaToolsExposed = records.every((record) =>
-      ["vm_screenshot", "vm_click", "vm_type_text", "vm_keypress", "vm_wait"].every((tool) => record.tools.includes(tool)),
+    const records = fs
+      .readFileSync(mockLog, "utf8")
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    result.checks.screenshotReturnedToModel = records.some(
+      (record) => record.sawPngBase64 && record.toolResults >= 1,
     );
-    result.checks.abortUsedWaitTool = records.some((record) => record.decision.tool?.function?.name === "vm_wait");
+    result.checks.allCuaToolsExposed = records.every((record) =>
+      ["vm_screenshot", "vm_click", "vm_type_text", "vm_keypress", "vm_wait"].every((tool) =>
+        record.tools.includes(tool),
+      ),
+    );
+    result.checks.abortUsedWaitTool = records.some(
+      (record) => record.decision.tool?.function?.name === "vm_wait",
+    );
     result.mockRequests = records.length;
   }
 

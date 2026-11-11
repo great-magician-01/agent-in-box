@@ -28,13 +28,22 @@ const pending = new Map();
 const listeners = new Set();
 let exited = false;
 
-const child = spawn(piBinary, [
-  "--mode", "rpc",
-  "--session-dir", path.join(work, "sessions"),
-  "--provider", "broker",
-  "--model", model,
-  "-e", extension,
-], { env: process.env, stdio: ["pipe", "pipe", "inherit"] });
+const child = spawn(
+  piBinary,
+  [
+    "--mode",
+    "rpc",
+    "--session-dir",
+    path.join(work, "sessions"),
+    "--provider",
+    "broker",
+    "--model",
+    model,
+    "-e",
+    extension,
+  ],
+  { env: process.env, stdio: ["pipe", "pipe", "inherit"] },
+);
 
 child.on("exit", (code, signal) => {
   exited = true;
@@ -104,13 +113,21 @@ async function main() {
 
   const content = fs.existsSync(marker) ? fs.readFileSync(marker, "utf8") : "";
   result.checks.guestTaskVerified = content === expected;
-  result.guestContentSha256 = content ? crypto.createHash("sha256").update(content).digest("hex") : null;
+  result.guestContentSha256 = content
+    ? crypto.createHash("sha256").update(content).digest("hex")
+    : null;
   result.expectedSha256 = crypto.createHash("sha256").update(expected).digest("hex");
   const messages = await command("get_messages");
   result.messageCount = messages.messages.length;
 
-  const toolEvents = fs.readFileSync(eventLog, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line));
-  result.toolExecutionStarts = toolEvents.filter((event) => event.type === "tool_execution_start").map((event) => event.toolName);
+  const toolEvents = fs
+    .readFileSync(eventLog, "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+  result.toolExecutionStarts = toolEvents
+    .filter((event) => event.type === "tool_execution_start")
+    .map((event) => event.toolName);
   result.checks.usedScreenshot = result.toolExecutionStarts.includes("vm_screenshot");
   result.status = Object.values(result.checks).every(Boolean) ? "passed" : "failed";
 }

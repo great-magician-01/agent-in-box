@@ -69,7 +69,7 @@ describe("PiWorkerEngine", () => {
     await engine.abort(session.sessionId);
 
     const archive = await engine.archive(session.sessionId);
-    expect(archive.archiveRef).toMatch(/backups\/worker-1-.*\.jsonl$/);
+    expect(archive.archiveRef).toMatch(/[\\/]backups[\\/]worker-1-.*\.jsonl$/);
     expect(archive.summary).toBe("done");
 
     const startArgs = JSON.parse(await readFile(argsLog, "utf8")) as string[];

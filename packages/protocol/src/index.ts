@@ -627,7 +627,90 @@ export interface RuntimeInfo {
     artifacts: string;
     archives: string;
     inbox: string;
+    backups: string;
   };
+}
+
+/* Phase 12: local-first diagnostics. The report never leaves the machine. */
+
+export type DiagnosticsCheckStatus = "ok" | "warning" | "error";
+
+export interface DiagnosticsCheck {
+  name: string;
+  status: DiagnosticsCheckStatus;
+  detail: string;
+}
+
+export interface DiagnosticsLogFile {
+  name: string;
+  bytes: number;
+  truncated: boolean;
+}
+
+export interface DiagnosticsMigrationBackup {
+  fileName: string;
+  sizeBytes: number;
+  sha256: string;
+  createdAt: IsoTimestamp;
+}
+
+export interface DiagnosticsReport {
+  generatedAt: IsoTimestamp;
+  warning: string;
+  product: {
+    version: string;
+    protocolVersion: ProtocolVersion;
+    nodeVersion: string;
+    pid: number;
+    uptimeSeconds: number;
+  };
+  runtime: {
+    platform: string;
+    architecture: string;
+    release: string;
+    hostname: string;
+    dataRoot: string;
+    dataRootSource: DataRootSource;
+    configPath: string;
+    databasePath: string;
+    logsPath: string;
+    loopbackOnly: boolean;
+  };
+  database: {
+    sizeBytes: number;
+    walBytes: number;
+    shmBytes: number;
+    appliedMigrations: string[];
+    pendingMigrations: string[];
+    quickCheck: string;
+    tableCounts: Record<string, number>;
+    migrationBackups: DiagnosticsMigrationBackup[];
+  };
+  storage: {
+    freeBytes: number;
+    totalBytes: number;
+  };
+  state: {
+    tasksByStatus: Record<string, number>;
+    vmsByPower: Record<string, number>;
+    workersByStatus: Record<string, number>;
+    imagesByStatus: Record<string, number>;
+    pendingOutbox: number;
+    unreadNotifications: number;
+  };
+  settings: {
+    resourcePolicy: ResourcePolicy;
+    security: SecuritySettings;
+    workerLifecycle: WorkerLifecyclePolicy;
+    preferredModelProvider: string | null;
+    credentialsConfigured: boolean;
+  };
+  logs: {
+    files: DiagnosticsLogFile[];
+    content: string;
+    truncated: boolean;
+  };
+  checks: DiagnosticsCheck[];
 }
 
 export const STORAGE_CATEGORIES = [
@@ -638,6 +721,7 @@ export const STORAGE_CATEGORIES = [
   "artifacts",
   "archives",
   "inbox",
+  "backups",
 ] as const;
 export type StorageCategory = (typeof STORAGE_CATEGORIES)[number];
 
@@ -651,6 +735,7 @@ export interface StorageLayoutInfo {
   artifacts: string;
   archives: string;
   inbox: string;
+  backups: string;
 }
 
 export interface StorageValidation {

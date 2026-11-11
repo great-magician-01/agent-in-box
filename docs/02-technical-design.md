@@ -783,6 +783,8 @@ Router / Task Outbox → Notification Mapper → Durable Outbound Queue → Plat
 - Electron 窗口退出与本地后台服务退出分开处理；
 - 宿主机休眠、断电和 Guest 崩溃纳入故障测试。
 
+**阶段 12 实现（2026-11-11）**：控制平面在已有数据库存在待应用 Migration 时，先创建 `backups/pre-migration-*.sqlite`，执行 `PRAGMA integrity_check`，写入 SHA-256 后按保留策略清理，再运行 Migration；任一备份步骤失败都会阻止启动。`smoke:phase12` 覆盖控制平面崩溃后的 Worker/任务/Lease 对账、迁移前备份和数据库恢复。
+
 ## 16. 可观测性与评测
 
 ### 16.1 本地诊断
@@ -791,6 +793,8 @@ Router / Task Outbox → Notification Mapper → Durable Outbound Queue → Plat
 - Task Trace 关联任务、Worker、VM、动作、截图、审批和结果；
 - 提供本机诊断包，但导出前提示敏感内容；
 - 默认不向外部遥测服务上传任务内容。
+
+**阶段 12 实现（2026-11-11）**：`GET /api/v1/diagnostics` 返回版本/平台、数据根、SQLite quick check、已应用/待应用迁移、迁移备份、表计数、任务/VM/Worker/镜像状态、Outbox/通知积压、资源/安全/Worker 策略和日志尾部；Web 设置页可导出 JSON。报告对访问密钥、Bearer、Provider Key、机器人 Secret 和会话 Cookie 做结构化与文本脱敏；控制平面未知异常只返回通用错误提示，脱敏后的完整堆栈只写本地日志；桌面日志对捕获的控制平面输出行做同样的凭据形状脱敏。诊断报告不自动上传。
 
 ### 16.2 Computer Use 评测
 

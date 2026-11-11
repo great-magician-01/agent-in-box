@@ -23,6 +23,7 @@ export class RuntimeController {
         artifacts: this.database.layout.artifacts,
         archives: this.database.layout.archives,
         inbox: this.database.layout.inbox,
+        backups: this.database.layout.backups,
       },
     };
   }

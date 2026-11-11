@@ -107,6 +107,20 @@ jobs:
         env:
           AGENT_IN_BOX_PHASE11_RESULT: ${{ runner.temp }}/phase11-smoke.json
 
+      - name: Run phase 12 security, recovery and performance smoke test
+        run: pnpm smoke:phase12
+        env:
+          AGENT_IN_BOX_PHASE12_RESULT: ${{ runner.temp }}/phase12-smoke.json
+
+      - name: Upload phase 12 smoke result
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase12-smoke-${{ runner.os }}
+          path: ${{ runner.temp }}/phase12-smoke.json
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload phase 11 smoke result
         if: success()
         uses: actions/upload-artifact@v4

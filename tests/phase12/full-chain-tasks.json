@@ -1,0 +1,244 @@
+{
+  "version": 1,
+  "description": "Agent-in-Box phase 12 Linux full-chain acceptance task set. These tasks must be executed against a real Linux Guest, real Worker/Pi and the configured model before the Linux acceptance build is declared. A model's self-report is never a completion condition.",
+  "defaults": {
+    "hostProfile": "H1",
+    "guestProfile": "G2",
+    "resourceProfile": "R2",
+    "repeat": 2
+  },
+  "tasks": [
+    {
+      "id": "LC-SHARED-001",
+      "level": "P0",
+      "title": "共享 Linux VM 上的项目任务完成与停止后恢复",
+      "entrypoints": ["electron", "web"],
+      "preconditions": [
+        "Linux VM 运行且绑定两个项目",
+        "两个项目使用不同 Guest 工作目录",
+        "Model Broker 持有真实模型凭据"
+      ],
+      "steps": [
+        "项目 A 创建任务并等待完成",
+        "项目 B 创建任务并等待完成",
+        "停止 VM",
+        "再次创建项目 A 任务并等待自动启动/恢复"
+      ],
+      "completion": {
+        "mode": "machine",
+        "checks": [
+          "两个任务产物 SHA-256 与 Guest 文件一致",
+          "同一 VM 上任务串行，不同 VM 可并行",
+          "VM 停止后任务进入明确等待状态或失败，不盲目重放旧动作",
+          "项目目录备份互不覆盖"
+        ]
+      },
+      "evidence": ["task-trace", "guest-file-sha256", "vm-state-transitions", "project-backup"]
+    },
+    {
+      "id": "LC-DEDICATED-002",
+      "level": "P0",
+      "title": "独占 Linux VM 的多任务与人工接管",
+      "entrypoints": ["electron", "web"],
+      "preconditions": ["独立 Linux VM 运行", "noVNC 控制台可用"],
+      "steps": [
+        "创建长任务",
+        "人工打开 noVNC 接管并输入",
+        "确认 AI 动作被拒绝",
+        "释放人工控制后继续或取消任务"
+      ],
+      "completion": {
+        "mode": "machine",
+        "checks": [
+          "人工接管后旧 AI Lease 失效",
+          "取消后无残留输入动作",
+          "任务 Trace 记录接管与取消"
+        ]
+      },
+      "evidence": ["execution-lease-log", "task-trace", "console-session-log"]
+    },
+    {
+      "id": "LC-ROUTER-003",
+      "level": "P0",
+      "title": "Router 复用现有 Worker 完成后续任务",
+      "entrypoints": ["electron", "web", "feishu", "qq"],
+      "preconditions": ["存在可复用 Worker", "Router 模型可用"],
+      "steps": [
+        "通过 Router 创建任务",
+        "确认分配到现有 Worker",
+        "任务完成后发送后续指令",
+        "确认同一 Worker 会话继续"
+      ],
+      "completion": {
+        "mode": "machine",
+        "checks": [
+          "Router 工具调用已审计",
+          "未创建重复任务",
+          "Worker 会话引用保持不变"
+        ]
+      },
+      "evidence": ["router-tool-calls", "worker-registry", "task-trace"]
+    },
+    {
+      "id": "LC-ROUTER-004",
+      "level": "P0",
+      "title": "Router 新建、归档和恢复 Worker",
+      "entrypoints": ["electron", "web"],
+      "preconditions": ["项目已绑定 Linux VM", "存在可归档 Worker"],
+      "steps": [
+        "通过 Router 新建 Worker 并完成任务",
+        "手动归档该 Worker",
+        "确认任务历史仍可检索",
+        "从归档恢复并继续任务"
+      ],
+      "completion": {
+        "mode": "machine",
+        "checks": [
+          "归档不删除任务或 Router 历史消息",
+          "恢复前注入最新截图与环境增量",
+          "Native Resume 或显式摘要恢复标记正确",
+          "恢复后桌面动作重新观察"
+        ]
+      },
+      "evidence": ["worker-archive", "resume-context", "task-trace"]
+    },
+    {
+      "id": "LC-BOT-005",
+      "level": "P0",
+      "title": "真实飞书机器人端到端任务",
+      "entrypoints": ["feishu"],
+      "preconditions": ["真实飞书测试应用", "活跃执行电脑绑定", "用户/群白名单"],
+      "steps": [
+        "单聊发送任务指令",
+        "在群聊 @ 机器人发送任务指令",
+        "审批一次敏感动作",
+        "等待完成通知"
+      ],
+      "completion": {
+        "mode": "machine",
+        "checks": [
+          "事件 ID 持久去重",
+          "任务和审批反馈回到来源会话",
+          "未授权用户不能创建或取消任务",
+          "重复推送不重复执行"
+        ]
+      },
+      "evidence": ["feishu-event-ids", "bot-outbound", "task-trace", "audit-log"]
+    },
+    {
+      "id": "LC-BOT-006",
+      "level": "P0",
+      "title": "真实 QQ 机器人端到端任务",
+      "entrypoints": ["qq"],
+      "preconditions": ["真实 QQ 测试机器人", "群聊 @ 事件权限"],
+      "steps": [
+        "群聊 @ 机器人创建任务",
+        "检查被动回复",
+        "断线重连后确认不重复执行",
+        "完成或失败通知回传"
+      ],
+      "completion": {
+        "mode": "machine",
+        "checks": [
+          "群聊白名单生效",
+          "被动回复窗口外错误可见",
+          "事件去重跨重启有效"
+        ]
+      },
+      "evidence": ["qq-event-ids", "bot-outbound", "task-trace"]
+    },
+    {
+      "id": "LC-FAIL-007",
+      "level": "P0",
+      "title": "执行中崩溃、断网、取消与人工接管",
+      "entrypoints": ["electron"],
+      "preconditions": ["任务正在执行", "可控制 Guest 网络"],
+      "steps": [
+        "强制终止控制平面",
+        "重启并检查任务和 Lease",
+        "中断 Guest 网络后恢复",
+        "取消任务并确认 Pi Abort",
+        "执行中人工接管"
+      ],
+      "completion": {
+        "mode": "machine",
+        "checks": [
+          "不产生重复任务",
+          "状态不确定时进入 failed/blocked 安全状态",
+          "不重放旧桌面动作",
+          "取消后无残留动作"
+        ]
+      },
+      "evidence": ["control-plane-logs", "task-trace", "lease-history", "rpc-events"]
+    },
+    {
+      "id": "LC-NET-008",
+      "level": "P1",
+      "title": "Guest 外网访问、审批与敏感地址边界",
+      "entrypoints": ["web"],
+      "preconditions": ["Linux VM 运行", "项目策略配置网络白名单"],
+      "steps": [
+        "访问项目允许的外部站点",
+        "尝试访问未在白名单中的站点",
+        "尝试访问宿主机管理端口和云元数据地址",
+        "检查审批与提示"
+      ],
+      "completion": {
+        "mode": "human_review",
+        "checks": [
+          "外部网络影响有明确审批或提示",
+          "不会把 VM 隔离宣传为强安全隔离",
+          "敏感地址不可被无提示访问"
+        ]
+      },
+      "evidence": ["network-policy", "approval-record", "guest-agent-log"]
+    },
+    {
+      "id": "LC-STORAGE-009",
+      "level": "P0",
+      "title": "非系统盘、镜像中断续传与 VM 自动启动",
+      "entrypoints": ["electron"],
+      "preconditions": ["数据根目录位于非系统盘"],
+      "steps": [
+        "下载镜像并中断网络",
+        "恢复后继续下载并校验",
+        "创建 VM 并停止",
+        "配置 when_needed 后创建任务"
+      ],
+      "completion": {
+        "mode": "machine",
+        "checks": [
+          "坏文件不会启动",
+          "部分下载可续传",
+          "VM 在需要时自动启动",
+          "数据目录迁移后旧路径不丢失"
+        ]
+      },
+      "evidence": ["image-download-log", "sha256", "vm-state", "storage-report"]
+    },
+    {
+      "id": "LC-UPGRADE-010",
+      "level": "P0",
+      "title": "版本升级、数据库备份与回滚",
+      "entrypoints": ["electron"],
+      "preconditions": ["已安装上一个测试构建", "存在项目和任务历史"],
+      "steps": [
+        "检查更新并下载",
+        "安装更新",
+        "确认迁移前备份已生成",
+        "重启应用并检查数据",
+        "执行回滚"
+      ],
+      "completion": {
+        "mode": "machine",
+        "checks": [
+          "迁移前备份 SHA-256 可校验",
+          "升级后项目和任务历史完整",
+          "回滚后应用与数据库可启动",
+          "签名与校验信息匹配"
+        ]
+      },
+      "evidence": ["update-manifest", "backup-sha256", "migration-log", "app-version"]
+    }
+  ]
+}

@@ -31,6 +31,7 @@ import type {
   OnboardingCompleteResult,
   OnboardingState,
   CreateProjectBackupRequest,
+  DiagnosticsReport,
   CreateVmSnapshotRequest,
   ProjectBackupImpact,
   ProjectBackupRecord,
@@ -374,6 +375,7 @@ export const api = {
       method: "DELETE",
     }),
   runtime: () => apiFetch<RuntimeInfo>("/api/v1/runtime"),
+  diagnostics: () => apiFetch<DiagnosticsReport>("/api/v1/diagnostics"),
   onboarding: () => apiFetch<OnboardingState>("/api/v1/onboarding"),
   completeOnboarding: (body: OnboardingCompleteRequest) =>
     apiFetch<OnboardingCompleteResult>("/api/v1/onboarding/complete", {

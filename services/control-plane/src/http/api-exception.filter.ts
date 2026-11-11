@@ -9,6 +9,7 @@ import {
 import type { Response } from "express";
 import type { ApiError, ApiErrorCode } from "@agent-in-box/protocol";
 import { PersistenceError } from "../persistence/errors";
+import { redactText } from "../security/redaction";
 
 function statusForCode(code: ApiErrorCode): number {
   switch (code) {
@@ -44,7 +45,7 @@ export class ApiExceptionFilter implements ExceptionFilter {
     if (exception instanceof PersistenceError) {
       const error: ApiError = {
         code: exception.code,
-        message: exception.message,
+        message: redactText(exception.message),
         ...(exception.details !== undefined ? { details: exception.details } : {}),
       };
       response.status(statusForCode(exception.code)).json({ ok: false, error });
@@ -64,7 +65,7 @@ export class ApiExceptionFilter implements ExceptionFilter {
             : exception.message;
       const error: ApiError = {
         code: status === 400 ? "bad_request" : status === 404 ? "not_found" : "internal_error",
-        message,
+        message: redactText(message),
       };
       response.status(status).json({ ok: false, error });
       return;
@@ -72,11 +73,14 @@ export class ApiExceptionFilter implements ExceptionFilter {
 
     this.logger.error(
       "Unhandled control-plane error",
-      exception instanceof Error ? exception.stack : String(exception),
+      redactText(exception instanceof Error ? (exception.stack ?? exception.message) : String(exception)),
     );
     const error: ApiError = {
       code: "internal_error",
-      message: exception instanceof Error ? exception.message : "内部错误",
+      // Unknown errors can contain upstream response bodies, credentials,
+      // filesystem paths or stack details. The actionable diagnostic belongs
+      // in the redacted local log/diagnostics report, never in HTTP.
+      message: "内部错误；请导出本机诊断报告或查看本机日志",
     };
     response.status(HttpStatus.INTERNAL_SERVER_ERROR).json({ ok: false, error });
   }

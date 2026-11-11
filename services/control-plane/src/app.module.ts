@@ -20,6 +20,7 @@ import { ResourceModule } from "./resources/resources.module";
 import { BotsModule } from "./bots/bots.module";
 import { NotificationsModule } from "./notifications/notifications.module";
 import { InboxModule } from "./inbox/inbox.module";
+import { DiagnosticsModule } from "./diagnostics/diagnostics.module";
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { InboxModule } from "./inbox/inbox.module";
     BotsModule,
     NotificationsModule,
     InboxModule,
+    DiagnosticsModule,
   ],
   controllers: [HealthController, RuntimeController],
 })

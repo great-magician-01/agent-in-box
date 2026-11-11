@@ -222,6 +222,7 @@ export function ensureStorageLayout(layout: StorageLayout): void {
     layout.artifacts,
     layout.archives,
     layout.inbox,
+    layout.backups,
   ]) {
     fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
   }

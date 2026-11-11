@@ -1556,7 +1556,85 @@ const migrations: Record<string, MigrationDefinition> = {
       }
     },
   },
+  "011_phase12_hardening": {
+    async up(db: Kysely<DatabaseSchema>): Promise<void> {
+      // Phase 12 acceptance runs large task histories and many idle/active
+      // Workers. These indexes keep board filters, worker roster rebuilds and
+      // archive lookups predictable without changing the domain model.
+      await db.schema
+        .createIndex("tasks_status_created_idx")
+        .ifNotExists()
+        .on("tasks")
+        .columns(["status", "created_at"])
+        .execute();
+      await db.schema
+        .createIndex("tasks_worker_created_idx")
+        .ifNotExists()
+        .on("tasks")
+        .columns(["assigned_worker_id", "created_at"])
+        .execute();
+      await db.schema
+        .createIndex("workers_status_created_idx")
+        .ifNotExists()
+        .on("workers")
+        .columns(["status", "created_at"])
+        .execute();
+      await db.schema
+        .createIndex("workers_project_vm_idx")
+        .ifNotExists()
+        .on("workers")
+        .columns(["project_id", "vm_id"])
+        .execute();
+    },
+
+    async down(db: Kysely<DatabaseSchema>): Promise<void> {
+      for (const index of [
+        "workers_project_vm_idx",
+        "workers_status_created_idx",
+        "tasks_worker_created_idx",
+        "tasks_status_created_idx",
+      ]) {
+        await db.schema.dropIndex(index).ifExists().execute();
+      }
+    },
+  },
 };
+
+/** Migration ids in the order the runner applies them. */
+export function migrationIds(): string[] {
+  return Object.keys(migrations);
+}
+
+/**
+ * Migration ids that have not been recorded yet. Missing schema_migrations
+ * means every migration is pending (a brand-new or legacy database).
+ */
+export async function pendingMigrationIds(db: Kysely<DatabaseSchema>): Promise<string[]> {
+  const table = await sql<{ name: string }>`
+    select name from sqlite_master where type = 'table' and name = 'schema_migrations'
+  `.execute(db);
+  if (table.rows.length === 0) {
+    return migrationIds();
+  }
+  const rows = await db.selectFrom("schema_migrations").select("id").execute();
+  const applied = new Set(rows.map((row) => row.id));
+  return migrationIds().filter((id) => !applied.has(id));
+}
+
+export async function appliedMigrationIds(db: Kysely<DatabaseSchema>): Promise<string[]> {
+  const table = await sql<{ name: string }>`
+    select name from sqlite_master where type = 'table' and name = 'schema_migrations'
+  `.execute(db);
+  if (table.rows.length === 0) {
+    return [];
+  }
+  const rows = await db
+    .selectFrom("schema_migrations")
+    .select("id")
+    .orderBy("id", "asc")
+    .execute();
+  return rows.map((row) => row.id);
+}
 
 export async function migrateToLatest(db: Kysely<DatabaseSchema>): Promise<string[]> {
   await sql`

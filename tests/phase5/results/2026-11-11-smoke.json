@@ -1,8 +1,8 @@
 {
   "phase": 5,
-  "startedAt": "2026-11-11T14:04:29.584Z",
-  "completedAt": "2026-11-11T14:04:31.344Z",
-  "platform": "linux",
+  "startedAt": "2026-11-11T15:10:25.819Z",
+  "completedAt": "2026-11-11T15:10:32.231Z",
+  "platform": "win32",
   "architecture": "x64",
   "checks": [
     "真实控制平面启动并应用阶段 5 SQLite 迁移",

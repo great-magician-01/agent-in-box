@@ -84,6 +84,8 @@ export function Dashboard({
   const [autoArchive, setAutoArchive] = useState(true);
   const [idleMinutes, setIdleMinutes] = useState("30");
   const [policyMessage, setPolicyMessage] = useState<string | null>(null);
+  const [diagnosticsBusy, setDiagnosticsBusy] = useState(false);
+  const [diagnosticsMessage, setDiagnosticsMessage] = useState<string | null>(null);
 
   const [cleanupMessage, setCleanupMessage] = useState<string | null>(null);
   const [preferences, setPreferences] = useState<DesktopPreferences | null>(null);
@@ -201,6 +203,30 @@ export function Dashboard({
       setPolicyMessage(errorMessage(error));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function exportDiagnostics(): Promise<void> {
+    setDiagnosticsBusy(true);
+    setDiagnosticsMessage(null);
+    try {
+      const report = await api.diagnostics();
+      const blob = new Blob([`${JSON.stringify(report, null, 2)}\n`], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `agent-in-box-diagnostics-${report.generatedAt.replace(/[:.]/g, "-")}.json`;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setDiagnosticsMessage("诊断报告已导出。报告可能包含路径和日志片段，请检查后再分享。");
+    } catch (error) {
+      setDiagnosticsMessage(errorMessage(error));
+    } finally {
+      setDiagnosticsBusy(false);
     }
   }
 
@@ -825,24 +851,38 @@ export function Dashboard({
               </dd>
             </div>
           </dl>
-          {bridge && (
-            <div className="action-row">
-              <button
-                type="button"
-                className="secondary"
-                onClick={() => void bridge.app.openLogs()}
-              >
-                打开日志目录
-              </button>
-              <button
-                type="button"
-                className="secondary"
-                onClick={() => void bridge.app.restartControlPlane()}
-              >
-                重启本地服务
-              </button>
-            </div>
-          )}
+          <div className="action-row">
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => void exportDiagnostics()}
+              disabled={diagnosticsBusy}
+            >
+              {diagnosticsBusy ? "生成中…" : "导出本机诊断报告"}
+            </button>
+            {bridge && (
+              <>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => void bridge.app.openLogs()}
+                >
+                  打开日志目录
+                </button>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => void bridge.app.restartControlPlane()}
+                >
+                  重启本地服务
+                </button>
+              </>
+            )}
+          </div>
+          <p className="muted small">
+            诊断报告包含版本、数据库计数、迁移备份和最近的桌面日志，不会自动上传。报告可能包含本机路径、任务或错误片段等敏感信息，分享前请检查。
+          </p>
+          {diagnosticsMessage && <p className="muted small">{diagnosticsMessage}</p>}
         </section>
       )}
 

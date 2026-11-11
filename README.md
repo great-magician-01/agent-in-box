@@ -1,6 +1,6 @@
 # Agent-in-Box
 
-面向个人用户的本地 AI 虚拟机工作平台。当前仓库已完成 **开发计划阶段 1（工程骨架、协议和本地持久化）**、**阶段 2（Electron、本地服务与自定义存储）**、**阶段 3（镜像服务、VM 生命周期与管理 UI）**、**阶段 4（Guest Agent、noVNC 实时控制台与统一 Execution Lease）**、**阶段 5（项目、多 VM 绑定、持久任务队列与任务看板）**、**阶段 6（Pi Worker Runtime、Model Broker 与 Worker Engine Adapter）**、**阶段 7（完整 Computer Use 执行器、执行保护、Policy/Approval 与完成校验）**、**阶段 8（Router、Worker Registry 与归档）**、**阶段 9（多 VM 资源调度、共享环境与多端状态同步）**、**阶段 10（飞书和 QQ 本地机器人）** 和 **阶段 11（Web、Electron 和安装体验）**。包含无特权 Electron 壳、控制平面进程监管、首次启动向导、自定义数据目录、可续传镜像服务、受 ACL 保护的 Go VM Supervisor、QEMU/WHPX 生命周期、认证 Guest 管理通道、AI/人工互斥桌面输入、跨项目串行的 VM 任务内核、认证 Guest Worker RPC、短期模型令牌、流式 Broker、Worker 心跳/归档/恢复、Host 侧 Computer Use Broker、动作/截图 Trace、人工审批、独立完成证据校验、可重建 Active Roster、可搜索 Archive Registry、自动空闲归档、原生/摘要恢复、只持有结构化工具的本地 Router、宿主内存软预算与 VM 自动启动/空闲休眠、共享 VM 整机快照影响确认、独立项目目录备份/恢复、看板/VM/项目页统一状态快照、飞书/QQ 本机出站长连接、持久化事件去重、身份/群白名单、敏感操作二次确认和任务/审批通知，以及本机访问密钥认证、CSRF/Origin 防护、统一导航与通知中心、文件拖放投递、桌面原生通知/开机启动、后台服务启动停止、更新检查/校验/回滚和保留用户数据的卸载选择。远程 Relay 未实现。真实 QEMU/WHPX、Linux Golden Image、真实 Pi/模型任务评测、真实飞书/QQ 应用凭据、真实更新源、Windows NSIS 干净安装和浏览器/Electron 人工交互验收仍按各阶段记录单独执行。
+面向个人用户的本地 AI 虚拟机工作平台。当前仓库已完成 **开发计划阶段 1（工程骨架、协议和本地持久化）**、**阶段 2（Electron、本地服务与自定义存储）**、**阶段 3（镜像服务、VM 生命周期与管理 UI）**、**阶段 4（Guest Agent、noVNC 实时控制台与统一 Execution Lease）**、**阶段 5（项目、多 VM 绑定、持久任务队列与任务看板）**、**阶段 6（Pi Worker Runtime、Model Broker 与 Worker Engine Adapter）**、**阶段 7（完整 Computer Use 执行器、执行保护、Policy/Approval 与完成校验）**、**阶段 8（Router、Worker Registry 与归档）**、**阶段 9（多 VM 资源调度、共享环境与多端状态同步）**、**阶段 10（飞书和 QQ 本地机器人）**、**阶段 11（Web、Electron 和安装体验）** 和 **阶段 12（Linux 安全、故障、升级与全链路验收）**。包含无特权 Electron 壳、控制平面进程监管、首次启动向导、自定义数据目录、可续传镜像服务、受 ACL 保护的 Go VM Supervisor、QEMU/WHPX 生命周期、认证 Guest 管理通道、AI/人工互斥桌面输入、跨项目串行的 VM 任务内核、认证 Guest Worker RPC、短期模型令牌、流式 Broker、Worker 心跳/归档/恢复、Host 侧 Computer Use Broker、动作/截图 Trace、人工审批、独立完成证据校验、可重建 Active Roster、可搜索 Archive Registry、自动空闲归档、原生/摘要恢复、只持有结构化工具的本地 Router、宿主内存软预算与 VM 自动启动/空闲休眠、共享 VM 整机快照影响确认、独立项目目录备份/恢复、看板/VM/项目页统一状态快照、飞书/QQ 本机出站长连接、持久化事件去重、身份/群白名单、敏感操作二次确认和任务/审批通知，本机访问密钥认证、CSRF/Origin 防护、统一导航与通知中心、文件拖放投递、桌面原生通知/开机启动、后台服务启动停止、更新检查/校验/回滚和保留用户数据的卸载选择，以及迁移前数据库备份、本机诊断报告、日志/诊断凭据脱敏和阶段 12 查询索引。远程 Relay 未实现。真实 QEMU/WHPX、Linux Golden Image、真实 Pi/模型任务评测、真实飞书/QQ 应用凭据、真实更新源、Windows NSIS 干净安装和浏览器/Electron 人工交互验收仍按各阶段记录单独执行。
 
 完整方案见：
 
@@ -17,7 +17,24 @@
 - [阶段 9 验收记录](tests/phase9/summary.md)
 - [阶段 10 验收记录](tests/phase10/summary.md)
 - [阶段 11 验收记录](tests/phase11/summary.md)
+- [阶段 12 验收记录](tests/phase12/summary.md)
+- [阶段 12 安全测试矩阵](tests/phase12/security-matrix.md)
+- [阶段 12 Linux 全链路验收任务集](tests/phase12/full-chain-tasks.json)
+- [用户指南](docs/04-user-guide.md)
+- [飞书与 QQ 机器人配置指南](docs/05-bot-guide.md)
+- [存储与备份指南](docs/06-storage-guide.md)
+- [隐私与数据处理说明](docs/07-privacy.md)
 - [Linux Guest Worker 安装资产](images/linux/README.md)
+
+## 阶段 12 已落地
+
+- **迁移前备份**：存在待应用 Schema Migration 时，先创建 SQLite 在线备份、执行 `integrity_check`、写入 SHA-256，默认保留 5 份；备份失败会停止启动而非无备份迁移。
+- **本机诊断**：`GET /api/v1/diagnostics` 返回版本、迁移、数据库计数、迁移备份、资源、设置和日志尾部；设置页可导出 JSON 并明确提示敏感内容。诊断和桌面日志对访问密钥、Bearer、Provider Key、机器人 Secret、会话 Cookie 做结构化与文本脱敏。
+- **安全加固**：未知控制平面异常不再向 HTTP 客户端返回原始堆栈；日志行在写入桌面日志前脱敏；新增状态/Worker/项目查询索引；`smoke:phase12` 验证 Host/Origin/Sec-Fetch-Site、CSRF、无宽松 CORS、诊断认证和 Router 工具面。
+- **故障与恢复**：`smoke:phase12` 在任务运行状态下 SIGKILL 真实控制平面后重启，验证运行任务安全失败、Worker 对账、Lease 释放、不重复执行，并用迁移前备份恢复 2001 条任务历史。
+- **性能基线**：当前开发机上述 2001 条任务看板 64 ms、100 条 Router 消息 4 ms；该数字是本机回归阈值，不是容量承诺。
+- **验收资产**：新增 Linux 全链路任务集、安全测试矩阵、用户指南、机器人配置指南、存储指南和隐私说明；`pnpm release:checksums` 生成 `release/SHA256SUMS` 与 `release/build-manifest.json`（不代替外部签名）。
+- **验证边界**：`pnpm smoke:phase12` 12 项通过；真实 QEMU/WHPX Linux Guest、真实 Pi/模型、真实飞书/QQ、Windows NSIS 安装、真实更新源、真实 Guest 网络边界和长时稳定性仍未验收。详见 [`tests/phase12/summary.md`](tests/phase12/summary.md)。
 
 ## 阶段 11 已落地
 
@@ -211,11 +228,23 @@ pnpm smoke:phase7
 # Router Tool Broker + Worker Registry/Archive + 自动/手动归档 + 原生/摘要恢复 + 重启对账
 pnpm smoke:phase8
 
+# 资源调度 + 共享快照/项目备份 + 多端状态同步
+pnpm smoke:phase9
+
+# 飞书/QQ 持久 Ingress + 身份/群白名单 + Router 任务回传
+pnpm smoke:phase10
+
 # 本机 Web 认证/CSRF/Origin + 通知中心 + 文件投递 + 更新/卸载单元测试
 pnpm smoke:phase11
 
+# 安全边界 + 迁移前备份/恢复 + SIGKILL 对账 + 2000+ 任务性能 + 诊断脱敏
+pnpm smoke:phase12
+
 # 生成 Guest Worker Runtime 自包含 tar.gz 与 SHA-256
 pnpm package:worker-runtime
+
+# 为 release/ 下的安装包/压缩包生成 SHA256SUMS 与 build-manifest.json（不代替签名）
+pnpm release:checksums
 
 # 已打包桌面壳的 Renderer 隔离、preload IPC 和 UI 加载
 # 需先执行 pnpm package:desktop:dir；Linux/WSL 还需要 X/WSLg 和 Electron 系统库
@@ -294,7 +323,7 @@ docs/                产品、技术与开发计划
 
 - 配置文件：Windows `%APPDATA%\AgentInBox\app-config.json`；Linux `~/.config/agent-in-box/app-config.json`；macOS `~/Library/Application Support/AgentInBox/app-config.json`
 - 默认数据根目录（首次启动向导会要求确认或改选）：Windows `%LOCALAPPDATA%\AgentInBox`；Linux/macOS 为 OS 数据目录
-- 存储布局：`images/`、`downloads/`、`vms/<vm-id>/`、`snapshots/<vm-id>/`、`artifacts/`、`archives/`
+- 存储布局：`images/`、`downloads/`、`vms/<vm-id>/`、`snapshots/<vm-id>/`、`artifacts/`、`archives/`、`inbox/`、`backups/`
 
 `AGENT_IN_BOX_CONFIG_DIR` 可覆盖配置目录（桌面应用会自动传给 Control Plane）；`AGENT_IN_BOX_DATA_ROOT` 可强制指定数据根目录，此时向导和存储迁移会锁定该路径。控制平面的 `/api/v1/runtime` 会返回解析后的存储布局和数据库路径，`/api/v1/storage` 返回分类占用和存储锁状态。
 
@@ -310,19 +339,26 @@ SQLite 数据库位于数据根目录下的 `agent-in-box.sqlite`，使用 WAL �
 - `app_settings`、`local_users`、`storage_migrations`
 - `bot_accounts`、`bot_identities`、`bot_chats`、`bot_events`、`bot_outbound`、`bot_turns`、`bot_task_links`、`bot_approval_links`、`bot_access_codes`、`bot_confirmations`
 
-数据库备份通过 `AppDatabase.backup()` 使用 SQLite 在线备份能力，后续会接入本地备份与恢复流程。
+数据库备份通过 `AppDatabase.backup()` 使用 SQLite 在线备份能力。阶段 12 起，控制平面在检测到待应用 Migration 时会先写入 `backups/pre-migration-*.sqlite`、执行 `integrity_check` 并保存 SHA-256；备份失败会阻止启动。详细恢复步骤见 [存储与备份指南](docs/06-storage-guide.md)。
 
 ## 当前验证记录（2026-11-10～11）
 
 已在当前开发环境实际执行：
 
 - `pnpm install`：成功；pnpm 11 仅允许 `esbuild`、`electron`、`better-sqlite3` 构建脚本
-- `pnpm check`：lint、typecheck、259 个 Vitest 测试、Go test、全部构建均通过；1 个环境依赖测试显式跳过
+- `pnpm check`：lint、typecheck、300 个 Vitest 测试、Go test、全部构建均通过；5 个环境依赖测试显式跳过
 - 控制平面 `GET /api/v1/health`、`GET /api/v1/runtime` 返回正常
-- 控制平面启动时创建 SQLite 数据库并应用 `001_initial_schema`、`002_phase2_settings`、`003_phase3_images`、`004_phase5_projects_tasks`、`005_phase6_workers_models`、`006_phase7_computer_use`、`007_phase8_router_archive`、`008_phase9_resources_sharing`、`009_phase10_bots`
+- 控制平面启动时创建 SQLite 数据库并应用 `001_initial_schema`、`002_phase2_settings`、`003_phase3_images`、`004_phase5_projects_tasks`、`005_phase6_workers_models`、`006_phase7_computer_use`、`007_phase8_router_archive`、`008_phase9_resources_sharing`、`009_phase10_bots`、`010_phase11_web_desktop`、`011_phase12_hardening`
 - SQLite 表、WAL 模式和迁移记录在真实运行中验证通过
 - Web 开发服务器可访问，`/api` 代理到控制平面正常
 - VM Supervisor 与 Guest Agent 的 `/healthz`、`/readyz` 正常
+
+### 阶段 12 验证（2026-11-11）
+
+- `pnpm smoke:phase12`：真实控制平面、SQLite、静态 Web 构建、迁移备份/恢复和崩溃对账，12 项检查通过：Host/Origin/Sec-Fetch-Site 与未认证拒绝、CSRF、无宽松 CORS、诊断认证/脱敏、Router 工具面、迁移前备份与 SHA-256、崩溃后任务/Worker/Lease 安全状态、2001 条任务看板 64 ms、100 条 Router 消息 4 ms、备份恢复后 2001 条任务历史可用。
+- 新增 `migration-backup.test.ts`、`diagnostics.service.test.ts`、`redaction.test.ts`、`api-exception.filter.test.ts` 和桌面日志脱敏测试。
+- 阶段 2～11 Smoke 在阶段 12 迁移/存储布局变更后全部重跑通过。
+- 新增 `tests/phase12/full-chain-tasks.json` 与 `security-matrix.md`；真实 QEMU/WHPX、真实 Pi/模型、真实机器人、Windows NSIS、真实更新源、Guest 网络边界和长时稳定性仍待显式验收。详细证据见 [`tests/phase12/summary.md`](tests/phase12/summary.md)。
 
 ### 阶段 10 验证（2026-11-11）
 
@@ -463,6 +499,10 @@ SQLite 数据库位于数据根目录下的 `agent-in-box.sqlite`，使用 WAL �
 - Resource Manager：宿主内存计数、Soft Memory Budget、自动启动/恢复、`waiting_resources`、空闲休眠和资源通知
 - 共享 VM 整机快照影响预览/确认、独立项目目录 tar.gz 备份与恢复、VM/项目删除依赖检查
 - 看板/VM/项目页统一资源与队列快照、任务跳转实时控制台和 Worker 会话、Worker 恢复环境增量摘要
+- 迁移前 SQLite 备份、完整性校验、SHA-256 与保留策略
+- 本机诊断报告（版本、迁移、计数、备份、资源、设置、日志尾部）与 Web 导出
+- 控制平面 HTTP/桌面日志/诊断报告的凭据形状脱敏和未知异常堆栈隔离
+- 阶段 12 任务/Worker/项目查询索引与 2000+ 任务历史回归
 
 明确未实现或未在本环境验证：
 
@@ -486,5 +526,10 @@ SQLite 数据库位于数据根目录下的 `agent-in-box.sqlite`，使用 WAL �
 - 项目工作目录备份遇到符号链接或特殊文件会拒绝而不是静默跳过；多 VM 绑定的项目恢复不是跨 VM 原子操作
 - 资源调度只约束宿主内存软预算，不控制 CPU/磁盘 IO；手动启动允许突破预算
 - Worker 恢复环境增量来自已落库的项目活动/任务，不包含未落库的 Guest 桌面瞬时变化
+- 真实 Guest 对宿主回环（`10.0.2.2`）、内网和云元数据地址的网络出口 ACL 尚未实现；当前依赖回环绑定、Bearer/短期令牌和 Lease，并明确不把同 VM 项目宣传为强安全隔离
+- 阶段 12 未执行真实 Linux 全链路任务集；`full-chain-tasks.json` 的任务、成功率、人工接管率和已知问题清单仍需在验收构建中生成
+- 数据库迁移前备份与手动恢复已验证，但尚未提供产品化的定时备份、备份加密、自动保留期限和多版本升级编排
+- 诊断报告目前是 JSON 文件而非 zip/签名包；没有自动上传、工单或反馈提交通道
+- 截图/日志没有可配置的自动保留期限；卸载默认保留用户数据
 
-阶段 0～11 的代码主链路已完成。下一步按 [开发计划](docs/03-development-plan.md) 进入阶段 12：Linux 安全、故障、升级与全链路验收；同时继续跟踪真实 QEMU/WHPX + noVNC 回归、真实 Pi/模型 Computer Use 与 Router 评测、真实飞书/QQ 凭据、Windows NSIS 干净安装、真实更新源和长时稳定性门槛。
+阶段 0～12 的代码主链路和本机自动化验收已完成。下一步按 [开发计划](docs/03-development-plan.md) 进入阶段 13：Windows VM 可行性、开发与本期最终联合验收；在此之前仍需完成阶段 12 的真实 QEMU/WHPX + noVNC、真实 Pi/模型任务集、真实飞书/QQ、Windows NSIS 干净安装、真实更新源、Guest 网络边界和长时稳定性发布门槛。

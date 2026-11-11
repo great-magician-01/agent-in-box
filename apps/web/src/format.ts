@@ -62,6 +62,7 @@ export const STORAGE_CATEGORY_LABELS: Record<StorageCategory, string> = {
   artifacts: "任务产物",
   archives: "归档",
   inbox: "文件投递",
+  backups: "数据库备份",
 };
 
 export const DATA_ROOT_SOURCE_LABELS: Record<DataRootSource, string> = {

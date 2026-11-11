@@ -22,12 +22,30 @@ export interface JsonLineLoggerOptions {
 const SECRET_KEY = /(secret|token|password|passwd|api[_-]?key|authorization|credential)/i;
 const MAX_STRING_LENGTH = 2000;
 
+/**
+ * Control-plane output is captured line-by-line and written as the log
+ * message. Scrub credential shapes there too, not just in structured data.
+ */
+export function redactText(raw: string): string {
+  const redacted = raw
+    .replace(/\baib_[A-Za-z0-9_-]{16,}\b/g, "[REDACTED_ACCESS_KEY]")
+    .replace(/\bsk-ant-[A-Za-z0-9_-]{8,}\b/g, "[REDACTED_API_KEY]")
+    .replace(/\bsk-[A-Za-z0-9_-]{16,}\b/g, "[REDACTED_API_KEY]")
+    .replace(/\b(Bearer|QQBot)\s+[A-Za-z0-9._~+/=-]{8,}/gi, "$1 [REDACTED]")
+    .replace(
+      /((?:"|')?(?:api[_-]?key|app[_-]?secret|secret|token|authorization|password|passwd|credential|cookie|access[_-]?key)(?:"|')?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;}]+)/gi,
+      "$1[REDACTED]",
+    )
+    .replace(/(aib_session=)[^;\s]+/gi, "$1[REDACTED]");
+  return redacted.length > MAX_STRING_LENGTH ? `${redacted.slice(0, MAX_STRING_LENGTH)}…` : redacted;
+}
+
 export function redactSensitive(value: unknown, depth = 0): unknown {
   if (depth > 6) {
     return "[depth-limit]";
   }
   if (typeof value === "string") {
-    return value.length > MAX_STRING_LENGTH ? `${value.slice(0, MAX_STRING_LENGTH)}…` : value;
+    return redactText(value);
   }
   if (Array.isArray(value)) {
     return value.slice(0, 100).map((item) => redactSensitive(item, depth + 1));
@@ -94,7 +112,7 @@ export class JsonLineLogger implements LoggerLike {
       time: this.now().toISOString(),
       level,
       scope: this.scope,
-      message,
+      message: redactText(message),
       ...(data !== undefined ? { data: redactSensitive(data) } : {}),
     };
     const line = `${JSON.stringify(record)}\n`;

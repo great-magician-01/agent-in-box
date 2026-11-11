@@ -578,8 +578,15 @@ async function readWebStream(
 }
 
 function endpointFor(pathname: string): "chat/completions" | "messages" | null {
-  if (pathname === "/v1/chat/completions") return "chat/completions";
-  if (pathname === "/v1/messages") return "messages";
+  // Pi (the OpenAI-compatible client) appends /chat/completions to the broker
+  // base URL recorded in models.json, while direct clients conventionally use
+  // /v1/chat/completions. Both forms reach the same token, model and task
+  // checks; only the upstream path differs (provider.baseUrl already carries
+  // /v1 when required).
+  if (pathname === "/v1/chat/completions" || pathname === "/chat/completions") {
+    return "chat/completions";
+  }
+  if (pathname === "/v1/messages" || pathname === "/messages") return "messages";
   return null;
 }
 

@@ -182,6 +182,25 @@ describe("ModelBrokerService", () => {
     });
   });
 
+  it("accepts the OpenAI SDK path without a /v1 prefix", async () => {
+    const response = await fetch(`${baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${token.token}`,
+      },
+      body: JSON.stringify({
+        model: "mock-cua",
+        stream: true,
+        messages: [{ role: "user", content: "hello from Pi" }],
+      }),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain('"content":"hello"');
+    expect(upstreamRequests).toHaveLength(1);
+    expect(upstreamRequests[0]).toMatchObject({ model: "mock-cua", stream: true });
+  });
+
   it("rejects a model outside the token whitelist without calling upstream", async () => {
     const result = await callBroker({ model: "other-model", messages: [] });
     expect(result.status).toBe(403);

@@ -156,6 +156,7 @@ async function createHarness(
     connection?: FakeConnection;
     ctx?: TestContext;
     lifecyclePolicy?: { autoArchiveEnabled: boolean; idleTimeoutMs: number };
+    heartbeatIntervalMs?: number;
   } = {},
 ): Promise<Harness> {
   const ctx = options.ctx ?? (await createTestContext());
@@ -260,7 +261,7 @@ async function createHarness(
     {
       connectorFactory: () => connection,
       tickIntervalMs: 300,
-      heartbeatIntervalMs: 5000,
+      heartbeatIntervalMs: options.heartbeatIntervalMs ?? 5000,
       idleCheckIntervalMs: 1000,
       workerLifecyclePolicy: options.lifecyclePolicy ?? {
         autoArchiveEnabled: false,
@@ -366,6 +367,38 @@ describe("WorkerRuntimeService", () => {
       .where("task_id", "=", prompted.taskId)
       .executeTakeFirst();
     expect(execution).toMatchObject({ worker_id: created.worker.id, requires_observation: 1 });
+  });
+
+  it("renews the execution lease while tool events keep the RPC heartbeat fresh", async () => {
+    // A busy turn emits tool/text events continuously. Those events refresh the
+    // RPC heartbeat timestamp, but must not starve the 30s execution lease.
+    const harness = await createHarness({ heartbeatIntervalMs: 60_000 });
+    active = harness;
+    const created = await harness.service.create({
+      projectId: harness.ctx.projectId,
+      vmId: harness.ctx.vmId,
+    });
+    const prompted = await harness.service.prompt(created.worker.id, { text: "[hold]" });
+    await waitFor(
+      async () => (await harness.tasks.get(prompted.taskId))?.status === "running",
+      "running task",
+    );
+    const lease = await harness.leases.getActive(harness.ctx.vmId);
+    expect(lease).toBeTruthy();
+    const runtime = (
+      harness.service as unknown as {
+        active: Map<string, { lastHeartbeatAt: number; lastLeaseRenewAt: number }>;
+      }
+    ).active.get(created.worker.id);
+    expect(runtime).toBeTruthy();
+    // Simulate continuous events and a renewal that is already due.
+    runtime!.lastHeartbeatAt = Date.now();
+    runtime!.lastLeaseRenewAt = Date.now() - 11_000;
+    await waitFor(async () => {
+      const current = await harness.leases.getActive(harness.ctx.vmId);
+      return Boolean(current && current.expiresAt > lease!.expiresAt);
+    }, "renewed lease");
+    await harness.service.abort(created.worker.id, "test cleanup");
   });
 
   it("steers a running turn, maps Abort to a stopped task and releases the lease", async () => {
@@ -534,6 +567,7 @@ describe("WorkerRuntimeService", () => {
     });
     const archived = await harness.service.archive(created.worker.id);
     expect(archived.worker.status).toBe("archived");
+    expect(archived.worker.archivedAt).toBeTruthy();
     expect(harness.connection.archiveCalls).toBe(1);
 
     const records = await harness.archives.listForWorker(created.worker.id);

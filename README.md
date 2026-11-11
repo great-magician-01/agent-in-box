@@ -21,6 +21,7 @@
 - [阶段 12 安全测试矩阵](tests/phase12/security-matrix.md)
 - [阶段 12 Linux 全链路验收任务集](tests/phase12/full-chain-tasks.json)
 - [阶段 13 验收记录](tests/phase13/summary.md)
+- [阶段 13 真实 Windows 宿主 + Linux Guest 验收记录（2026-11-12）](tests/phase13/real-verification-2026-11-12.md)
 - [阶段 13 Linux/Windows 混合验收任务集](tests/phase13/mixed-tasks.json)
 - [Windows Guest 镜像与运行时资产](images/windows/README.md)
 - [用户指南](docs/04-user-guide.md)

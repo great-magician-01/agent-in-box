@@ -575,7 +575,10 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
         `Worker 已停止但归档记录写入失败：${errorMessage(error)}`,
       );
     }
-    return this.view(updated ?? worker);
+    // updateRuntime was read before archived_at was written, so re-read the row
+    // to return the same archive state a subsequent GET would report.
+    const final = (await this.workers.getWorker(workerId)) ?? updated ?? worker;
+    return this.view(final);
   }
 
   async resume(workerId: string, request: WorkerResumeRequest = {}): Promise<WorkerResumeResult> {
@@ -1682,23 +1685,37 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
       );
       return;
     }
+    // Token and Execution Lease renewal must not be gated by the RPC heartbeat.
+    // Tool events also refresh lastHeartbeatAt, so a busy Worker can stream
+    // events continuously while the 30s lease would otherwise expire and every
+    // vm_* call would fail with lease_conflict.
+    if (!active.aborting && now - active.lastRenewAt >= 30_000) {
+      try {
+        await Promise.all([
+          this.tokens.renew(active.tokenId),
+          this.cuaTokens.renew(active.cuaTokenId),
+        ]);
+        active.lastRenewAt = now;
+      } catch (error) {
+        this.logger.warn(`Worker ${worker.id} broker token renewal failed: ${errorMessage(error)}`);
+      }
+    }
+    if (active.leaseId && now - active.lastLeaseRenewAt >= 10_000) {
+      try {
+        await this.leases.renew(active.leaseId, 30_000);
+        active.lastLeaseRenewAt = now;
+      } catch (error) {
+        this.logger.warn(
+          `Worker ${worker.id} execution lease renewal failed: ${errorMessage(error)}`,
+        );
+      }
+    }
     if (now - active.lastHeartbeatAt >= this.heartbeatIntervalMs) {
       try {
         await active.connection.session(active.sessionId);
         active.heartbeatFailures = 0;
         active.lastHeartbeatAt = now;
         await this.workers.updateHeartbeat(worker.id, nowIso());
-        if (!active.aborting && now - active.lastRenewAt >= 30_000) {
-          await Promise.all([
-            this.tokens.renew(active.tokenId),
-            this.cuaTokens.renew(active.cuaTokenId),
-          ]);
-          active.lastRenewAt = now;
-        }
-        if (active.leaseId && now - active.lastLeaseRenewAt >= 10_000) {
-          await this.leases.renew(active.leaseId, 30_000);
-          active.lastLeaseRenewAt = now;
-        }
       } catch (error) {
         active.heartbeatFailures += 1;
         if (active.heartbeatFailures >= this.heartbeatFailureThreshold) {

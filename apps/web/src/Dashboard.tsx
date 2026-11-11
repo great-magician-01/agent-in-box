@@ -17,6 +17,7 @@ import type {
 import { api, ApiRequestError } from "./api";
 import { chooseDirectory, saveCloseBehavior } from "./desktop";
 import { VmManager } from "./VmManager";
+import { WorkManager } from "./WorkManager";
 import {
   CONTROL_PLANE_STATE_LABELS,
   DATA_ROOT_SOURCE_LABELS,
@@ -322,6 +323,8 @@ export function Dashboard({
           </dl>
         </article>
       </section>
+
+      <WorkManager />
 
       <VmManager
         host={host}

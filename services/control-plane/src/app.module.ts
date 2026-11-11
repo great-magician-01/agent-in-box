@@ -8,6 +8,9 @@ import { HostModule } from "./host/host.module";
 import { OnboardingModule } from "./onboarding/onboarding.module";
 import { ImageModule } from "./images/image.module";
 import { VmModule } from "./vms/vm.module";
+import { ProjectModule } from "./projects/project.module";
+import { TaskModule } from "./tasks/task.module";
+import { EventsModule } from "./events/events.module";
 
 @Module({
   imports: [
@@ -18,6 +21,9 @@ import { VmModule } from "./vms/vm.module";
     OnboardingModule,
     ImageModule,
     VmModule,
+    ProjectModule,
+    TaskModule,
+    EventsModule,
   ],
   controllers: [HealthController, RuntimeController],
 })

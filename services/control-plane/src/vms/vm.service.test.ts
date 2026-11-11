@@ -217,7 +217,7 @@ describe("VmService", () => {
     expect(stoppedAgain.vm.powerState).toBe("stopped");
     expect(stoppedAgain.vm.guestHealth).toBe("unknown");
     expect(stoppedAgain.boundProjects).toEqual([
-      { id: project.id, name: "Shared project", isPrimary: true },
+      { id: project.id, name: "Shared project", isPrimary: true, archivedAt: null },
     ]);
     expect(stoppedAgain.currentTask).toMatchObject({ id: "task-1", status: "running" });
     const events = await app.db

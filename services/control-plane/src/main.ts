@@ -6,6 +6,8 @@ import { controlPlaneConfigFromEnv } from "@agent-in-box/config";
 import { AppModule } from "./app.module";
 import { ApiExceptionFilter } from "./http/api-exception.filter";
 import { ConsoleService } from "./vms/console.service";
+import { EventsService } from "./events/events.service";
+import { attachUpgradeFallback } from "./http/upgrade-fallback";
 
 const ALLOWED_HOSTNAMES = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 
@@ -64,6 +66,10 @@ async function bootstrap(): Promise<void> {
   const httpServer = app.getHttpServer();
   const detachConsole = app.get(ConsoleService).attach(httpServer);
   httpServer.once("close", detachConsole);
+  const detachEvents = app.get(EventsService).attach(httpServer);
+  httpServer.once("close", detachEvents);
+  const detachUpgradeFallback = attachUpgradeFallback(httpServer);
+  httpServer.once("close", detachUpgradeFallback);
   console.log(`control-plane listening on http://${config.host}:${config.port}`);
 }
 

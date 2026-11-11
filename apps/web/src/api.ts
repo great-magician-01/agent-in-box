@@ -16,6 +16,21 @@ import type {
   StorageMigrationResult,
   StorageReport,
   StorageValidation,
+  ProjectBindingRequest,
+  ProjectBindingUpdateRequest,
+  ProjectCreateRequest,
+  ProjectDetail,
+  ProjectUpdateRequest,
+  ProjectView,
+  ConversationRecord,
+  TaskArtifactRecord,
+  TaskBoardSnapshot,
+  TaskCreateRequest,
+  TaskCreateResult,
+  TaskDetail,
+  TaskListFilters,
+  TaskRecord,
+  TaskStreamState,
   VmConsole,
   VmConsoleSession,
   VmControlView,
@@ -156,6 +171,63 @@ export function subscribeImageEvents(
   return () => source.close();
 }
 
+export const TASK_EVENTS_PATH = "/api/v1/events/ws";
+
+/**
+ * WebSocket messages are invalidation hints, not a second task state store.
+ * Every open/reconnect triggers a full board snapshot read by the caller.
+ */
+export function subscribeTaskEvents(
+  onInvalidate: () => void,
+  onStateChange?: (state: TaskStreamState) => void,
+): () => void {
+  let closed = false;
+  let socket: WebSocket | null = null;
+  let retryTimer: number | null = null;
+
+  const connect = () => {
+    if (closed) return;
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    socket = new WebSocket(`${protocol}//${window.location.host}${TASK_EVENTS_PATH}`);
+    socket.onopen = () => {
+      onStateChange?.("live");
+      onInvalidate();
+    };
+    socket.onmessage = (message: MessageEvent) => {
+      if (typeof message.data !== "string") return;
+      try {
+        const event = JSON.parse(message.data) as { type?: unknown };
+        if (event.type === "invalidate") onInvalidate();
+      } catch {
+        // Invalid hints are ignored; the next reconnect always performs full sync.
+      }
+    };
+    socket.onclose = () => {
+      if (closed) return;
+      onStateChange?.("reconnecting");
+      retryTimer = window.setTimeout(connect, 1000);
+    };
+    socket.onerror = () => socket?.close();
+  };
+
+  connect();
+  return () => {
+    closed = true;
+    if (retryTimer !== null) window.clearTimeout(retryTimer);
+    socket?.close();
+  };
+}
+
+function taskBoardQuery(filters: TaskListFilters): string {
+  const query = new URLSearchParams();
+  if (filters.projectId) query.set("projectId", filters.projectId);
+  if (filters.vmId) query.set("vmId", filters.vmId);
+  if (filters.workerId) query.set("workerId", filters.workerId);
+  if (filters.statuses?.length) query.set("status", filters.statuses.join(","));
+  const encoded = query.toString();
+  return encoded ? `?${encoded}` : "";
+}
+
 export const api = {
   health: fetchHealth,
   runtime: () => apiFetch<RuntimeInfo>("/api/v1/runtime"),
@@ -190,6 +262,74 @@ export const api = {
     apiFetch<StorageCleanupResult>("/api/v1/storage/cleanup-downloads", {
       method: "POST",
     }),
+  projects: (includeArchived = true) =>
+    apiFetch<ProjectView[]>(`/api/v1/projects?includeArchived=${includeArchived}`),
+  project: (id: string) => apiFetch<ProjectDetail>(`/api/v1/projects/${encodeURIComponent(id)}`),
+  createProject: (body: ProjectCreateRequest) =>
+    apiFetch<ProjectDetail>("/api/v1/projects", { method: "POST", body: JSON.stringify(body) }),
+  updateProject: (id: string, body: ProjectUpdateRequest) =>
+    apiFetch<ProjectDetail>(`/api/v1/projects/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+  archiveProject: (id: string) =>
+    apiFetch<ProjectDetail>(`/api/v1/projects/${encodeURIComponent(id)}/archive`, {
+      method: "POST",
+    }),
+  restoreProject: (id: string) =>
+    apiFetch<ProjectDetail>(`/api/v1/projects/${encodeURIComponent(id)}/restore`, {
+      method: "POST",
+    }),
+  deleteProject: (id: string) =>
+    apiFetch<{ deleted: true; projectId: string }>(`/api/v1/projects/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
+  bindProjectVm: (id: string, body: ProjectBindingRequest) =>
+    apiFetch<ProjectDetail>(`/api/v1/projects/${encodeURIComponent(id)}/bindings`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  updateProjectVmBinding: (id: string, bindingId: string, body: ProjectBindingUpdateRequest) =>
+    apiFetch<ProjectDetail>(
+      `/api/v1/projects/${encodeURIComponent(id)}/bindings/${encodeURIComponent(bindingId)}`,
+      { method: "PATCH", body: JSON.stringify(body) },
+    ),
+  unbindProjectVm: (id: string, bindingId: string) =>
+    apiFetch<ProjectDetail>(
+      `/api/v1/projects/${encodeURIComponent(id)}/bindings/${encodeURIComponent(bindingId)}`,
+      { method: "DELETE" },
+    ),
+  createProjectConversation: (id: string, title: string) =>
+    apiFetch<ConversationRecord>(`/api/v1/projects/${encodeURIComponent(id)}/conversations`, {
+      method: "POST",
+      body: JSON.stringify({ title }),
+    }),
+  taskBoard: (filters: TaskListFilters = {}) =>
+    apiFetch<TaskBoardSnapshot>(`/api/v1/tasks/board${taskBoardQuery(filters)}`),
+  taskDetail: (id: string) => apiFetch<TaskDetail>(`/api/v1/tasks/${encodeURIComponent(id)}`),
+  createTask: (body: TaskCreateRequest, idempotencyKey: string) =>
+    apiFetch<TaskCreateResult>("/api/v1/tasks", {
+      method: "POST",
+      headers: { "x-idempotency-key": idempotencyKey },
+      body: JSON.stringify(body),
+    }),
+  setTaskPriority: (id: string, priority: number) =>
+    apiFetch<TaskRecord>(`/api/v1/tasks/${encodeURIComponent(id)}/priority`, {
+      method: "PATCH",
+      body: JSON.stringify({ priority }),
+    }),
+  cancelTask: (id: string, reason?: string) =>
+    apiFetch<TaskRecord>(`/api/v1/tasks/${encodeURIComponent(id)}/cancel`, {
+      method: "POST",
+      body: JSON.stringify(reason ? { reason } : {}),
+    }),
+  retryTask: (id: string) =>
+    apiFetch<TaskRecord>(`/api/v1/tasks/${encodeURIComponent(id)}/retry`, { method: "POST" }),
+  verifyTaskArtifact: (taskId: string, artifactId: string) =>
+    apiFetch<TaskArtifactRecord>(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/artifacts/${encodeURIComponent(artifactId)}/verify`,
+      { method: "POST" },
+    ),
   images: () => apiFetch<ImageCatalog>("/api/v1/images"),
   refreshImageManifest: () =>
     apiFetch<ImageCatalog>("/api/v1/images/manifest/refresh", { method: "POST" }),

@@ -397,6 +397,133 @@ const migrations: Record<string, MigrationDefinition> = {
       }
     },
   },
+  "004_phase5_projects_tasks": {
+    async up(db: Kysely<DatabaseSchema>): Promise<void> {
+      await db.schema
+        .alterTable("projects")
+        .addColumn("workspace_config_json", "text", (column) =>
+          column.notNull().defaultTo('{"defaultGuestWorkspacePath":"/home/worker/workspace"}'),
+        )
+        .execute();
+      await db.schema
+        .alterTable("projects")
+        .addColumn("updated_at", "text", (column) => column.notNull().defaultTo(""))
+        .execute();
+
+      await db.schema
+        .alterTable("tasks")
+        .addColumn("attempt_count", "integer", (column) => column.notNull().defaultTo(0))
+        .execute();
+      await db.schema.alterTable("tasks").addColumn("result_json", "text").execute();
+      await db.schema.alterTable("tasks").addColumn("error_message", "text").execute();
+      await db.schema
+        .alterTable("tasks")
+        .addColumn("updated_at", "text", (column) => column.notNull().defaultTo(""))
+        .execute();
+
+      await db.schema
+        .createTable("task_dependencies")
+        .addColumn("task_id", "text", (column) => column.notNull())
+        .addColumn("dependency_task_id", "text", (column) => column.notNull())
+        .addColumn("created_at", "text", (column) => column.notNull())
+        .addPrimaryKeyConstraint("task_dependencies_pk", ["task_id", "dependency_task_id"])
+        .addForeignKeyConstraint(
+          "task_dependencies_task_fk",
+          ["task_id"],
+          "tasks",
+          ["id"],
+          (constraint) => constraint.onDelete("cascade"),
+        )
+        .addForeignKeyConstraint(
+          "task_dependencies_dependency_fk",
+          ["dependency_task_id"],
+          "tasks",
+          ["id"],
+          (constraint) => constraint.onDelete("cascade"),
+        )
+        .execute();
+      await db.schema
+        .createIndex("task_dependencies_dependency_idx")
+        .on("task_dependencies")
+        .column("dependency_task_id")
+        .execute();
+
+      await db.schema
+        .createTable("task_artifacts")
+        .addColumn("id", "text", (column) => column.primaryKey())
+        .addColumn("project_id", "text", (column) => column.notNull())
+        .addColumn("task_id", "text", (column) => column.notNull())
+        .addColumn("name", "text", (column) => column.notNull())
+        .addColumn("relative_path", "text", (column) => column.notNull())
+        .addColumn("media_type", "text", (column) => column.notNull())
+        .addColumn("size_bytes", "integer", (column) => column.notNull())
+        .addColumn("sha256", "text", (column) => column.notNull())
+        .addColumn("created_at", "text", (column) => column.notNull())
+        .addColumn("verified_at", "text")
+        .addForeignKeyConstraint(
+          "task_artifacts_project_fk",
+          ["project_id"],
+          "projects",
+          ["id"],
+          (constraint) => constraint.onDelete("restrict"),
+        )
+        .addForeignKeyConstraint("task_artifacts_task_fk", ["task_id"], "tasks", ["id"], (c) =>
+          c.onDelete("cascade"),
+        )
+        .execute();
+      await db.schema
+        .createIndex("task_artifacts_project_idx")
+        .on("task_artifacts")
+        .columns(["project_id", "created_at"])
+        .execute();
+      await db.schema
+        .createIndex("task_artifacts_task_idx")
+        .on("task_artifacts")
+        .column("task_id")
+        .execute();
+
+      await db.schema
+        .createTable("project_activities")
+        .addColumn("id", "integer", (column) => column.primaryKey().autoIncrement())
+        .addColumn("project_id", "text", (column) => column.notNull())
+        .addColumn("type", "text", (column) => column.notNull())
+        .addColumn("payload_json", "text", (column) => column.notNull())
+        .addColumn("created_at", "text", (column) => column.notNull())
+        .addForeignKeyConstraint(
+          "project_activities_project_fk",
+          ["project_id"],
+          "projects",
+          ["id"],
+          (constraint) => constraint.onDelete("cascade"),
+        )
+        .execute();
+      await db.schema
+        .createIndex("project_activities_project_idx")
+        .on("project_activities")
+        .columns(["project_id", "id"])
+        .execute();
+
+      // A waiting approval still owns the active execution. Other queued tasks,
+      // including tasks from another project, cannot claim the same VM.
+      await sql`
+        create unique index tasks_single_execution_idx on tasks(vm_id)
+        where status in ('running', 'waiting_approval')
+      `.execute(db);
+    },
+
+    async down(db: Kysely<DatabaseSchema>): Promise<void> {
+      await db.schema.dropIndex("tasks_single_execution_idx").ifExists().execute();
+      for (const table of ["project_activities", "task_artifacts", "task_dependencies"]) {
+        await db.schema.dropTable(table).ifExists().execute();
+      }
+      for (const column of ["updated_at", "error_message", "result_json", "attempt_count"]) {
+        await db.schema.alterTable("tasks").dropColumn(column).execute();
+      }
+      for (const column of ["updated_at", "workspace_config_json"]) {
+        await db.schema.alterTable("projects").dropColumn(column).execute();
+      }
+    },
+  },
 };
 
 export async function migrateToLatest(db: Kysely<DatabaseSchema>): Promise<string[]> {

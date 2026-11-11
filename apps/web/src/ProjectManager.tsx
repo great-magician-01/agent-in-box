@@ -1,0 +1,520 @@
+/* eslint-disable react-hooks/set-state-in-effect -- selected server records initialize edit forms */
+import { useEffect, useMemo, useState } from "react";
+import type {
+  ProjectBindingView,
+  ProjectDetail,
+  ProjectView,
+  VmInstanceRecord,
+} from "@agent-in-box/protocol";
+import { api } from "./api";
+import { formatDate, VM_POWER_STATE_LABELS } from "./format";
+
+interface ProjectManagerProps {
+  projects: ProjectView[];
+  vms: VmInstanceRecord[];
+  detail: ProjectDetail | null;
+  selectedProjectId: string | null;
+  onSelect(projectId: string): void;
+  onChanged(): Promise<void>;
+}
+
+export function ProjectManager({
+  projects,
+  vms,
+  detail,
+  selectedProjectId,
+  onSelect,
+  onChanged,
+}: ProjectManagerProps): React.JSX.Element {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [workspace, setWorkspace] = useState("/home/worker/workspace");
+  const [editName, setEditName] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editWorkspace, setEditWorkspace] = useState("");
+  const [bindVmId, setBindVmId] = useState("");
+  const [bindPath, setBindPath] = useState("/home/worker/workspace");
+  const [bindPrimary, setBindPrimary] = useState(false);
+  const [conversationTitle, setConversationTitle] = useState("");
+
+  useEffect(() => {
+    if (!detail) return;
+    setEditName(detail.project.name);
+    setEditDescription(detail.project.description);
+    setEditWorkspace(detail.project.workspaceConfig.defaultGuestWorkspacePath);
+  }, [detail]);
+
+  const availableVms = useMemo(() => {
+    const bound = new Set(detail?.bindings.map((item) => item.vm.id) ?? []);
+    return vms.filter((vm) => !bound.has(vm.id));
+  }, [detail, vms]);
+  const selectedBindVm = availableVms.some((vm) => vm.id === bindVmId)
+    ? bindVmId
+    : (availableVms[0]?.id ?? "");
+  const archived = detail?.project.archivedAt != null;
+
+  async function run<T>(action: () => Promise<T>): Promise<T | null> {
+    if (busy) return null;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await action();
+      await onChanged();
+      return result;
+    } catch (cause) {
+      setError(errorMessage(cause));
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createProject(event: React.FormEvent): Promise<void> {
+    event.preventDefault();
+    const created = await run(() =>
+      api.createProject({
+        name,
+        description,
+        workspaceConfig: { defaultGuestWorkspacePath: workspace },
+      }),
+    );
+    if (created) {
+      setName("");
+      setDescription("");
+      setWorkspace("/home/worker/workspace");
+      onSelect(created.project.id);
+    }
+  }
+
+  async function addBinding(event: React.FormEvent): Promise<void> {
+    event.preventDefault();
+    if (!detail || !selectedBindVm) return;
+    const created = await run(() =>
+      api.bindProjectVm(detail.project.id, {
+        vmId: selectedBindVm,
+        guestWorkspacePath: bindPath,
+        isPrimary: bindPrimary,
+      }),
+    );
+    if (created) {
+      setBindVmId("");
+      setBindPrimary(false);
+    }
+  }
+
+  async function addConversation(event: React.FormEvent): Promise<void> {
+    event.preventDefault();
+    if (!detail) return;
+    const created = await run(() =>
+      api.createProjectConversation(detail.project.id, conversationTitle),
+    );
+    if (created) setConversationTitle("");
+  }
+
+  return (
+    <div className="project-workspace">
+      <div className="project-list" aria-label="项目列表">
+        <div className="section-heading">
+          <h3>项目</h3>
+          <span className="muted small">{projects.length} 个</span>
+        </div>
+        {projects.length === 0 && <p className="muted small">创建项目后，再绑定一台或多台 VM。</p>}
+        <div className="project-tabs" role="list">
+          {projects.map((view) => (
+            <button
+              type="button"
+              role="listitem"
+              key={view.project.id}
+              className={view.project.id === selectedProjectId ? "selected" : ""}
+              onClick={() => onSelect(view.project.id)}
+            >
+              <strong>{view.project.name}</strong>
+              <span>
+                {view.project.archivedAt ? "已归档 · " : ""}
+                {view.bindings.length} VM · {view.activeTaskCount} 活跃任务
+              </span>
+            </button>
+          ))}
+        </div>
+        <details className="create-box">
+          <summary>新建项目</summary>
+          <form className="stack compact-form" onSubmit={(event) => void createProject(event)}>
+            <label className="field">
+              <span>名称</span>
+              <input
+                value={name}
+                maxLength={80}
+                required
+                onChange={(event) => setName(event.target.value)}
+              />
+            </label>
+            <label className="field">
+              <span>描述</span>
+              <textarea
+                value={description}
+                maxLength={2000}
+                onChange={(event) => setDescription(event.target.value)}
+              />
+            </label>
+            <label className="field">
+              <span>默认 Guest 工作目录</span>
+              <input
+                value={workspace}
+                required
+                spellCheck={false}
+                onChange={(event) => setWorkspace(event.target.value)}
+              />
+            </label>
+            <button type="submit" className="primary" disabled={busy}>
+              创建项目
+            </button>
+          </form>
+        </details>
+      </div>
+
+      <div className="project-detail" id="project-detail">
+        {error && <div className="notice">{error}</div>}
+        {!detail ? (
+          <p className="muted">
+            {selectedProjectId ? "正在读取项目详情…" : "请选择或创建一个项目。"}
+          </p>
+        ) : (
+          <>
+            <div className="section-heading">
+              <div>
+                <h3>{detail.project.name}</h3>
+                <span className="muted small">创建于 {formatDate(detail.project.createdAt)}</span>
+              </div>
+              <span className={`pill ${archived ? "warn" : "ok"}`}>
+                {archived ? "已归档" : "活跃"}
+              </span>
+            </div>
+            <form
+              className="project-edit-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void run(() =>
+                  api.updateProject(detail.project.id, {
+                    name: editName,
+                    description: editDescription,
+                    workspaceConfig: { defaultGuestWorkspacePath: editWorkspace },
+                  }),
+                );
+              }}
+            >
+              <div className="form-grid two-columns">
+                <label className="field">
+                  <span>项目名称</span>
+                  <input
+                    value={editName}
+                    disabled={archived || busy}
+                    required
+                    onChange={(event) => setEditName(event.target.value)}
+                  />
+                </label>
+                <label className="field">
+                  <span>默认工作目录</span>
+                  <input
+                    value={editWorkspace}
+                    disabled={archived || busy}
+                    required
+                    spellCheck={false}
+                    onChange={(event) => setEditWorkspace(event.target.value)}
+                  />
+                </label>
+              </div>
+              <label className="field">
+                <span>描述</span>
+                <textarea
+                  value={editDescription}
+                  disabled={archived || busy}
+                  onChange={(event) => setEditDescription(event.target.value)}
+                />
+              </label>
+              <div className="action-row">
+                {!archived && (
+                  <button type="submit" className="secondary" disabled={busy}>
+                    保存项目
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={busy}
+                  onClick={() =>
+                    void run(() =>
+                      archived
+                        ? api.restoreProject(detail.project.id)
+                        : api.archiveProject(detail.project.id),
+                    )
+                  }
+                >
+                  {archived ? "恢复项目" : "归档项目"}
+                </button>
+                <button
+                  type="button"
+                  className="link-button danger-link"
+                  disabled={busy}
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        "删除项目元数据不会删除任何 VM 或虚拟磁盘。已有任务历史的项目只能归档。确定继续？",
+                      )
+                    ) {
+                      void run(() => api.deleteProject(detail.project.id));
+                    }
+                  }}
+                >
+                  删除项目
+                </button>
+              </div>
+            </form>
+
+            <section className="subsection" aria-labelledby="bindings-title">
+              <div className="section-heading">
+                <h4 id="bindings-title">VM 绑定与共享影响</h4>
+                <span className="muted small">停止的 VM 也可绑定</span>
+              </div>
+              {detail.bindings.length === 0 && <p className="muted small">尚未绑定 VM。</p>}
+              <div className="binding-list">
+                {detail.bindings.map((item) => (
+                  <BindingRow
+                    key={`${item.binding.id}:${item.binding.guestWorkspacePath}`}
+                    item={item}
+                    currentProjectId={detail.project.id}
+                    archived={archived}
+                    busy={busy}
+                    onChanged={onChanged}
+                    onError={setError}
+                  />
+                ))}
+              </div>
+              {!archived && (
+                <form
+                  className="inline-form binding-form"
+                  onSubmit={(event) => void addBinding(event)}
+                >
+                  <label className="field">
+                    <span>添加 VM</span>
+                    <select
+                      value={selectedBindVm}
+                      onChange={(event) => setBindVmId(event.target.value)}
+                      disabled={!selectedBindVm || busy}
+                    >
+                      {!selectedBindVm && <option value="">所有 VM 均已绑定</option>}
+                      {availableVms.map((vm) => (
+                        <option key={vm.id} value={vm.id}>
+                          {vm.name} · {VM_POWER_STATE_LABELS[vm.powerState]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>Guest 工作目录</span>
+                    <input
+                      value={bindPath}
+                      required
+                      spellCheck={false}
+                      onChange={(event) => setBindPath(event.target.value)}
+                    />
+                  </label>
+                  <label className="toggle compact-toggle">
+                    <input
+                      type="checkbox"
+                      checked={bindPrimary}
+                      onChange={(event) => setBindPrimary(event.target.checked)}
+                    />
+                    <span>设为主 VM</span>
+                  </label>
+                  <button type="submit" className="secondary" disabled={busy || !selectedBindVm}>
+                    绑定
+                  </button>
+                </form>
+              )}
+            </section>
+
+            <div className="project-columns">
+              <section className="subsection">
+                <h4>项目会话</h4>
+                <ul className="plain-list">
+                  {detail.conversations.map((conversation) => (
+                    <li key={conversation.id} id={`conversation-${conversation.id}`}>
+                      <strong>{conversation.title}</strong>
+                      <span className="muted small">{formatDate(conversation.lastMessageAt)}</span>
+                    </li>
+                  ))}
+                </ul>
+                {!archived && (
+                  <form className="inline-form" onSubmit={(event) => void addConversation(event)}>
+                    <label className="field">
+                      <span className="sr-only">新会话标题</span>
+                      <input
+                        value={conversationTitle}
+                        required
+                        maxLength={120}
+                        placeholder="新会话标题"
+                        onChange={(event) => setConversationTitle(event.target.value)}
+                      />
+                    </label>
+                    <button type="submit" className="secondary" disabled={busy}>
+                      新建会话
+                    </button>
+                  </form>
+                )}
+              </section>
+              <section className="subsection">
+                <h4>最近活动</h4>
+                <ul className="plain-list activity-list">
+                  {detail.activities.slice(0, 8).map((activity) => (
+                    <li key={activity.id}>
+                      <code>{activity.type}</code>
+                      <span className="muted small">{formatDate(activity.createdAt)}</span>
+                    </li>
+                  ))}
+                  {detail.activities.length === 0 && <li className="muted small">暂无活动</li>}
+                </ul>
+              </section>
+            </div>
+            {detail.artifacts.length > 0 && (
+              <section className="subsection">
+                <h4>产物引用</h4>
+                <ul className="plain-list">
+                  {detail.artifacts.slice(0, 8).map((artifact) => (
+                    <li key={artifact.id}>
+                      <code>{artifact.relativePath}</code>
+                      <span className="muted small">
+                        {artifact.sizeBytes} B · {artifact.verifiedAt ? "哈希已校验" : "需重新校验"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function BindingRow({
+  item,
+  currentProjectId,
+  archived,
+  busy,
+  onChanged,
+  onError,
+}: {
+  item: ProjectBindingView;
+  currentProjectId: string;
+  archived: boolean;
+  busy: boolean;
+  onChanged(): Promise<void>;
+  onError(message: string | null): void;
+}): React.JSX.Element {
+  const [workspace, setWorkspace] = useState(item.binding.guestWorkspacePath);
+  const [rowBusy, setRowBusy] = useState(false);
+  const others = item.sharedProjects.filter((project) => project.id !== currentProjectId);
+
+  async function update(action: () => Promise<unknown>): Promise<void> {
+    if (rowBusy) return;
+    setRowBusy(true);
+    onError(null);
+    try {
+      await action();
+      await onChanged();
+    } catch (cause) {
+      onError(errorMessage(cause));
+    } finally {
+      setRowBusy(false);
+    }
+  }
+
+  return (
+    <article className="binding-card">
+      <div className="section-heading">
+        <div>
+          <strong>{item.vm.name}</strong>
+          <span className="muted small">
+            {" "}
+            · {VM_POWER_STATE_LABELS[item.vm.powerState]} · {item.vm.osFamily}
+          </span>
+        </div>
+        {item.binding.isPrimary && <span className="pill ok">主 VM</span>}
+      </div>
+      <label className="field">
+        <span>项目工作目录</span>
+        <input
+          value={workspace}
+          disabled={archived || busy || rowBusy}
+          spellCheck={false}
+          onChange={(event) => setWorkspace(event.target.value)}
+        />
+      </label>
+      <p className={others.length ? "shared-warning" : "muted small"}>
+        {others.length ? (
+          <>
+            共享给：
+            {item.sharedProjects
+              .map((project) => `${project.name}${project.archivedAt ? "（已归档）" : ""}`)
+              .join("、")}
+            。桌面、软件和系统状态共同影响；当前 VM 有 {item.sharedActiveTaskCount}{" "}
+            个未结束任务，跨项目串行。
+          </>
+        ) : (
+          <>当前仅由此项目绑定；之后新增共享项目时，任务也会进入同一 VM 串行队列。</>
+        )}
+      </p>
+      {!archived && (
+        <div className="action-row">
+          <button
+            type="button"
+            className="secondary"
+            disabled={busy || rowBusy}
+            onClick={() =>
+              void update(() =>
+                api.updateProjectVmBinding(currentProjectId, item.binding.id, {
+                  guestWorkspacePath: workspace,
+                }),
+              )
+            }
+          >
+            保存目录
+          </button>
+          {!item.binding.isPrimary && (
+            <button
+              type="button"
+              className="secondary"
+              disabled={busy || rowBusy}
+              onClick={() =>
+                void update(() =>
+                  api.updateProjectVmBinding(currentProjectId, item.binding.id, {
+                    isPrimary: true,
+                  }),
+                )
+              }
+            >
+              设为主 VM
+            </button>
+          )}
+          <button
+            type="button"
+            className="link-button danger-link"
+            disabled={busy || rowBusy}
+            onClick={() =>
+              void update(() => api.unbindProjectVm(currentProjectId, item.binding.id))
+            }
+          >
+            解绑（不删除 VM）
+          </button>
+        </div>
+      )}
+    </article>
+  );
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}

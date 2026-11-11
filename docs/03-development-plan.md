@@ -3,7 +3,7 @@
 > 文档状态：实施计划草案 v0.1  
 > 使用方式：按阶段顺序开发。每个阶段先完成验收条件，再进入下一阶段；技术验证未通过时先调整对应选型，不在不稳定的底座上继续堆叠产品功能。
 
-## 0. 当前进度（2026-11-10）
+## 0. 当前进度（2026-11-11）
 
 - **阶段 1.1 完成**：单仓库 Monorepo、pnpm Workspace、TypeScript/Go 工具链、统一构建与检查。
 - **阶段 1.2 完成（初版）**：核心协议、分页/错误/幂等契约、任务与 Worker 状态机、VM 多对多绑定规则、Computer Use 动作、Guest RPC、VmProvider、Worker Engine 和 Bot Connector 接口均有类型与契约测试。
@@ -17,7 +17,8 @@
 - **保留的负面结果与外部门槛**：Epiphany HTML5 drag-and-drop 失败；出现过一次 Guest 内核 panic，需更长 soak；Hyper-V 需 Pro/Enterprise 环境；Wayland 首版不支持；真实飞书/QQ 凭据验收仍待测试应用；真实镜像 CDN 与断电恢复待补。
 - **阶段 3 完成（代码与本机服务验证）**：Image Service 的 Manifest/白名单/不可变版本、续传/取消/去重/SSE/重启恢复；Supervisor 的完整 QEMU 生命周期 API、ACL、进程/QMP 对账；Linux VM 控制平面与资源/绑定/任务/健康分离的管理 UI。`pnpm check` 与 Windows 服务 Smoke 通过。当前环境未重新执行真实 QEMU/WHPX 回归，未关闭门槛见 [`tests/phase3/summary.md`](../tests/phase3/summary.md)。
 - **阶段 4 完成（代码与本机服务验证）**：Guest Agent 认证/令牌轮换、心跳、版本握手、动作 ID/超时/去重、安全更新暂存；X11 动态分辨率/DPI；noVNC 实时控制台、回环一次性票据与逐帧 RFB 输入门控；统一 Per-VM Execution Lease 和人工抢占 AI。Windows 真实进程 Smoke 与自动化回归通过。真实 QEMU/WHPX、X11 和浏览器/Electron 人工桌面交互、服务管理器更新激活仍需显式验收，详见 [`tests/phase4/summary.md`](../tests/phase4/summary.md)。
-- **下一步**：进入阶段 5（Project/ProjectVmBinding、Task Service、目标 VM 队列和任务看板），随后按阶段 6 将 PiWorkerEngine 接入 Task Service、Lease 和 Worker Registry。真实 QEMU/WHPX 与 noVNC 回归、Electron 托管 Supervisor、Windows NSIS 安装包与干净 Windows Smoke Test、真实飞书/QQ 和长时稳定性作为发布前验收门槛持续跟踪。
+- **阶段 5 完成（代码、自动化与真实控制平面 Smoke）**：Project CRUD/归档/工作区配置、多对多 VM 绑定和主 VM、项目会话/活动/产物引用；Task 依赖/优先级/幂等/取消/重试、Per-VM 持久队列、完成结果与产物 SHA-256 校验；任务看板筛选、详情和 WebSocket 重连全量同步。真实控制平面重启后运行任务不重复认领，HTTP 不提供伪造完成路由。Pi Worker、真实浏览器/Electron 人工看板验收仍未在本轮执行，详见 [`tests/phase5/summary.md`](../tests/phase5/summary.md)。
+- **下一步**：进入阶段 6（Pi Worker Runtime、Model Broker、Worker Engine Adapter），将 Worker 接入 TaskService 认领、Execution Lease 和 Worker Registry。真实 QEMU/WHPX 与 noVNC 回归、Electron 托管 Supervisor、Windows NSIS 安装包与干净 Windows Smoke Test、真实飞书/QQ 和长时稳定性作为发布前验收门槛持续跟踪。
 
 1. 先验证 Hypervisor、镜像、Pi Computer Use 和模型代理等高风险链路，再大规模开发 UI。
 2. 每个阶段形成可运行、可测试的纵向能力，避免一次性生成大量空模块。
@@ -430,6 +431,19 @@
 - 看板与数据库一致；
 - 重连后完整同步，不只依赖漏收的增量事件；
 - 任务详情能跳转项目、VM 和来源会话。
+
+**阶段 5 逐项验收记录（2026-11-11）**：
+
+- [x] 多项目可绑定同 VM，单项目可绑定多 VM，停止 VM 可绑定；解绑/删除不删除共享 VM。
+- [x] 状态迁移由领域状态机约束，迁移、TaskEvent、项目活动和 Outbox 同事务写入。
+- [x] SQLite 部分唯一索引与服务端认领共同保证同 VM 串行；跨项目使用同一队列。
+- [x] 真实控制平面重启后，持久化的运行中任务不会再次认领；幂等键不会创建重复任务。
+- [x] 浏览器 API 只有创建、取消、重试和优先级命令，没有状态覆盖或完成路由；完成由服务端 `TaskService.complete()` 校验结果和产物。
+- [x] 看板读取数据库快照，WebSocket 只发送失效通知；连接打开和重连后均重新读取完整快照。
+- [x] 项目、VM、Worker、状态筛选，以及取消、重试、优先级、任务时间线和来源跳转已实现。
+- [ ] 在真实浏览器和打包 Electron 中人工操作看板并复核布局/可访问性；本轮完成生产构建和 API/WebSocket Smoke，未声称人工 UI 验收通过。
+
+完整接口、错误/取消/恢复语义和限制见 [`tests/phase5/summary.md`](../tests/phase5/summary.md)。
 
 ---
 

@@ -47,6 +47,12 @@ export async function createTestContext(): Promise<TestContext> {
     projectId: project.id,
     title: "Test conversation",
   });
+  await catalog.bindVm({
+    projectId: project.id,
+    vmId: vm.id,
+    guestWorkspacePath: "/home/worker/workspace",
+    isPrimary: true,
+  });
 
   return {
     app,

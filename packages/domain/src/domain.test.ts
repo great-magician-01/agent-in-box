@@ -6,6 +6,7 @@ import {
   canTransitionWorker,
   isLeaseActive,
   normalizeQueuePriority,
+  normalizeGuestWorkspacePath,
   validateBindings,
 } from "./index";
 
@@ -26,6 +27,9 @@ describe("task state machine", () => {
     expect(canTransitionTask("running", "waiting_approval")).toBe(true);
     expect(canTransitionTask("waiting_approval", "running")).toBe(true);
     expect(canTransitionTask("failed", "queued")).toBe(true);
+    expect(canTransitionTask("failed", "waiting_vm")).toBe(true);
+    expect(canTransitionTask("failed", "created")).toBe(true);
+    expect(canTransitionTask("queued", "waiting_vm")).toBe(true);
   });
 
   it("rejects terminal and skipping transitions", () => {
@@ -82,5 +86,13 @@ describe("lease and priority helpers", () => {
     expect(normalizeQueuePriority(-500)).toBe(-100);
     expect(normalizeQueuePriority(Number.NaN)).toBe(0);
     expect(normalizeQueuePriority(4.9)).toBe(4);
+  });
+
+  it("validates guest workspace paths without treating them as host paths", () => {
+    expect(normalizeGuestWorkspacePath("/home/worker/project/")).toBe("/home/worker/project");
+    expect(normalizeGuestWorkspacePath("/")).toBe("/");
+    expect(() => normalizeGuestWorkspacePath("relative/path")).toThrow("absolute POSIX");
+    expect(() => normalizeGuestWorkspacePath("/home/worker/../host")).toThrow("without '..'");
+    expect(() => normalizeGuestWorkspacePath("C:\\host")).toThrow("absolute POSIX");
   });
 });

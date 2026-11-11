@@ -1,8 +1,8 @@
 {
   "phase": 4,
-  "startedAt": "2026-11-10T17:06:50.857Z",
-  "completedAt": "2026-11-10T17:06:53.678Z",
-  "platform": "win32",
+  "startedAt": "2026-11-11T03:02:00.456Z",
+  "completedAt": "2026-11-11T03:02:01.871Z",
+  "platform": "linux",
   "architecture": "x64",
   "checks": [
     "真实控制平面启动，Guest/Supervisor ACL 文件均从 VM 数据目录解析",

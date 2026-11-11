@@ -67,6 +67,15 @@ export class ConsoleService implements OnModuleDestroy {
   /** Attach to the loopback HTTP server created by Nest. */
   attach(server: HttpServer): () => void {
     const listener = (request: IncomingMessage, socket: Duplex, head: Buffer): void => {
+      let isConsoleRoute = false;
+      try {
+        const pathname = new URL(request.url ?? "", "http://127.0.0.1").pathname;
+        isConsoleRoute = /^\/api\/v1\/vms\/[^/]+\/console\/ws$/.test(pathname);
+      } catch {
+        isConsoleRoute = false;
+      }
+      // The phase-5 event stream owns a separate upgrade route.
+      if (!isConsoleRoute) return;
       void this.upgrade(request, socket, head).catch(() => {
         rejectUpgrade(socket, 403, "Console access denied");
       });

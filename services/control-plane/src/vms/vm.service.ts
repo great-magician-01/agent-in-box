@@ -20,6 +20,7 @@ import { toTaskRecord, toVmInstanceRecord } from "../persistence/mappers";
 import type { DatabaseSchema } from "../persistence/schema";
 import { nowIso } from "../persistence/time";
 import { KYSELY } from "../persistence/tokens";
+import { TaskService } from "../persistence/services/task-service";
 import { directoryStats } from "../storage/fs-utils";
 import { SupervisorClient } from "./supervisor.client";
 
@@ -51,6 +52,7 @@ export class VmService {
     private readonly images: ImageService,
     private readonly supervisor: SupervisorClient,
     @Optional() @Inject(VM_SERVICE_OPTIONS) options: VmServiceOptions = {},
+    @Optional() private readonly tasks?: TaskService,
   ) {
     this.guestFetch = options.guestFetchImpl ?? fetch;
     this.guestTimeoutMs = options.guestTimeoutMs ?? 1000;
@@ -90,6 +92,7 @@ export class VmService {
             await this.persistState(row.id, runtime.powerState, runtime.guestHealth, runtime, null);
           }
         }
+        await this.tasks?.reconcileVm(row.id);
         return this.view(row.id, runtime);
       }),
     );
@@ -212,6 +215,7 @@ export class VmService {
     try {
       const state = await this.withGuestHealth(await operation());
       await this.persistState(id, state.powerState, state.guestHealth, state, null);
+      await this.tasks?.reconcileVm(id);
       return this.view(id, state);
     } catch (error) {
       await this.persistState(
@@ -320,6 +324,7 @@ export class VmService {
           "projects.id as id",
           "projects.name as name",
           "project_vm_bindings.is_primary as is_primary",
+          "projects.archived_at as archived_at",
         ])
         .where("project_vm_bindings.vm_id", "=", id)
         .execute(),
@@ -342,6 +347,7 @@ export class VmService {
         id: binding.id,
         name: binding.name,
         isPrimary: binding.is_primary === 1,
+        archivedAt: binding.archived_at,
       })),
       currentTask: task
         ? {

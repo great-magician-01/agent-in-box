@@ -924,7 +924,12 @@ export function VmManager({ host, hostReserveBytes }: VmManagerProps): React.JSX
               VM_POWER_STATE_LABELS[power]
             }`;
             return (
-              <article className="vm-card" key={view.vm.id} aria-label={`虚拟机 ${view.vm.name}`}>
+              <article
+                className="vm-card"
+                id={`vm-${view.vm.id}`}
+                key={view.vm.id}
+                aria-label={`虚拟机 ${view.vm.name}`}
+              >
                 <div className="vm-card-head">
                   <div>
                     <h4>{view.vm.name}</h4>
@@ -996,7 +1001,10 @@ export function VmManager({ host, hostReserveBytes }: VmManagerProps): React.JSX
                     <dd>
                       {view.boundProjects.length > 0
                         ? view.boundProjects
-                            .map((project) => `${project.name}${project.isPrimary ? "（主）" : ""}`)
+                            .map(
+                              (project) =>
+                                `${project.name}${project.archivedAt ? "（已归档）" : ""}${project.isPrimary ? "（主）" : ""}`,
+                            )
                             .join("、")
                         : "未绑定项目"}
                     </dd>
@@ -1020,6 +1028,13 @@ export function VmManager({ host, hostReserveBytes }: VmManagerProps): React.JSX
                     </dd>
                   </div>
                 </dl>
+
+                {view.boundProjects.length > 1 && (
+                  <p className="shared-warning">
+                    共享 VM：{view.boundProjects.map((project) => project.name).join("、")}
+                    共用桌面、软件和系统状态；所有项目的任务在此 VM 上串行执行。
+                  </p>
+                )}
 
                 {diskPercent !== null && (
                   <div

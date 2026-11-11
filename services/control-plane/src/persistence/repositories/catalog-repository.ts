@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { Inject } from "@nestjs/common";
 import type { Kysely } from "kysely";
 import type {
   ConversationRecord,
@@ -18,6 +19,7 @@ import {
 } from "../mappers";
 import { NotFoundError, PersistenceError } from "../errors";
 import type { DatabaseSchema } from "../schema";
+import { KYSELY } from "../tokens";
 
 export interface CreateImageInput {
   name: string;
@@ -59,7 +61,7 @@ export interface BindVmInput {
 }
 
 export class CatalogRepository {
-  constructor(private readonly db: Kysely<DatabaseSchema>) {}
+  constructor(@Inject(KYSELY) private readonly db: Kysely<DatabaseSchema>) {}
 
   async createImage(input: CreateImageInput): Promise<ImageRecord> {
     const now = nowIso();
@@ -124,12 +126,15 @@ export class CatalogRepository {
   }
 
   async createProject(input: CreateProjectInput): Promise<ProjectRecord> {
+    const now = nowIso();
     const record: ProjectRecord = {
       id: randomUUID(),
       name: input.name,
       description: input.description ?? "",
       defaultVmBindingId: null,
-      createdAt: nowIso(),
+      workspaceConfig: { defaultGuestWorkspacePath: "/home/worker/workspace" },
+      createdAt: now,
+      updatedAt: now,
       archivedAt: null,
     };
 
@@ -140,7 +145,9 @@ export class CatalogRepository {
         name: record.name,
         description: record.description,
         default_vm_binding_id: null,
+        workspace_config_json: JSON.stringify(record.workspaceConfig),
         created_at: record.createdAt,
+        updated_at: record.updatedAt,
         archived_at: null,
       })
       .execute();

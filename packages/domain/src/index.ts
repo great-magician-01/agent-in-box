@@ -14,12 +14,12 @@ const TASK_TRANSITIONS: Record<TaskStatus, readonly TaskStatus[]> = {
   created: ["waiting_resources", "waiting_vm", "queued", "cancelled"],
   waiting_resources: ["waiting_vm", "queued", "cancelled", "blocked"],
   waiting_vm: ["queued", "cancelled", "blocked", "failed"],
-  queued: ["running", "cancelled", "blocked"],
+  queued: ["running", "waiting_vm", "cancelled", "blocked"],
   running: ["waiting_approval", "completed", "failed", "cancelled", "blocked"],
   waiting_approval: ["running", "blocked", "cancelled", "failed"],
   blocked: ["queued", "cancelled", "failed"],
   completed: [],
-  failed: ["queued"],
+  failed: ["created", "waiting_vm", "queued"],
   cancelled: [],
 };
 
@@ -92,4 +92,19 @@ export function normalizeQueuePriority(value: number): number {
     return 0;
   }
   return Math.max(-100, Math.min(100, Math.trunc(value)));
+}
+
+/** Guest paths are configuration only; they are never host filesystem paths. */
+export function normalizeGuestWorkspacePath(value: string): string {
+  const normalized = value.trim();
+  if (
+    !normalized ||
+    normalized.length > 240 ||
+    normalized.includes("\0") ||
+    !normalized.startsWith("/") ||
+    normalized.split("/").includes("..")
+  ) {
+    throw new Error("Guest workspace must be an absolute POSIX path without '..'");
+  }
+  return normalized.replace(/\/+$/, "") || "/";
 }

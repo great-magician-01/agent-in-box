@@ -43,7 +43,9 @@ export interface ProjectsTable {
   name: string;
   description: string;
   default_vm_binding_id: string | null;
+  workspace_config_json: string;
   created_at: string;
+  updated_at: string;
   archived_at: string | null;
 }
 
@@ -90,9 +92,13 @@ export interface TasksTable {
   objective: string;
   status: string;
   priority: number;
+  attempt_count: number;
   latest_summary: string | null;
+  result_json: string | null;
   error_code: string | null;
+  error_message: string | null;
   created_at: string;
+  updated_at: string;
   started_at: string | null;
   completed_at: string | null;
 }
@@ -100,6 +106,33 @@ export interface TasksTable {
 export interface TaskEventsTable {
   id: Generated<number>;
   task_id: string;
+  type: string;
+  payload_json: string;
+  created_at: string;
+}
+
+export interface TaskDependenciesTable {
+  task_id: string;
+  dependency_task_id: string;
+  created_at: string;
+}
+
+export interface TaskArtifactsTable {
+  id: string;
+  project_id: string;
+  task_id: string;
+  name: string;
+  relative_path: string;
+  media_type: string;
+  size_bytes: number;
+  sha256: string;
+  created_at: string;
+  verified_at: string | null;
+}
+
+export interface ProjectActivitiesTable {
+  id: Generated<number>;
+  project_id: string;
   type: string;
   payload_json: string;
   created_at: string;
@@ -177,6 +210,9 @@ export interface DatabaseSchema {
   workers: WorkersTable;
   tasks: TasksTable;
   task_events: TaskEventsTable;
+  task_dependencies: TaskDependenciesTable;
+  task_artifacts: TaskArtifactsTable;
+  project_activities: ProjectActivitiesTable;
   outbox: OutboxTable;
   vm_leases: VmLeasesTable;
   processed_events: ProcessedEventsTable;

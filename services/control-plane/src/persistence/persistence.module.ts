@@ -7,7 +7,7 @@ import { WorkerRepository } from "./repositories/worker-repository";
 import { LeaseRepository } from "./repositories/lease-repository";
 import { OutboxRepository } from "./repositories/outbox-repository";
 import { EventDedupRepository } from "./repositories/event-dedup-repository";
-import { TaskService } from "./services/task-service";
+import { TaskService, TASK_SERVICE_OPTIONS } from "./services/task-service";
 import { LeaseService } from "./services/lease-service";
 
 const kyselyProvider: Provider = {
@@ -26,6 +26,11 @@ const kyselyProvider: Provider = {
     LeaseRepository,
     OutboxRepository,
     EventDedupRepository,
+    {
+      provide: TASK_SERVICE_OPTIONS,
+      useFactory: (database: DatabaseService) => ({ artifactRoot: database.layout.artifacts }),
+      inject: [DatabaseService],
+    },
     TaskService,
     LeaseService,
   ],

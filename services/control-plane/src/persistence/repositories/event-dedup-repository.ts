@@ -1,8 +1,10 @@
+import { Inject } from "@nestjs/common";
 import type { Kysely } from "kysely";
 import type { DatabaseSchema } from "../schema";
+import { KYSELY } from "../tokens";
 
 export class EventDedupRepository {
-  constructor(private readonly db: Kysely<DatabaseSchema>) {}
+  constructor(@Inject(KYSELY) private readonly db: Kysely<DatabaseSchema>) {}
 
   /**
    * Claim an event exactly once. Returns true when the caller owns the event

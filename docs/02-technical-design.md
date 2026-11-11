@@ -289,6 +289,38 @@ created_at, started_at, completed_at
 - 消费方按事件 ID 去重；
 - 看板是数据库投影，不单独维护另一套任务事实。
 
+### 5.7 阶段 5 持久化与接口实现（2026-11-11）
+
+Migration `004_phase5_projects_tasks` 增加 `task_dependencies`、`task_artifacts`、`project_activities`，并为项目工作区和任务结果、错误详情、尝试次数、更新时间补充字段。`tasks_single_execution_idx` 是 SQLite 部分唯一索引：同一 `vm_id` 最多存在一个 `running` 或 `waiting_approval` 任务。等待审批仍视为占用当前执行位置。
+
+`TaskService.claimNext(vmId)` 在事务中检查活动执行、依赖状态和 `priority DESC, created_at ASC, id ASC` 队列顺序，并在最后复核 VM 必须运行、项目未归档且绑定仍存在。认领成功后持久化 `running` 和 `attempt_count`；控制平面重启不会把该记录重置为新任务，也不会自动再次认领。不同 VM 可以独立认领。VM 停止时依赖就绪的 `queued` 会退回 `waiting_vm`；重试根据依赖和 VM 状态进入 `created`、`waiting_vm` 或 `queued`，并重新检查项目/绑定。项目 Worker 遇到其他项目的队首任务返回空，不抢走该任务。阶段 6 的 Worker Runtime 必须在此基础上补充进程对账、Abort 和 Lease 生命周期，不能把持久化 `running` 误认为 Pi 进程仍健康。
+
+任务完成不经过通用状态 HTTP 接口。浏览器只能创建、取消、重试和调整未开始任务优先级；`POST /complete`、通用状态 PATCH 均不存在。服务端 Worker 调用 `TaskService.complete()`，要求非空结果摘要，产物必须位于 Storage Manager 的 `artifacts/` 内，使用相对 POSIX 路径，拒绝路径穿越和符号链接。文件只打开一次，使用 `O_NOFOLLOW`（支持的宿主）、描述符和真实路径检查后，从同一描述符核对实际大小与 SHA-256。状态、产物引用、TaskEvent 和 Outbox 在同一事务提交。重新校验先检查任务/产物归属，失败也会事务化写入失败事件。
+
+项目接口支持 CRUD、归档/恢复、工作区配置、多 VM 绑定、主 VM 切换、项目会话和活动。已有任务历史的项目只能归档；有未结束任务时不能归档或解绑对应 VM。删除项目只级联项目自有元数据，不删除 VM 行或虚拟磁盘。
+
+主要路由：
+
+```text
+GET/POST              /api/v1/projects
+GET/PATCH/DELETE      /api/v1/projects/:id
+POST                  /api/v1/projects/:id/archive
+POST                  /api/v1/projects/:id/restore
+POST                  /api/v1/projects/:id/bindings
+PATCH/DELETE          /api/v1/projects/:id/bindings/:bindingId
+POST                  /api/v1/projects/:id/conversations
+GET/POST              /api/v1/tasks
+GET                   /api/v1/tasks/board
+GET                   /api/v1/tasks/:id
+PATCH                 /api/v1/tasks/:id/priority
+POST                  /api/v1/tasks/:id/cancel
+POST                  /api/v1/tasks/:id/retry
+POST                  /api/v1/tasks/:id/artifacts/:artifactId/verify
+WebSocket             /api/v1/events/ws
+```
+
+Outbox 发布器将提交后的消息标记为已发布并广播带单调 `eventId`、`eventVersion`、协议版本、时间和可用项目/任务/VM 上下文的失效通知。当前 WebSocket 不是可靠增量日志，离线期间也不承诺逐条重放；客户端在每次打开/重连时读取 `/tasks/board` 完整数据库快照，事件只触发重新同步。noVNC 与事件 WebSocket 各自只处理自己的 upgrade 路径，最终 fallback 对未被认领的路径返回 404 并关闭 socket，避免未知升级连接悬挂。
+
 ## 6. 状态机与调度
 
 ### 6.1 Task 状态机

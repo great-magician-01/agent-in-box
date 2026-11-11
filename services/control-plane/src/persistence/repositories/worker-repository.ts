@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
+import { Inject } from "@nestjs/common";
 import type { Kysely } from "kysely";
 import type { WorkerRecord, WorkerStatus } from "@agent-in-box/protocol";
 import { toWorkerRecord } from "../mappers";
 import { nowIso } from "../time";
 import type { DatabaseSchema } from "../schema";
+import { KYSELY } from "../tokens";
 
 export interface CreateWorkerInput {
   projectId: string;
@@ -15,7 +17,7 @@ export interface CreateWorkerInput {
 }
 
 export class WorkerRepository {
-  constructor(private readonly db: Kysely<DatabaseSchema>) {}
+  constructor(@Inject(KYSELY) private readonly db: Kysely<DatabaseSchema>) {}
 
   async createWorker(input: CreateWorkerInput): Promise<WorkerRecord> {
     const now = nowIso();

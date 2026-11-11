@@ -4,8 +4,10 @@ import type {
   GuestHealthState,
   ImageRecord,
   OsFamily,
+  ProjectActivityRecord,
   ProjectRecord,
   ProjectVmBindingRecord,
+  TaskArtifactRecord,
   TaskRecord,
   VmInstanceRecord,
   VmPowerState,
@@ -17,6 +19,8 @@ import type {
   ImagesTable,
   ProjectVmBindingsTable,
   ProjectsTable,
+  TaskArtifactsTable,
+  ProjectActivitiesTable,
   TasksTable,
   VmInstancesTable,
   WorkersTable,
@@ -46,6 +50,15 @@ function parseCapabilities(value: string): string[] {
     return Array.isArray(parsed) && parsed.every((item) => typeof item === "string") ? parsed : [];
   } catch {
     return [];
+  }
+}
+
+function parseJson(value: string | null): unknown | null {
+  if (value === null || value === "") return null;
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return null;
   }
 }
 
@@ -91,12 +104,22 @@ export function toVmInstanceRecord(row: Selectable<VmInstancesTable>): VmInstanc
 }
 
 export function toProjectRecord(row: Selectable<ProjectsTable>): ProjectRecord {
+  const parsed = parseJson(row.workspace_config_json);
+  const workspace =
+    parsed !== null && typeof parsed === "object" && "defaultGuestWorkspacePath" in parsed
+      ? (parsed as { defaultGuestWorkspacePath?: unknown }).defaultGuestWorkspacePath
+      : undefined;
   return {
     id: row.id,
     name: row.name,
     description: row.description,
     defaultVmBindingId: row.default_vm_binding_id,
+    workspaceConfig: {
+      defaultGuestWorkspacePath:
+        typeof workspace === "string" && workspace ? workspace : "/home/worker/workspace",
+    },
     createdAt: row.created_at,
+    updatedAt: row.updated_at || row.created_at,
     archivedAt: row.archived_at,
   };
 }
@@ -139,11 +162,42 @@ export function toTaskRecord(row: Selectable<TasksTable>): TaskRecord {
     objective: row.objective,
     status: row.status,
     priority: row.priority,
+    attemptCount: row.attempt_count,
     createdAt: row.created_at,
+    updatedAt: row.updated_at || row.created_at,
     startedAt: row.started_at,
     completedAt: row.completed_at,
     latestSummary: row.latest_summary,
+    result: parseJson(row.result_json),
     errorCode: row.error_code,
+    errorMessage: row.error_message,
+  };
+}
+
+export function toTaskArtifactRecord(row: Selectable<TaskArtifactsTable>): TaskArtifactRecord {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    taskId: row.task_id,
+    name: row.name,
+    relativePath: row.relative_path,
+    mediaType: row.media_type,
+    sizeBytes: row.size_bytes,
+    sha256: row.sha256,
+    createdAt: row.created_at,
+    verifiedAt: row.verified_at,
+  };
+}
+
+export function toProjectActivityRecord(
+  row: Selectable<ProjectActivitiesTable>,
+): ProjectActivityRecord {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    type: row.type,
+    payload: parseJson(row.payload_json),
+    createdAt: row.created_at,
   };
 }
 

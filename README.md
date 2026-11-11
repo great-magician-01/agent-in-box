@@ -1,6 +1,6 @@
 # Agent-in-Box
 
-面向个人用户的本地 AI 虚拟机工作平台。当前仓库已完成 **开发计划阶段 1（工程骨架、协议和本地持久化）**、**阶段 2（Electron、本地服务与自定义存储）**、**阶段 3（镜像服务、VM 生命周期与管理 UI）** 和 **阶段 4（Guest Agent、noVNC 实时控制台与统一 Execution Lease）**：包含无特权 Electron 壳、控制平面进程监管、首次启动向导、自定义数据目录、可续传镜像服务、受 ACL 保护的 Go VM Supervisor、QEMU/WHPX 生命周期、认证 Guest 管理通道，以及 AI/人工互斥的桌面输入。真实 QEMU/WHPX 和浏览器/Electron 人工桌面验收仍按阶段 4 记录单独执行。
+面向个人用户的本地 AI 虚拟机工作平台。当前仓库已完成 **开发计划阶段 1（工程骨架、协议和本地持久化）**、**阶段 2（Electron、本地服务与自定义存储）**、**阶段 3（镜像服务、VM 生命周期与管理 UI）**、**阶段 4（Guest Agent、noVNC 实时控制台与统一 Execution Lease）** 和 **阶段 5（项目、多 VM 绑定、持久任务队列与任务看板）**。包含无特权 Electron 壳、控制平面进程监管、首次启动向导、自定义数据目录、可续传镜像服务、受 ACL 保护的 Go VM Supervisor、QEMU/WHPX 生命周期、认证 Guest 管理通道、AI/人工互斥桌面输入，以及跨项目串行的 VM 任务内核。真实 QEMU/WHPX、浏览器/Electron 人工交互和 Pi Worker 集成验收仍按各阶段记录单独执行。
 
 完整方案见：
 
@@ -10,6 +10,17 @@
 - [阶段 2 验收记录](tests/phase2/summary.md)
 - [阶段 3 验收记录](tests/phase3/summary.md)
 - [阶段 4 验收记录](tests/phase4/summary.md)
+- [阶段 5 验收记录](tests/phase5/summary.md)
+
+## 阶段 5 已落地
+
+- **项目与多 VM 绑定**：项目 CRUD、归档/恢复、Guest 工作区配置、主 VM 切换、停止 VM 绑定；项目会话、活动和产物引用。项目与 VM 页面明确列出共享项目、归档状态和串行状态影响，解绑/删除项目不会删除共享 VM。
+- **持久任务内核**：幂等创建、依赖、优先级、合法状态迁移、取消、失败重试和错误记录；TaskEvent、项目活动与 Outbox 同事务写入。SQLite 唯一约束和事务化认领保证同一 VM 只有一个运行中/待审批任务，不同 VM 可独立执行。
+- **结果与产物**：服务端 `TaskService.complete()` 校验非空摘要和产物目录内文件的实际大小/SHA-256，支持重新校验；浏览器没有通用状态覆盖或完成路由。
+- **任务看板**：项目/VM/Worker/状态筛选、排队位置和优先级、取消/重试、依赖/结果/产物/TaskEvent 时间线，以及项目、VM、来源会话跳转。WebSocket 只通知失效，打开和重连后读取完整数据库快照。
+- **验证边界**：真实控制平面 HTTP/WebSocket Smoke 已验证重启不重复认领；Smoke 使用服务端 TaskService 驱动和预置 VM 状态，不代表 Pi Worker、真实 QEMU/WHPX 或浏览器/Electron 人工 UI 验收通过。
+
+详见 [`tests/phase5/summary.md`](tests/phase5/summary.md)。
 
 ## 阶段 4 已落地
 
@@ -109,6 +120,9 @@ pnpm smoke:phase3
 # Guest Agent + 版本/更新握手 + noVNC 代理 + AI/人工 Lease 互斥
 pnpm smoke:phase4
 
+# 项目/绑定 + 任务队列 + 产物校验 + 真实重启 + WebSocket 全量重同步
+pnpm smoke:phase5
+
 # 已打包桌面壳的 Renderer 隔离、preload IPC 和 UI 加载
 # 需先执行 pnpm package:desktop:dir；Linux/WSL 还需要 X/WSLg 和 Electron 系统库
 pnpm smoke:desktop
@@ -138,7 +152,7 @@ GitHub Actions 工作流位于 `.github/workflows/ci.yml`，在 `main` 推送、
 
 - `pnpm install --frozen-lockfile`；
 - `pnpm check`、`go vet ./...`、关键 Go 包的 race 测试与自包含 Control Plane 打包；
-- 阶段 2、3、4 服务 Smoke Test，并上传阶段 3/4 的机器结果 artifact。
+- 阶段 2、3、4、5 服务 Smoke Test，并上传阶段 3/4/5 的机器结果 artifact。
 
 CI 不申请模型或机器人凭据，也不运行真实 QEMU/WHPX；这些仍由对应阶段的显式集成测试和宿主环境验收覆盖。
 
@@ -190,25 +204,33 @@ docs/                产品、技术与开发计划
 
 SQLite 数据库位于数据根目录下的 `agent-in-box.sqlite`，使用 WAL 模式并启用外键约束。启动时执行内置 Migration Runner；迁移记录保存在 `schema_migrations` 表中，每条迁移在独立事务中应用。数据库包含：
 
-- `projects`、`project_vm_bindings`、`vm_instances`、`conversations`
-- `tasks`、`task_events`、`workers`、`idempotency_keys`
+- `projects`、`project_vm_bindings`、`project_activities`、`vm_instances`、`conversations`
+- `tasks`、`task_events`、`task_dependencies`、`task_artifacts`、`workers`、`idempotency_keys`
 - `outbox`、`vm_leases`、`processed_events`
 - `images`
 - `app_settings`、`local_users`、`storage_migrations`
 
 数据库备份通过 `AppDatabase.backup()` 使用 SQLite 在线备份能力，后续会接入本地备份与恢复流程。
 
-## 当前验证记录（2026-11-10）
+## 当前验证记录（2026-11-10～11）
 
 已在当前开发环境实际执行：
 
 - `pnpm install`：成功；pnpm 11 仅允许 `esbuild`、`electron`、`better-sqlite3` 构建脚本
-- `pnpm check`：lint、typecheck、145 个 Vitest 测试、Go test、全部构建均通过
+- `pnpm check`：lint、typecheck、168 个 Vitest 测试、Go test、全部构建均通过；1 个环境依赖测试显式跳过
 - 控制平面 `GET /api/v1/health`、`GET /api/v1/runtime` 返回正常
-- 控制平面启动时创建 SQLite 数据库并应用 `001_initial_schema`、`002_phase2_settings`
+- 控制平面启动时创建 SQLite 数据库并应用 `001_initial_schema`、`002_phase2_settings`、`003_phase3_images`、`004_phase5_projects_tasks`
 - SQLite 表、WAL 模式和迁移记录在真实运行中验证通过
 - Web 开发服务器可访问，`/api` 代理到控制平面正常
 - VM Supervisor 与 Guest Agent 的 `/healthz`、`/readyz` 正常
+
+### 阶段 5 验证（2026-11-11）
+
+- `pnpm smoke:phase5`：真实控制平面完成项目多对多绑定、共享 VM 删除保护、幂等/依赖/优先级、跨项目串行认领、失败重试、取消和产物 SHA-256 校验。
+- 在任务保持 `running` 时停止并重新启动真实控制平面，新的认领请求返回空且尝试次数保持为 1；浏览器 `POST /complete` 返回 404。
+- WebSocket 事件包含单调 ID、Schema/协议版本和任务上下文；断线后通过 `/api/v1/tasks/board` 重新读取完整快照，不依赖漏收事件重放。
+- `realQemuValidated=false`、`browserInteractionValidated=false`、`workerRuntimeIntegrated=false`；本阶段 Smoke 的 Worker 是服务端 TaskService 驱动，不是 Pi RPC。
+- 详细证据和未关闭门槛见 [`tests/phase5/summary.md`](tests/phase5/summary.md)。
 
 ### 阶段 4 验证（2026-11-11）
 

@@ -1,6 +1,8 @@
+import { Inject } from "@nestjs/common";
 import type { Kysely } from "kysely";
 import type { DatabaseExecutor } from "../executor";
 import type { DatabaseSchema } from "../schema";
+import { KYSELY } from "../tokens";
 
 export interface OutboxMessage {
   id: number;
@@ -12,7 +14,7 @@ export interface OutboxMessage {
 }
 
 export class OutboxRepository {
-  constructor(private readonly db: Kysely<DatabaseSchema>) {}
+  constructor(@Inject(KYSELY) private readonly db: Kysely<DatabaseSchema>) {}
 
   async append(
     topic: string,

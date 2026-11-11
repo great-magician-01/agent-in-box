@@ -1,0 +1,23 @@
+{
+  "phase": 5,
+  "startedAt": "2026-11-11T03:01:17.132Z",
+  "completedAt": "2026-11-11T03:01:18.616Z",
+  "platform": "linux",
+  "architecture": "x64",
+  "checks": [
+    "真实控制平面启动并应用阶段 5 SQLite 迁移",
+    "多项目共享同一 VM、单项目绑定多 VM、停止 VM 绑定及共享影响清单",
+    "删除项目不会删除共享 VM",
+    "幂等创建、依赖、等待 VM、跨项目优先级队列和版本化 WebSocket 事件",
+    "服务端 Worker 按优先级认领后，同 VM 第二个认领请求被拒绝",
+    "控制平面真实重启后运行中任务不重复认领，且浏览器无完成路由",
+    "错误产物哈希阻止完成，正确结果/产物通过独立校验并进入时间线",
+    "依赖完成后唤醒、失败错误记录、HTTP 重试和取消均保持合法状态迁移",
+    "活跃项目归档保护、归档修改保护和解绑不删除 VM",
+    "WebSocket 断线期间不依赖增量重放，重连后完整数据库快照包含全部任务"
+  ],
+  "realQemuValidated": false,
+  "browserInteractionValidated": false,
+  "workerRuntimeIntegrated": false,
+  "note": "Real control-plane HTTP/WebSocket processes plus an in-process server-side TaskService worker driver. No Pi Worker, QEMU/WHPX or browser/Electron interaction is claimed."
+}

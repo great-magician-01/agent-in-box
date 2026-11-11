@@ -49,6 +49,15 @@ export const TASK_STATUSES = [
   "cancelled",
 ] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
+export const ACTIVE_TASK_STATUSES = [
+  "created",
+  "waiting_resources",
+  "waiting_vm",
+  "queued",
+  "running",
+  "waiting_approval",
+  "blocked",
+] as const satisfies readonly TaskStatus[];
 
 export const WORKER_STATUSES = [
   "starting",
@@ -100,12 +109,18 @@ export interface VmInstanceRecord {
   lastStartedAt: IsoTimestamp | null;
 }
 
+export interface ProjectWorkspaceConfig {
+  defaultGuestWorkspacePath: string;
+}
+
 export interface ProjectRecord {
   id: Id;
   name: string;
   description: string;
   defaultVmBindingId: Id | null;
+  workspaceConfig: ProjectWorkspaceConfig;
   createdAt: IsoTimestamp;
+  updatedAt: IsoTimestamp;
   archivedAt: IsoTimestamp | null;
 }
 
@@ -128,11 +143,15 @@ export interface TaskRecord {
   objective: string;
   status: TaskStatus;
   priority: number;
+  attemptCount: number;
   createdAt: IsoTimestamp;
+  updatedAt: IsoTimestamp;
   startedAt: IsoTimestamp | null;
   completedAt: IsoTimestamp | null;
   latestSummary: string | null;
+  result: unknown | null;
   errorCode: string | null;
+  errorMessage: string | null;
 }
 
 export interface TaskEventRecord {
@@ -170,6 +189,8 @@ export interface ConversationRecord {
 export interface DomainEventPayloads {
   "task.created": { task: TaskRecord };
   "task.status_changed": { taskId: Id; from: TaskStatus; to: TaskStatus };
+  "task.priority_changed": { taskId: Id; from: number; to: number };
+  "project.changed": { projectId: Id; action: string };
   "worker.archived": { workerId: Id; summaryRef: string | null };
   "worker.resumed": { workerId: Id; restoreMode: "native" | "summary" };
   "vm.power_changed": { vmId: Id; from: VmPowerState; to: VmPowerState };
@@ -715,6 +736,7 @@ export interface VmProjectReference {
   id: Id;
   name: string;
   isPrimary: boolean;
+  archivedAt: IsoTimestamp | null;
 }
 
 export interface VmTaskReference {
@@ -862,6 +884,131 @@ export interface GuestScreenshot {
   capturedAt: IsoTimestamp;
   dataBase64: string;
 }
+
+/* Phase 5: projects, durable per-VM queues and task board projections. */
+export interface ProjectActivityRecord {
+  id: number;
+  projectId: Id;
+  type: string;
+  payload: unknown;
+  createdAt: IsoTimestamp;
+}
+
+export interface TaskArtifactRecord {
+  id: Id;
+  projectId: Id;
+  taskId: Id;
+  name: string;
+  relativePath: string;
+  mediaType: string;
+  sizeBytes: number;
+  sha256: string;
+  createdAt: IsoTimestamp;
+  verifiedAt: IsoTimestamp | null;
+}
+
+export interface ProjectBindingView {
+  binding: ProjectVmBindingRecord;
+  vm: VmInstanceRecord;
+  sharedProjects: VmProjectReference[];
+  sharedActiveTaskCount: number;
+}
+
+export interface ProjectView {
+  project: ProjectRecord;
+  bindings: ProjectBindingView[];
+  conversationCount: number;
+  activeTaskCount: number;
+}
+
+export interface ProjectDetail extends ProjectView {
+  conversations: ConversationRecord[];
+  activities: ProjectActivityRecord[];
+  artifacts: TaskArtifactRecord[];
+}
+
+export interface ProjectCreateRequest {
+  name: string;
+  description?: string;
+  workspaceConfig?: ProjectWorkspaceConfig;
+}
+
+export interface ProjectUpdateRequest {
+  name?: string;
+  description?: string;
+  workspaceConfig?: ProjectWorkspaceConfig;
+}
+
+export interface ProjectBindingRequest {
+  vmId: Id;
+  guestWorkspacePath: string;
+  isPrimary?: boolean;
+}
+
+export interface ProjectBindingUpdateRequest {
+  guestWorkspacePath?: string;
+  isPrimary?: boolean;
+}
+
+export interface TaskCreateRequest {
+  projectId: Id;
+  vmId: Id;
+  originConversationId?: Id;
+  objective: string;
+  priority?: number;
+  parentTaskId?: Id | null;
+  dependsOn?: Id[];
+}
+
+export interface TaskCreateResult {
+  task: TaskRecord;
+  created: boolean;
+}
+
+export interface TaskBoardItem extends TaskRecord {
+  dependencyIds: Id[];
+  /** One-based position among runnable queued tasks on this VM; null otherwise. */
+  queuePosition: number | null;
+}
+
+export interface TaskBoardSnapshot {
+  tasks: TaskBoardItem[];
+  projects: ProjectRecord[];
+  vms: VmInstanceRecord[];
+  workers: WorkerRecord[];
+  snapshotAt: IsoTimestamp;
+  eventCursor: number;
+}
+
+export interface TaskDetail {
+  task: TaskBoardItem;
+  dependencies: TaskRecord[];
+  events: TaskEventRecord[];
+  artifacts: TaskArtifactRecord[];
+}
+
+export interface TaskArtifactInput {
+  relativePath: string;
+  sha256: string;
+  sizeBytes?: number;
+  name?: string;
+  mediaType?: string;
+}
+
+export interface TaskCompletionInput {
+  summary: string;
+  result?: unknown;
+  artifacts?: TaskArtifactInput[];
+}
+
+export interface TaskListFilters {
+  projectId?: Id;
+  vmId?: Id;
+  workerId?: Id;
+  statuses?: TaskStatus[];
+}
+
+export type TaskStreamState = "live" | "reconnecting";
 
 export function isTaskStatus(value: unknown): value is TaskStatus {
   return typeof value === "string" && (TASK_STATUSES as readonly string[]).includes(value);

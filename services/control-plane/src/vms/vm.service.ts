@@ -4,23 +4,34 @@ import path from "node:path";
 import { Inject, Injectable, Optional } from "@nestjs/common";
 import type {
   GuestHealthState,
+  ResourceReport,
   SupervisorVmState,
+  VmActiveWorkerView,
   VmConsole,
   VmCreateRequest,
   VmInstanceView,
   VmListResponse,
   VmPowerState,
+  VmQueueItem,
+  VmSchedulingView,
+  VmSharingView,
   SupervisorAvailability,
 } from "@agent-in-box/protocol";
 import type { Kysely } from "kysely";
 import { ImageService } from "../images/image.service";
 import { DatabaseService } from "../persistence/database.service";
 import { NotFoundError, PersistenceError } from "../persistence/errors";
-import { toTaskRecord, toVmInstanceRecord } from "../persistence/mappers";
+import { toVmInstanceRecord } from "../persistence/mappers";
 import type { DatabaseSchema } from "../persistence/schema";
 import { nowIso } from "../persistence/time";
 import { KYSELY } from "../persistence/tokens";
 import { TaskService } from "../persistence/services/task-service";
+import { ResourceManagerService } from "../resources/resource-manager.service";
+import {
+  autoStartDecision,
+  isSuspendBlockingWorkerStatus,
+  maxIsoTimestamp,
+} from "../resources/resource-policy";
 import { directoryStats } from "../storage/fs-utils";
 import { SupervisorClient } from "./supervisor.client";
 
@@ -53,6 +64,7 @@ export class VmService {
     private readonly supervisor: SupervisorClient,
     @Optional() @Inject(VM_SERVICE_OPTIONS) options: VmServiceOptions = {},
     @Optional() private readonly tasks?: TaskService,
+    @Optional() private readonly resources?: ResourceManagerService,
   ) {
     this.guestFetch = options.guestFetchImpl ?? fetch;
     this.guestTimeoutMs = options.guestTimeoutMs ?? 1000;
@@ -75,26 +87,23 @@ export class VmService {
       };
     }
 
-    const items = await Promise.all(
-      rows.map(async (row) => {
-        let runtime = states.get(row.id) ?? null;
-        if (availability.available) {
-          if (!runtime) {
-            await this.persistState(
-              row.id,
-              "error",
-              "unknown",
-              null,
-              "Supervisor 中缺少 VM 元数据",
-            );
-          } else {
-            runtime = await this.withGuestHealth(runtime);
-            await this.persistState(row.id, runtime.powerState, runtime.guestHealth, runtime, null);
-          }
+    const runtimes = new Map<string, SupervisorVmState | null>();
+    for (const row of rows) {
+      let runtime = states.get(row.id) ?? null;
+      if (availability.available) {
+        if (!runtime) {
+          await this.persistState(row.id, "error", "unknown", null, "Supervisor 中缺少 VM 元数据");
+        } else {
+          runtime = await this.withGuestHealth(runtime);
+          await this.persistState(row.id, runtime.powerState, runtime.guestHealth, runtime, null);
         }
-        await this.tasks?.reconcileVm(row.id);
-        return this.view(row.id, runtime);
-      }),
+      }
+      await this.tasks?.reconcileVm(row.id);
+      runtimes.set(row.id, runtime);
+    }
+    const report = await this.resourceReport();
+    const items = await Promise.all(
+      rows.map((row) => this.view(row.id, runtimes.get(row.id) ?? null, report)),
     );
     return { items, supervisor: availability };
   }
@@ -171,7 +180,20 @@ export class VmService {
         last_started_at: null,
       })
       .execute();
-    return this.view(id, runtime);
+    return this.view(id, runtime, await this.resourceReport());
+  }
+
+  async get(id: string): Promise<VmInstanceView> {
+    await this.requireVm(id);
+    let runtime: SupervisorVmState | null = null;
+    try {
+      runtime = await this.withGuestHealth(await this.supervisor.get(id));
+      await this.persistState(id, runtime.powerState, runtime.guestHealth, runtime, null);
+      await this.tasks?.reconcileVm(id);
+    } catch {
+      // Keep the persisted VM view available when the Supervisor is down.
+    }
+    return this.view(id, runtime, await this.resourceReport());
   }
 
   start(id: string): Promise<VmInstanceView> {
@@ -191,6 +213,86 @@ export class VmService {
 
   resume(id: string): Promise<VmInstanceView> {
     return this.action(id, () => this.supervisor.resume(id));
+  }
+
+  async delete(id: string): Promise<{ deleted: true; vmId: string }> {
+    const vm = await this.requireVm(id);
+    const [bindings, task, worker, archive, backup, leaseRows] = await Promise.all([
+      this.db
+        .selectFrom("project_vm_bindings")
+        .innerJoin("projects", "projects.id", "project_vm_bindings.project_id")
+        .select(["projects.name as name"])
+        .where("project_vm_bindings.vm_id", "=", id)
+        .execute(),
+      this.db.selectFrom("tasks").select("id").where("vm_id", "=", id).limit(1).executeTakeFirst(),
+      this.db
+        .selectFrom("workers")
+        .select("id")
+        .where("vm_id", "=", id)
+        .limit(1)
+        .executeTakeFirst(),
+      this.db
+        .selectFrom("worker_archives")
+        .select("id")
+        .where("vm_id", "=", id)
+        .limit(1)
+        .executeTakeFirst(),
+      this.db
+        .selectFrom("project_backup_bindings")
+        .select(["backup_id"])
+        .where("vm_id", "=", id)
+        .limit(1)
+        .executeTakeFirst(),
+      this.db.selectFrom("vm_leases").select(["expires_at"]).where("vm_id", "=", id).execute(),
+    ]);
+    const activeLease = leaseRows.some((row) => Date.parse(row.expires_at) > Date.now());
+    if (bindings.length > 0) {
+      throw new PersistenceError(
+        "conflict",
+        `VM 仍绑定项目：${bindings.map((binding) => binding.name).join("、")}；请先解除全部绑定`,
+        { dependencies: { bindings: bindings.map((binding) => binding.name) } },
+      );
+    }
+    if (task) {
+      throw new PersistenceError("conflict", "VM 已有任务历史，不能删除；请保留 VM 或先归档项目", {
+        dependencies: { tasks: true },
+      });
+    }
+    if (worker || archive) {
+      throw new PersistenceError("conflict", "VM 已有 Worker 或归档历史，不能删除", {
+        dependencies: { workers: Boolean(worker), workerArchives: Boolean(archive) },
+      });
+    }
+    if (backup) {
+      throw new PersistenceError("conflict", "VM 被项目备份引用，请先删除相关项目备份", {
+        dependencies: { projectBackupId: backup.backup_id },
+      });
+    }
+    if (activeLease) {
+      throw new PersistenceError("conflict", "VM 仍有活动 Execution Lease，不能删除");
+    }
+    const runtime = await this.supervisor.get(id);
+    if (runtime.powerState !== "stopped") {
+      throw new PersistenceError("conflict", "删除 VM 前必须完全停止（stopped）VM");
+    }
+    await this.supervisor.delete(id);
+    const now = nowIso();
+    await this.db.transaction().execute(async (trx) => {
+      await trx.deleteFrom("vm_snapshots").where("vm_id", "=", id).execute();
+      await trx.deleteFrom("vm_instances").where("id", "=", id).execute();
+      await trx
+        .insertInto("outbox")
+        .values({
+          topic: "vm.deleted",
+          payload_json: JSON.stringify({ vmId: id, name: vm.name }),
+          created_at: now,
+          published_at: null,
+          attempts: 0,
+          last_error: null,
+        })
+        .execute();
+    });
+    return { deleted: true, vmId: id };
   }
 
   async console(id: string): Promise<VmConsole> {
@@ -217,7 +319,7 @@ export class VmService {
       const state = await this.withGuestHealth(await operation());
       await this.persistState(id, state.powerState, state.guestHealth, state, null);
       await this.tasks?.reconcileVm(id);
-      return this.view(id, state);
+      return this.view(id, state, await this.resourceReport());
     } catch (error) {
       await this.persistState(
         id,
@@ -315,9 +417,22 @@ export class VmService {
     });
   }
 
-  private async view(id: string, runtime: SupervisorVmState | null): Promise<VmInstanceView> {
+  private async resourceReport(): Promise<ResourceReport | null> {
+    if (!this.resources) return null;
+    try {
+      return await this.resources.report();
+    } catch {
+      return null;
+    }
+  }
+
+  private async view(
+    id: string,
+    runtime: SupervisorVmState | null,
+    report: ResourceReport | null,
+  ): Promise<VmInstanceView> {
     const vm = await this.requireVm(id);
-    const [bindings, task, usage] = await Promise.all([
+    const [bindings, taskRows, workerRows, allTaskTimes, lease, usage] = await Promise.all([
       this.db
         .selectFrom("project_vm_bindings")
         .innerJoin("projects", "projects.id", "project_vm_bindings.project_id")
@@ -331,32 +446,169 @@ export class VmService {
         .execute(),
       this.db
         .selectFrom("tasks")
-        .selectAll()
+        .innerJoin("projects", "projects.id", "tasks.project_id")
+        .select([
+          "tasks.id as id",
+          "tasks.project_id as project_id",
+          "projects.name as project_name",
+          "tasks.objective as objective",
+          "tasks.status as status",
+          "tasks.priority as priority",
+          "tasks.created_at as created_at",
+          "tasks.updated_at as updated_at",
+        ])
+        .where("tasks.vm_id", "=", id)
+        .where("tasks.status", "in", ACTIVE_TASK_STATUSES)
+        .orderBy("tasks.priority", "desc")
+        .orderBy("tasks.created_at", "asc")
+        .execute(),
+      this.db
+        .selectFrom("workers")
+        .innerJoin("projects", "projects.id", "workers.project_id")
+        .select([
+          "workers.id as id",
+          "workers.project_id as project_id",
+          "projects.name as project_name",
+          "workers.status as status",
+          "workers.current_task_id as current_task_id",
+          "workers.last_active_at as last_active_at",
+        ])
+        .where("workers.vm_id", "=", id)
+        .where("workers.status", "not in", ["archived", "failed"])
+        .orderBy("workers.created_at", "asc")
+        .execute(),
+      this.db.selectFrom("tasks").select(["updated_at"]).where("vm_id", "=", id).execute(),
+      this.db
+        .selectFrom("vm_leases")
+        .select(["id", "owner", "expires_at"])
         .where("vm_id", "=", id)
-        .where("status", "in", ACTIVE_TASK_STATUSES)
-        .orderBy("priority", "desc")
-        .orderBy("created_at", "asc")
-        .limit(1)
         .executeTakeFirst(),
       directoryStats(vm.storageRoot).catch(() => ({ bytes: 0, files: 0 })),
     ]);
+    const boundProjects = bindings.map((binding) => ({
+      id: binding.id,
+      name: binding.name,
+      isPrimary: binding.is_primary === 1,
+      archivedAt: binding.archived_at,
+    }));
+    const queued = taskRows.filter((task) => task.status === "queued");
+    const queue: VmQueueItem[] = taskRows.map((task) => ({
+      taskId: task.id,
+      projectId: task.project_id,
+      projectName: task.project_name,
+      objective: task.objective,
+      status: task.status as VmQueueItem["status"],
+      priority: task.priority,
+      queuePosition:
+        task.status === "queued"
+          ? queued.findIndex((candidate) => candidate.id === task.id) + 1
+          : null,
+      createdAt: task.created_at,
+    }));
+    const activeWorkers: VmActiveWorkerView[] = workerRows.map((worker) => ({
+      workerId: worker.id,
+      projectId: worker.project_id,
+      projectName: worker.project_name,
+      status: worker.status as VmActiveWorkerView["status"],
+      currentTaskId: worker.current_task_id,
+      lastActiveAt: worker.last_active_at,
+    }));
+    const sharing: VmSharingView = {
+      shared: boundProjects.length > 1,
+      projectCount: boundProjects.length,
+      projects: boundProjects,
+      warning:
+        boundProjects.length > 1
+          ? `共享 VM：${boundProjects.map((project) => project.name).join("、")} 共用桌面、软件和系统状态；整机快照与系统级变更会影响全部绑定项目。`
+          : null,
+    };
+    const scheduling = this.schedulingView({
+      vm,
+      report,
+      queue,
+      allTaskTimes: allTaskTimes.map((row) => row.updated_at),
+      activeWorkers,
+      leaseExpiresAt: lease?.expires_at ?? null,
+    });
+    const current = taskRows[0];
     return {
       vm,
       runtime,
       diskUsageBytes: usage.bytes,
-      boundProjects: bindings.map((binding) => ({
-        id: binding.id,
-        name: binding.name,
-        isPrimary: binding.is_primary === 1,
-        archivedAt: binding.archived_at,
-      })),
-      currentTask: task
+      boundProjects,
+      currentTask: current
         ? {
-            id: task.id,
-            objective: task.objective,
-            status: toTaskRecord(task).status,
+            id: current.id,
+            objective: current.objective,
+            status: current.status as NonNullable<VmInstanceView["currentTask"]>["status"],
           }
         : null,
+      queue,
+      activeWorkers,
+      sharing,
+      scheduling,
+    };
+  }
+
+  private schedulingView(input: {
+    vm: ReturnType<typeof toVmInstanceRecord>;
+    report: ResourceReport | null;
+    queue: VmQueueItem[];
+    allTaskTimes: string[];
+    activeWorkers: VmActiveWorkerView[];
+    leaseExpiresAt: string | null;
+  }): VmSchedulingView {
+    const report = input.report;
+    const power = input.vm.powerState;
+    const startable = power === "stopped" || power === "suspended";
+    const waitingCount = input.queue.filter(
+      (item) => item.status === "waiting_vm" || item.status === "waiting_resources",
+    ).length;
+    let canAutoStart = false;
+    let blockedReason: string | null = null;
+    if (report && report.autoStartPolicy === "when_needed" && startable && waitingCount > 0) {
+      const decision = autoStartDecision({
+        requiredBytes: input.vm.memoryBytes,
+        allocatedBytes: report.allocatedMemoryBytes,
+        budgetBytes: report.effectiveBudgetBytes,
+        freeMemoryBytes: report.freeMemoryBytes,
+        hostReserveBytes: report.hostReserveBytes,
+      });
+      canAutoStart = decision.canStart;
+      blockedReason = decision.reason;
+    }
+    const blockers: string[] = [];
+    if (input.queue.length > 0) blockers.push("active_tasks");
+    if (input.activeWorkers.some((worker) => isSuspendBlockingWorkerStatus(worker.status))) {
+      blockers.push("worker_connected");
+    }
+    if (input.leaseExpiresAt && Date.parse(input.leaseExpiresAt) > Date.now()) {
+      blockers.push("execution_lease");
+    }
+    const idleSince = new Date(
+      Date.parse(
+        maxIsoTimestamp([
+          input.vm.lastStartedAt ?? input.vm.createdAt,
+          ...input.allTaskTimes,
+          ...input.activeWorkers.map((worker) => worker.lastActiveAt),
+        ]) ?? input.vm.createdAt,
+      ),
+    );
+    const idleSuspendEligibleAt = report?.idleSuspendEnabled
+      ? new Date(idleSince.getTime() + report.idleSuspendTimeoutMs).toISOString()
+      : null;
+    const warnings: string[] = [];
+    if (report && startable && input.vm.memoryBytes > report.remainingBudgetBytes) {
+      warnings.push("手动启动会超出 Soft Memory Budget；允许手动启动，但可能造成宿主机卡顿。");
+    }
+    return {
+      autoStartPolicy: report?.autoStartPolicy ?? "manual",
+      canAutoStart,
+      blockedReason,
+      idleSuspendEnabled: report?.idleSuspendEnabled ?? false,
+      idleSuspendEligibleAt,
+      idleSuspendBlockers: blockers,
+      warnings,
     };
   }
 }

@@ -17,6 +17,7 @@ import { CuaPolicyService } from "../computer-use/cua-policy.service";
 import { CuaTokenService } from "../computer-use/cua-token.service";
 import { SettingsService } from "../settings/settings.service";
 import type { GuestService } from "../vms/guest.service";
+import { CatalogRepository } from "../persistence/repositories/catalog-repository";
 import { LeaseRepository } from "../persistence/repositories/lease-repository";
 import { OutboxRepository } from "../persistence/repositories/outbox-repository";
 import { TaskRepository } from "../persistence/repositories/task-repository";
@@ -604,6 +605,23 @@ describe("WorkerRuntimeService", () => {
       vmId: harness.ctx.vmId,
     });
     await harness.service.archive(created.worker.id);
+    const catalog = new CatalogRepository(harness.ctx.app.db);
+    const other = await catalog.createProject({ name: "Shared VM neighbour" });
+    await catalog.bindVm({
+      projectId: other.id,
+      vmId: harness.ctx.vmId,
+      guestWorkspacePath: "/home/worker/neighbour",
+      isPrimary: true,
+    });
+    await harness.ctx.app.db
+      .insertInto("project_activities")
+      .values({
+        project_id: other.id,
+        type: "task.status_changed",
+        payload_json: "{}",
+        created_at: new Date(Date.now() + 5_000).toISOString(),
+      })
+      .execute();
     harness.connection.resumeError = new Error(
       "Incompatible Worker Engine/Session version 1.5.1/1",
     );
@@ -611,6 +629,13 @@ describe("WorkerRuntimeService", () => {
     const resumed = await harness.service.resume(created.worker.id, { mode: "auto" });
     expect(resumed.restoreMode).toBe("summary");
     expect(resumed.notice).toContain("原生会话恢复失败");
+    expect(resumed.context.environment.sharedVm).toBe(true);
+    expect(resumed.context.environment.sharedProjects.map((project) => project.name)).toEqual([
+      "Shared VM neighbour",
+    ]);
+    expect(resumed.context.environment.changesSinceArchive.join("\n")).toContain(
+      "Shared VM neighbour",
+    );
     expect(harness.connection.startSessionCalls).toBe(startsBefore + 1);
     expect(harness.connection.specs.at(-1)?.systemPrompt).toContain(
       "Archived Worker session summary",

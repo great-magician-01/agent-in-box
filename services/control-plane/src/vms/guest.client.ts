@@ -1,5 +1,10 @@
-import { lstat, readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { createReadStream, createWriteStream } from "node:fs";
+import { lstat, readFile, stat, unlink } from "node:fs/promises";
 import path from "node:path";
+import { Readable, Transform } from "node:stream";
+import type { ReadableStream as NodeReadableStream } from "node:stream/web";
+import { pipeline } from "node:stream/promises";
 import { Inject, Injectable, Optional } from "@nestjs/common";
 import type {
   GuestActionResult,
@@ -16,6 +21,9 @@ import { GUEST_PROTOCOL_VERSION } from "@agent-in-box/protocol";
 import { PersistenceError } from "../persistence/errors";
 
 export const GUEST_CLIENT_OPTIONS = Symbol("AGENT_IN_BOX_GUEST_CLIENT_OPTIONS");
+
+/** Mirrors the Guest Agent workspace archive cap; larger workspaces need a host-side backup. */
+export const MAX_WORKSPACE_ARCHIVE_BYTES = 512 * 1024 * 1024;
 
 export interface GuestClientOptions {
   fetchImpl?: typeof fetch;
@@ -117,6 +125,112 @@ export class GuestClient {
     return result;
   }
 
+  /**
+   * Streams a Guest workspace tar.gz to the host and verifies its SHA-256.
+   * The destination must be a new file; callers own its directory.
+   */
+  async downloadWorkspace(
+    target: GuestTarget,
+    workspacePath: string,
+    destination: string,
+  ): Promise<{ sha256: string; sizeBytes: number; fileCount: number }> {
+    const response = await this.sendRaw(
+      target,
+      "GET",
+      `/v1/workspace/archive?path=${encodeURIComponent(workspacePath)}`,
+      undefined,
+      undefined,
+      15 * 60_000,
+    );
+    const expectedSha = response.headers.get("x-agent-in-box-sha256") ?? "";
+    const declaredSize = Number(response.headers.get("content-length"));
+    if (Number.isFinite(declaredSize) && declaredSize > MAX_WORKSPACE_ARCHIVE_BYTES) {
+      throw new PersistenceError("unavailable", "Guest workspace archive 超过大小限制");
+    }
+    const body = response.body;
+    if (!body) throw new PersistenceError("unavailable", "Guest Agent 未返回 workspace archive");
+    const hash = createHash("sha256");
+    let sizeBytes = 0;
+    const counter = new Transform({
+      transform(chunk: Buffer | Uint8Array, _encoding, callback) {
+        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        sizeBytes += buffer.byteLength;
+        if (sizeBytes > MAX_WORKSPACE_ARCHIVE_BYTES) {
+          callback(new PersistenceError("unavailable", "Guest workspace archive 超过大小限制"));
+          return;
+        }
+        hash.update(buffer);
+        callback(null, chunk);
+      },
+    });
+    try {
+      await pipeline(
+        Readable.fromWeb(body as unknown as NodeReadableStream),
+        counter,
+        createWriteStream(destination, { flags: "wx", mode: 0o600 }),
+      );
+    } catch (error) {
+      await unlink(destination).catch(() => undefined);
+      if (error instanceof PersistenceError) throw error;
+      throw new PersistenceError(
+        "unavailable",
+        `下载 Guest workspace archive 失败：${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    const sha256 = hash.digest("hex");
+    if (expectedSha && expectedSha !== sha256) {
+      await unlink(destination).catch(() => undefined);
+      throw new PersistenceError("unavailable", "Guest workspace archive SHA-256 校验失败");
+    }
+    const fileCount = Number(response.headers.get("x-agent-in-box-files"));
+    return {
+      sha256,
+      sizeBytes,
+      fileCount: Number.isFinite(fileCount) ? fileCount : 0,
+    };
+  }
+
+  /** Uploads a verified workspace tar.gz and lets the Guest Agent replace the directory. */
+  async restoreWorkspace(
+    target: GuestTarget,
+    workspacePath: string,
+    filePath: string,
+    sha256: string,
+  ): Promise<{ fileCount: number; sizeBytes: number }> {
+    const info = await stat(filePath).catch(() => null);
+    if (!info?.isFile() || info.size > MAX_WORKSPACE_ARCHIVE_BYTES) {
+      throw new PersistenceError("unavailable", "项目备份文件不存在或超过大小限制");
+    }
+    if (!/^[a-f0-9]{64}$/.test(sha256)) {
+      throw new PersistenceError("unavailable", "项目备份缺少有效的 SHA-256");
+    }
+    const response = await this.sendRaw(
+      target,
+      "POST",
+      `/v1/workspace/restore?path=${encodeURIComponent(workspacePath)}`,
+      Readable.toWeb(createReadStream(filePath)) as unknown as BodyInit,
+      {
+        "content-type": "application/gzip",
+        "content-length": String(info.size),
+        "x-agent-in-box-sha256": sha256,
+      },
+      15 * 60_000,
+    );
+    const bytes = await readLimited(response, 1024 * 1024);
+    try {
+      const result = JSON.parse(Buffer.from(bytes).toString("utf8")) as {
+        fileCount?: unknown;
+        sizeBytes?: unknown;
+      };
+      return {
+        fileCount: typeof result.fileCount === "number" ? result.fileCount : 0,
+        sizeBytes: typeof result.sizeBytes === "number" ? result.sizeBytes : 0,
+      };
+    } catch {
+      throw new PersistenceError("unavailable", "Guest Agent 返回了无效的 workspace 恢复结果");
+    }
+  }
+
   private async request<T>(target: GuestTarget, route: string, body?: unknown): Promise<T> {
     const response = await this.send(target, body === undefined ? "GET" : "POST", route, body);
     const bytes = await readLimited(response, 2 * 1024 * 1024);
@@ -127,11 +241,29 @@ export class GuestClient {
     }
   }
 
-  private async send(
+  private send(
     target: GuestTarget,
     method: "GET" | "POST",
     route: string,
     body?: unknown,
+  ): Promise<Response> {
+    return this.sendRaw(
+      target,
+      method,
+      route,
+      body === undefined ? undefined : JSON.stringify(body),
+      body === undefined ? undefined : { "content-type": "application/json" },
+      Math.min(this.timeoutMs, 60_000),
+    );
+  }
+
+  private async sendRaw(
+    target: GuestTarget,
+    method: "GET" | "POST",
+    route: string,
+    body: BodyInit | undefined,
+    extraHeaders: Record<string, string> | undefined,
+    timeoutMs: number,
   ): Promise<Response> {
     if (!Number.isInteger(target.hostPort) || target.hostPort < 1 || target.hostPort > 65535) {
       throw new PersistenceError("unavailable", "VM 没有有效的 Guest Agent 回环端口");
@@ -145,12 +277,13 @@ export class GuestClient {
         headers: {
           accept: "application/json",
           authorization: `Bearer ${token}`,
-          ...(body !== undefined ? { "content-type": "application/json" } : {}),
+          ...(extraHeaders ?? {}),
         },
-        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+        ...(body !== undefined ? { body } : {}),
+        ...(body !== undefined && isNodeStreamBody(body) ? { duplex: "half" } : {}),
         redirect: "error",
-        signal: AbortSignal.timeout(Math.min(this.timeoutMs, 60_000)),
-      });
+        signal: AbortSignal.timeout(timeoutMs),
+      } as RequestInit);
     } catch (error) {
       throw new PersistenceError(
         "unavailable",
@@ -172,6 +305,14 @@ export class GuestClient {
     }
     return response;
   }
+}
+
+function isNodeStreamBody(body: BodyInit): boolean {
+  return (
+    typeof body === "object" &&
+    body !== null &&
+    typeof (body as { getReader?: unknown }).getReader === "function"
+  );
 }
 
 async function readToken(preferred: string, fallback: string | undefined): Promise<string> {

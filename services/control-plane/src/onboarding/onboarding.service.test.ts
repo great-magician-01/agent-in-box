@@ -206,7 +206,10 @@ describe("onboarding", () => {
 
     expect(state.resourcePolicy).toEqual({
       hostReserveBytes: 3 * GIB,
+      softMemoryBudgetBytes: 0,
       autoStartPolicy: "when_needed",
+      idleSuspendEnabled: false,
+      idleSuspendTimeoutMs: 60 * 60_000,
     });
     expect(state.security.requireApprovalForSensitiveActions).toBe(false);
   });

@@ -120,6 +120,46 @@ describe("ProjectService", () => {
     await expect(projects.get(project.project.id)).rejects.toThrow("项目不存在");
   });
 
+  it("blocks project deletion when Worker history still depends on it", async () => {
+    const project = await projects.create({ name: "Worker history project" });
+    await projects.bind(project.project.id, {
+      vmId: ctx.vmId,
+      guestWorkspacePath: "/home/worker/history",
+    });
+    const now = new Date().toISOString();
+    await ctx.app.db
+      .insertInto("workers")
+      .values({
+        id: "history-worker",
+        project_id: project.project.id,
+        vm_id: ctx.vmId,
+        conversation_id: ctx.conversationId,
+        engine_type: "pi-rpc",
+        engine_version: "1.5.1",
+        status: "archived",
+        current_task_id: null,
+        capability_set: "[]",
+        created_at: now,
+        last_active_at: now,
+        archived_at: now,
+        agent_session_ref: null,
+        session_version: null,
+        last_heartbeat_at: null,
+        archive_summary: null,
+        last_error_code: null,
+        last_error_message: null,
+        broker_token_id: null,
+        provider_id: null,
+        model_id: null,
+      })
+      .execute();
+    await expect(projects.delete(project.project.id)).rejects.toMatchObject({
+      code: "conflict",
+      details: { dependencies: { workers: true } },
+    });
+    expect(await catalog.getVm(ctx.vmId)).toBeDefined();
+  });
+
   it("archives only inactive projects and prevents changes while archived", async () => {
     const tasks = new TaskService(
       ctx.app.db,

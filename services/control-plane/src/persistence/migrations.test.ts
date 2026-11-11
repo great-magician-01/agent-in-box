@@ -38,6 +38,13 @@ describe("database migrations", () => {
         "app_settings",
         "local_users",
         "storage_migrations",
+        "worker_archives",
+        "worker_resume_contexts",
+        "worker_inputs",
+        "router_sessions",
+        "vm_snapshots",
+        "project_backups",
+        "project_backup_bindings",
       ]),
     );
   });

@@ -14,19 +14,27 @@ import {
 } from "@agent-in-box/protocol";
 import { PersistenceError } from "../persistence/errors";
 import { TaskService } from "../persistence/services/task-service";
+import { ResourceManagerService } from "../resources/resource-manager.service";
 
 @Controller("/api/v1/tasks")
 export class TaskController {
-  constructor(private readonly tasks: TaskService) {}
+  constructor(
+    private readonly tasks: TaskService,
+    private readonly resources: ResourceManagerService,
+  ) {}
 
   @Get("board")
-  board(
+  async board(
     @Query("projectId") projectId?: string,
     @Query("vmId") vmId?: string,
     @Query("workerId") workerId?: string,
     @Query("status") status?: string,
   ): Promise<TaskBoardSnapshot> {
-    return this.tasks.board(parseFilters(projectId, vmId, workerId, status));
+    const [board, resources] = await Promise.all([
+      this.tasks.board(parseFilters(projectId, vmId, workerId, status)),
+      this.resources.report(),
+    ]);
+    return { ...board, resources };
   }
 
   @Get()

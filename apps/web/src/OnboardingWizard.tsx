@@ -285,7 +285,10 @@ export function OnboardingWizard({
         dataRoot: validation?.resolvedPath ?? dataRoot,
         resourcePolicy: {
           hostReserveBytes,
+          softMemoryBudgetBytes: 0,
           autoStartPolicy,
+          idleSuspendEnabled: false,
+          idleSuspendTimeoutMs: 60 * 60_000,
         },
         security: {
           requireApprovalForSensitiveActions: requireApproval,

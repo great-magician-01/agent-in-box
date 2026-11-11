@@ -1,6 +1,6 @@
 # Agent-in-Box
 
-面向个人用户的本地 AI 虚拟机工作平台。当前仓库已完成 **开发计划阶段 1（工程骨架、协议和本地持久化）**、**阶段 2（Electron、本地服务与自定义存储）**、**阶段 3（镜像服务、VM 生命周期与管理 UI）**、**阶段 4（Guest Agent、noVNC 实时控制台与统一 Execution Lease）**、**阶段 5（项目、多 VM 绑定、持久任务队列与任务看板）**、**阶段 6（Pi Worker Runtime、Model Broker 与 Worker Engine Adapter）**、**阶段 7（完整 Computer Use 执行器、执行保护、Policy/Approval 与完成校验）** 和 **阶段 8（Router、Worker Registry 与归档）**。包含无特权 Electron 壳、控制平面进程监管、首次启动向导、自定义数据目录、可续传镜像服务、受 ACL 保护的 Go VM Supervisor、QEMU/WHPX 生命周期、认证 Guest 管理通道、AI/人工互斥桌面输入、跨项目串行的 VM 任务内核、认证 Guest Worker RPC、短期模型令牌、流式 Broker、Worker 心跳/归档/恢复、Host 侧 Computer Use Broker、动作/截图 Trace、人工审批、独立完成证据校验、可重建 Active Roster、可搜索 Archive Registry、自动空闲归档、原生/摘要恢复和只持有结构化工具的本地 Router。真实 QEMU/WHPX、Linux Golden Image、真实 Pi/模型任务评测和浏览器/Electron 人工交互验收仍按各阶段记录单独执行。
+面向个人用户的本地 AI 虚拟机工作平台。当前仓库已完成 **开发计划阶段 1（工程骨架、协议和本地持久化）**、**阶段 2（Electron、本地服务与自定义存储）**、**阶段 3（镜像服务、VM 生命周期与管理 UI）**、**阶段 4（Guest Agent、noVNC 实时控制台与统一 Execution Lease）**、**阶段 5（项目、多 VM 绑定、持久任务队列与任务看板）**、**阶段 6（Pi Worker Runtime、Model Broker 与 Worker Engine Adapter）**、**阶段 7（完整 Computer Use 执行器、执行保护、Policy/Approval 与完成校验）**、**阶段 8（Router、Worker Registry 与归档）** 和 **阶段 9（多 VM 资源调度、共享环境与多端状态同步）**。包含无特权 Electron 壳、控制平面进程监管、首次启动向导、自定义数据目录、可续传镜像服务、受 ACL 保护的 Go VM Supervisor、QEMU/WHPX 生命周期、认证 Guest 管理通道、AI/人工互斥桌面输入、跨项目串行的 VM 任务内核、认证 Guest Worker RPC、短期模型令牌、流式 Broker、Worker 心跳/归档/恢复、Host 侧 Computer Use Broker、动作/截图 Trace、人工审批、独立完成证据校验、可重建 Active Roster、可搜索 Archive Registry、自动空闲归档、原生/摘要恢复、只持有结构化工具的本地 Router、宿主内存软预算与 VM 自动启动/空闲休眠、共享 VM 整机快照影响确认、独立项目目录备份/恢复以及看板/VM/项目页统一状态快照。真实 QEMU/WHPX、Linux Golden Image、真实 Pi/模型任务评测和浏览器/Electron 人工交互验收仍按各阶段记录单独执行。
 
 完整方案见：
 
@@ -14,7 +14,18 @@
 - [阶段 6 验收记录](tests/phase6/summary.md)
 - [阶段 7 验收记录](tests/phase7/summary.md)
 - [阶段 8 验收记录](tests/phase8/summary.md)
+- [阶段 9 验收记录](tests/phase9/summary.md)
 - [Linux Guest Worker 安装资产](images/linux/README.md)
+
+## 阶段 9 已落地
+
+- **Resource Manager**：Host Reserve、Soft Memory Budget、运行 VM 分配和宿主可用内存统一报告；`when_needed` 策略自动启动/恢复 VM，资源不足时任务进入 `waiting_resources` 并写入 `resource.waiting_for_memory` 通知；手动启动允许超预算但界面提示。空闲休眠只作用于无活动任务、无活动 Worker、无 Execution Lease 的 VM，绝不自动停止有任务的 VM。
+- **共享 VM 保护**：项目绑定、VM 页和项目页明确展示共享的桌面/软件/系统状态；整机快照创建/恢复只允许 stopped VM，恢复前列出当前全部受影响项目并要求显式确认；项目级工作目录备份独立于整机快照，使用 Guest SHA-256 tar.gz 归档和原子目录替换，共享目录路径冲突会阻止恢复，避免静默覆盖其他项目。
+- **依赖检查**：项目删除检查任务、Worker 与归档历史；VM 删除检查项目绑定、任务、Worker/归档历史、项目备份引用和 Execution Lease，只删除无依赖的 stopped VM。
+- **恢复环境增量**：Worker 恢复上下文新增共享 VM 项目列表和离开期间的项目活动/任务变化摘要，首回合继续注入最新截图。
+- **多端状态同步**：任务看板包含资源预算、等待资源/VM 和每任务 VM 电源状态；VM 页显示队列、活跃 Worker、共享提示、调度阻塞和快照；项目页显示全部绑定、活跃 Worker 和队列深度；任务详情可跳转实时控制台和 Worker 会话。所有页面通过 WebSocket 失效通知或重连后的完整快照从数据库对账。
+
+详见 [`tests/phase9/summary.md`](tests/phase9/summary.md)。
 
 ## 阶段 8 已落地
 
@@ -277,6 +288,12 @@ SQLite 数据库位于数据根目录下的 `agent-in-box.sqlite`，使用 WAL �
 - Web 开发服务器可访问，`/api` 代理到控制平面正常
 - VM Supervisor 与 Guest Agent 的 `/healthz`、`/readyz` 正常
 
+### 阶段 9 验证（2026-11-11）
+
+- `pnpm smoke:phase9`：真实控制平面/SQLite/宿主内存计数、伪造 Supervisor/Guest Agent，10 项检查通过：阶段 9 迁移与资源报告、资源不足任务进入 waiting_resources、预算恢复后自动启动并回到队列、看板/VM/项目页状态一致、共享 VM 快照影响确认与恢复、项目目录备份校验/恢复且不触碰其他项目、VM/项目删除依赖检查、空闲休眠不停止有任务 VM、全量快照对账。
+- 资源调度、共享快照与项目备份的单元测试覆盖软预算阻塞、自动启动/恢复、空闲休眠阻塞条件、快照共享影响、项目备份共享目录冲突和删除依赖。
+- `realQemuWxpx=false`、`realLinuxGuest=false`、`realWorkerPi=false`、`realRouterPi=false`、`realModel=false`、`browserElectronUi=false`；真实 QEMU 快照、真实 Guest workspace 归档和人工 UI 仍待显式验收。详细证据见 [`tests/phase9/summary.md`](tests/phase9/summary.md)。
+
 ### 阶段 8 验证（2026-11-11）
 
 - `pnpm smoke:phase8`：真实控制平面/SQLite、HTTP Router Tool Broker、Worker RPC 和伪造 Guest Agent/Router Pi，10 项检查通过：阶段 8 迁移、Router 工具面、Router 查询已有 Worker 后分派、取消→Abort、归档/Active Roster/Archive Registry、同版本 Native Resume 与截图注入、归档后 Router 检索并创建后续任务、重启后 Router 会话恢复与任务分配查询、Outbox/恢复上下文持久化。
@@ -401,6 +418,9 @@ SQLite 数据库位于数据根目录下的 `agent-in-box.sqlite`，使用 WAL �
 - Worker Registry/Active Roster、Archive Registry 检索、自动空闲归档和阻塞条件
 - Router 主会话：宿主 Pi、短期 Router 模型/工具令牌、结构化任务/Worker/看板/归档工具与工具调用审计
 - 原生会话恢复、版本不兼容时的摘要语义恢复、恢复截图/环境变化注入和归档后新建 Worker
+- Resource Manager：宿主内存计数、Soft Memory Budget、自动启动/恢复、`waiting_resources`、空闲休眠和资源通知
+- 共享 VM 整机快照影响预览/确认、独立项目目录 tar.gz 备份与恢复、VM/项目删除依赖检查
+- 看板/VM/项目页统一资源与队列快照、任务跳转实时控制台和 Worker 会话、Worker 恢复环境增量摘要
 
 明确未实现或未在本环境验证：
 
@@ -415,5 +435,9 @@ SQLite 数据库位于数据根目录下的 `agent-in-box.sqlite`，使用 WAL �
 - Wayland 与 Windows Guest 的截图/输入路径
 - 真实 Router Pi 模型决策质量、长会话压缩和真实 Provider 工具调用回归；当前 Smoke 使用测试 Router Pi
 - 真实飞书/QQ 应用凭据验收；本地长连接框架和 mock 协议测试已完成
+- 真实 QEMU `qemu-img snapshot`、真实 Guest workspace tar.gz 归档/恢复和真实共享 VM 并发回归；阶段 9 Smoke 使用协议替身
+- 项目工作目录备份遇到符号链接或特殊文件会拒绝而不是静默跳过；多 VM 绑定的项目恢复不是跨 VM 原子操作
+- 资源调度只约束宿主内存软预算，不控制 CPU/磁盘 IO；手动启动允许突破预算
+- Worker 恢复环境增量来自已落库的项目活动/任务，不包含未落库的 Guest 桌面瞬时变化
 
-阶段 0～8 的代码主链路已完成。下一步按 [开发计划](docs/03-development-plan.md) 进入阶段 9：多 VM 资源调度、共享环境完善和多端状态同步；同时继续跟踪真实 QEMU/WHPX + noVNC 回归、真实 Pi/模型 Computer Use 与 Router 评测、Windows NSIS 干净安装和长时稳定性门槛。
+阶段 0～9 的代码主链路已完成。下一步按 [开发计划](docs/03-development-plan.md) 进入阶段 10：飞书和 QQ 本地机器人；同时继续跟踪真实 QEMU/WHPX + noVNC 回归、真实 Pi/模型 Computer Use 与 Router 评测、Windows NSIS 干净安装和长时稳定性门槛。

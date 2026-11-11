@@ -399,6 +399,8 @@ blocked → queued（用户明确恢复或重试）
 
 自动任务资源不足时进入 `waiting_resources`。系统不得擅自停止有运行任务的 VM。用户手动启动可以突破建议值，但界面应提示宿主机卡顿风险。
 
+**阶段 9 实现状态（2026-11-11）**：控制平面 `ResourceManagerService` 从 SQLite 和 `os.totalmem()/freemem()` 重建资源报告，`GET /api/v1/resources` 返回预算、运行 VM 分配、等待任务和自动启动阻塞；后台 tick 与 `POST /api/v1/resources/reconcile` 共用调度。`when_needed` 按 Soft Memory Budget 自动 start/resume，资源不足将 `waiting_vm` 转为 `waiting_resources` 并写 Outbox；手动启动可突破预算但 VM 视图返回告警。空闲休眠要求无活动任务、无 attached Worker 且无未过期 Lease，活动时间取 VM 启动时间、任务更新时间与 Worker 心跳的最大值。仅约束内存，不调度 CPU/磁盘 IO；真实宿主内存计数语义仍需环境调参。
+
 ### 6.4 Worker 生命周期
 
 ```text
@@ -501,6 +503,8 @@ Linux Guest 的默认 Provider 在技术验证后确定，不在验证前写死�
 ### 8.4 共享 VM 快照限制
 
 整机 Snapshot 是 VM 级操作，影响全部绑定项目。项目级备份必须独立实现，不能通过恢复共享 VM 来回滚单项目。
+
+**阶段 9 实现状态（2026-11-11）**：`vm_snapshots` 记录整机快照和创建时绑定项目；影响预览返回当前全部受影响项目、活动任务和最近活动，共享快照恢复要求 `confirmSharedImpact=true`，且 VM 必须 stopped、无活动任务和 Lease。项目备份使用 `project_backups`/`project_backup_bindings` 保存每个项目绑定目录的 tar.gz、SHA-256、文件数和产物引用快照；Guest Agent 的 workspace archive/restore 仅允许配置根目录，拒绝符号链接、特殊文件和路径逃逸，restore 使用 staging + rename。恢复遇到目录被其他项目共享、绑定变化、VM 停止或活动任务时会阻止；多绑定恢复不是跨 VM 原子操作。项目/VM 删除均执行显式依赖检查。
 
 ## 9. Guest Agent 与 Computer Use
 

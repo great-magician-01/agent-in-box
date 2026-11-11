@@ -41,6 +41,13 @@ func splitVerifyRoots(value string) []string {
 	return roots
 }
 
+func defaultWorkspaceRoots() string {
+	if value := strings.TrimSpace(os.Getenv("AGENT_IN_BOX_WORKSPACE_ROOTS")); value != "" {
+		return value
+	}
+	return "/home:/tmp"
+}
+
 func defaultUpdateDir() string {
 	if configDir, err := os.UserConfigDir(); err == nil && strings.TrimSpace(configDir) != "" {
 		return filepath.Join(configDir, "agent-in-box", "guest-agent", "updates")
@@ -56,6 +63,8 @@ func main() {
 	updateDir := flag.String("update-dir", defaultUpdateDir(), "directory for verified staged updates; empty disables update staging")
 	maxUpdateBytes := flag.Int64("update-max-bytes", 128<<20, "largest guest-agent update that may be staged")
 	verifyRoots := flag.String("verify-roots", defaultVerifyRoots(), "colon-separated absolute guest roots allowed for read-only completion file evidence")
+	workspaceRoots := flag.String("workspace-roots", defaultWorkspaceRoots(), "colon-separated absolute guest roots allowed for project workspace archive and restore")
+	maxWorkspaceArchiveBytes := flag.Int64("workspace-max-bytes", 512<<20, "largest workspace archive accepted or produced (capped at 512 MiB)")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
@@ -80,15 +89,17 @@ func main() {
 
 	healthHandler := health.NewHandler("guest-agent", version)
 	rpc := guestagent.NewServerWithOptions(guestagent.ServerOptions{
-		Token:          token,
-		TokenFile:      *tokenFile,
-		AgentVersion:   version,
-		Desktop:        desktop,
-		Logger:         logger,
-		ActionTimeout:  *actionTimeout,
-		UpdateDir:      *updateDir,
-		MaxUpdateBytes: *maxUpdateBytes,
-		VerifyRoots:    splitVerifyRoots(*verifyRoots),
+		Token:                    token,
+		TokenFile:                *tokenFile,
+		AgentVersion:             version,
+		Desktop:                  desktop,
+		Logger:                   logger,
+		ActionTimeout:            *actionTimeout,
+		UpdateDir:                *updateDir,
+		MaxUpdateBytes:           *maxUpdateBytes,
+		VerifyRoots:              splitVerifyRoots(*verifyRoots),
+		WorkspaceRoots:           splitVerifyRoots(*workspaceRoots),
+		MaxWorkspaceArchiveBytes: *maxWorkspaceArchiveBytes,
 	})
 	mux := http.NewServeMux()
 	mux.Handle("/healthz", healthHandler)

@@ -8,13 +8,18 @@ import type {
   TaskStreamState,
 } from "@agent-in-box/protocol";
 import { api, subscribeTaskEvents } from "./api";
+import { ProjectBackupPanel } from "./ProjectBackupPanel";
 import { ProjectManager } from "./ProjectManager";
 import { RouterPanel } from "./RouterPanel";
 import { TaskBoard } from "./TaskBoard";
 import { WorkerPanel } from "./WorkerPanel";
 import { WorkerRegistryPanel } from "./WorkerRegistryPanel";
 
-export function WorkManager(): React.JSX.Element {
+interface WorkManagerProps {
+  onOpenVmConsole?(vmId: string): void;
+}
+
+export function WorkManager({ onOpenVmConsole }: WorkManagerProps = {}): React.JSX.Element {
   const [projects, setProjects] = useState<ProjectView[]>([]);
   const [board, setBoard] = useState<TaskBoardSnapshot | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
@@ -26,6 +31,7 @@ export function WorkManager(): React.JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
   const [focusedConversationId, setFocusedConversationId] = useState<string | null>(null);
+  const [focusedWorkerId, setFocusedWorkerId] = useState<string | null>(null);
   const selectedProjectRef = useRef<string | null>(null);
   const inFlightRef = useRef(false);
   const queuedRefreshRef = useRef(false);
@@ -135,6 +141,19 @@ export function WorkManager(): React.JSX.Element {
     setFocusedConversationId(conversationId);
   }, []);
 
+  const openWorker = useCallback((projectId: string, workerId: string) => {
+    const changed = selectedProjectRef.current !== projectId;
+    selectedProjectRef.current = projectId;
+    setSelectedProjectId(projectId);
+    if (changed) setProjectDetail(null);
+    setFocusedWorkerId(workerId);
+  }, []);
+
+  useEffect(() => {
+    if (!focusedWorkerId || !selectedDetail) return;
+    document.getElementById("worker-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [focusedWorkerId, selectedDetail]);
+
   return (
     <section className="panel work-manager" aria-labelledby="work-manager-title">
       <div className="panel-heading">
@@ -167,11 +186,19 @@ export function WorkManager(): React.JSX.Element {
             onChanged={() => load(true)}
           />
           {selectedDetail && selectedDetail.project.archivedAt === null && (
-            <WorkerPanel
-              project={selectedDetail}
-              revision={revision}
-              onChanged={() => load(true)}
-            />
+            <>
+              <ProjectBackupPanel
+                project={selectedDetail}
+                revision={revision}
+                onChanged={() => load(true)}
+              />
+              <WorkerPanel
+                project={selectedDetail}
+                revision={revision}
+                focusWorkerId={focusedWorkerId}
+                onChanged={() => load(true)}
+              />
+            </>
           )}
           <TaskBoard
             board={board}
@@ -182,6 +209,8 @@ export function WorkManager(): React.JSX.Element {
             onSelectTask={setSelectedTaskId}
             onSelectProject={selectProject}
             onOpenConversation={openConversation}
+            onOpenWorker={openWorker}
+            {...(onOpenVmConsole ? { onOpenVmConsole } : {})}
             onChanged={() => load(true)}
           />
           <WorkerRegistryPanel revision={revision} onChanged={() => load(true)} />

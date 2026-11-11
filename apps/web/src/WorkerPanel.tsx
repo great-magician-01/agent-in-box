@@ -12,10 +12,16 @@ import { api } from "./api";
 interface WorkerPanelProps {
   project: ProjectDetail;
   revision: number;
+  focusWorkerId?: string | null;
   onChanged(): void;
 }
 
-export function WorkerPanel({ project, revision, onChanged }: WorkerPanelProps): React.JSX.Element {
+export function WorkerPanel({
+  project,
+  revision,
+  focusWorkerId,
+  onChanged,
+}: WorkerPanelProps): React.JSX.Element {
   const [workers, setWorkers] = useState<WorkerView[]>([]);
   const [selectedWorkerId, setSelectedWorkerId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ConversationMessageRecord[]>([]);
@@ -84,6 +90,13 @@ export function WorkerPanel({ project, revision, onChanged }: WorkerPanelProps):
       active = false;
     };
   }, [projectId, revision]);
+
+  useEffect(() => {
+    if (!focusWorkerId) return;
+    setSelectedWorkerId((current) =>
+      workers.some((item) => item.worker.id === focusWorkerId) ? focusWorkerId : current,
+    );
+  }, [focusWorkerId, workers]);
 
   useEffect(() => {
     if (!selectedWorkerId) {
@@ -188,7 +201,7 @@ export function WorkerPanel({ project, revision, onChanged }: WorkerPanelProps):
   }
 
   return (
-    <section className="worker-panel" aria-labelledby="worker-panel-title">
+    <section id="worker-panel" className="worker-panel" aria-labelledby="worker-panel-title">
       <div className="panel-heading">
         <div>
           <p className="eyebrow">PI WORKER / MODEL BROKER</p>

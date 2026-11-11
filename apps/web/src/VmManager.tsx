@@ -6,13 +6,23 @@ import type {
   ImageCatalog,
   ImageRecord,
   ImageStatus,
+  ResourceReport,
+  TaskStreamState,
   VmConsoleSession,
   VmCreateRequest,
   VmInstanceView,
   VmListResponse,
   VmPowerState,
+  VmSnapshotImpact,
+  VmSnapshotRecord,
 } from "@agent-in-box/protocol";
-import { api, ApiRequestError, subscribeImageEvents, type ImageEventStreamState } from "./api";
+import {
+  api,
+  ApiRequestError,
+  subscribeImageEvents,
+  subscribeTaskEvents,
+  type ImageEventStreamState,
+} from "./api";
 import { VmConsole } from "./VmConsole";
 import {
   GUEST_HEALTH_LABELS,
@@ -25,26 +35,44 @@ import {
 
 const GIB = 1024 * 1024 * 1024;
 
-type VmAction = "start" | "stop" | "suspend" | "resume" | "console";
+type VmAction = "start" | "stop" | "suspend" | "resume" | "console" | "delete";
 
 interface Feedback {
   kind: "ok" | "error";
   text: string;
 }
 
+export interface ConsoleRequest {
+  vmId: string;
+  nonce: number;
+}
+
 export interface VmManagerProps {
   host: HostInspectionReport | null;
   hostReserveBytes: number;
+  consoleRequest?: ConsoleRequest | null;
 }
 
-export function VmManager({ host, hostReserveBytes }: VmManagerProps): React.JSX.Element {
+export function VmManager({
+  host,
+  hostReserveBytes,
+  consoleRequest,
+}: VmManagerProps): React.JSX.Element {
   const [catalog, setCatalog] = useState<ImageCatalog | null>(null);
   const [vms, setVms] = useState<VmListResponse | null>(null);
+  const [resources, setResources] = useState<ResourceReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [streamState, setStreamState] = useState<ImageEventStreamState>("reconnecting");
+  const [taskStreamState, setTaskStreamState] = useState<TaskStreamState>("reconnecting");
+  const [snapshots, setSnapshots] = useState<Record<string, VmSnapshotRecord[]>>({});
+  const [snapshotLabel, setSnapshotLabel] = useState<Record<string, string>>({});
+  const [snapshotBusy, setSnapshotBusy] = useState<Record<string, boolean>>({});
+  const [restoreImpact, setRestoreImpact] = useState<VmSnapshotImpact | null>(null);
+  const [restoreAcknowledged, setRestoreAcknowledged] = useState(false);
+  const lastConsoleNonce = useRef(0);
 
   const [downloadTotals, setDownloadTotals] = useState<Record<string, number>>({});
   const [downloadBusy, setDownloadBusy] = useState<Record<string, boolean>>({});
@@ -86,12 +114,27 @@ export function VmManager({ host, hostReserveBytes }: VmManagerProps): React.JSX
       setLoading(true);
     }
     try {
-      const [nextCatalog, nextVms] = await Promise.all([api.images(), api.vms()]);
+      const [nextCatalog, nextVms, nextResources] = await Promise.all([
+        api.images(),
+        api.vms(),
+        api.resources().catch(() => null),
+      ]);
+      if (!mountedRef.current) {
+        return;
+      }
+      const snapshotEntries = await Promise.all(
+        nextVms.items.map(async (view) => {
+          const list = await api.vmSnapshots(view.vm.id).catch(() => []);
+          return [view.vm.id, list] as const;
+        }),
+      );
       if (!mountedRef.current) {
         return;
       }
       setCatalog(nextCatalog);
       setVms(nextVms);
+      setResources(nextResources);
+      setSnapshots(Object.fromEntries(snapshotEntries));
       setLoadError(null);
     } catch (error) {
       if (mountedRef.current) {
@@ -143,8 +186,32 @@ export function VmManager({ host, hostReserveBytes }: VmManagerProps): React.JSX
     return unsubscribe;
   }, [load]);
 
+  useEffect(() => subscribeTaskEvents(() => void load(true), setTaskStreamState), [load]);
+
   const supervisorAvailable = vms?.supervisor.available ?? true;
   const supervisorMessage = vms?.supervisor.message ?? null;
+
+  useEffect(() => {
+    if (!consoleRequest || consoleRequest.nonce === lastConsoleNonce.current) return;
+    const view = (vms?.items ?? []).find((item) => item.vm.id === consoleRequest.vmId);
+    if (!view) return;
+    lastConsoleNonce.current = consoleRequest.nonce;
+    document
+      .getElementById(`vm-${view.vm.id}`)
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    const power = effectivePower(view);
+    if (supervisorAvailable && (power === "running" || power === "suspended")) {
+      void openConsole(view);
+    } else if (!supervisorAvailable || (power !== "running" && power !== "suspended")) {
+      setFeedback({
+        kind: "error",
+        text:
+          power === "stopped"
+            ? "目标 VM 已停止，启动后才能打开实时控制台。"
+            : "目标 VM 当前不可用，无法打开实时控制台。",
+      });
+    }
+  }, [consoleRequest, vms, supervisorAvailable]);
 
   const availableImages = useMemo(
     () =>
@@ -421,6 +488,93 @@ export function VmManager({ host, hostReserveBytes }: VmManagerProps): React.JSX
     }
   }
 
+  async function createSnapshot(view: VmInstanceView): Promise<void> {
+    const id = view.vm.id;
+    if (snapshotBusy[id]) return;
+    setSnapshotBusy((current) => ({ ...current, [id]: true }));
+    setFeedback(null);
+    const trimmedLabel = snapshotLabel[id]?.trim() ?? "";
+    try {
+      await api.createVmSnapshot(id, trimmedLabel ? { label: trimmedLabel } : {});
+      setSnapshotLabel((current) => withoutKey(current, id));
+      setFeedback({ kind: "ok", text: `已创建「${view.vm.name}」整机快照` });
+      await load(true);
+    } catch (error) {
+      setFeedback({ kind: "error", text: `创建快照失败：${errorMessage(error)}` });
+    } finally {
+      setSnapshotBusy((current) => withoutKey(current, id));
+    }
+  }
+
+  async function inspectSnapshotRestore(
+    view: VmInstanceView,
+    snapshot: VmSnapshotRecord,
+  ): Promise<void> {
+    setFeedback(null);
+    try {
+      const impact = await api.vmSnapshotImpact(view.vm.id, snapshot.id);
+      setRestoreImpact(impact);
+      setRestoreAcknowledged(false);
+      document
+        .getElementById("snapshot-restore-impact")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    } catch (error) {
+      setFeedback({ kind: "error", text: `读取快照影响失败：${errorMessage(error)}` });
+    }
+  }
+
+  async function confirmSnapshotRestore(): Promise<void> {
+    if (!restoreImpact || snapshotBusy[restoreImpact.vmId]) return;
+    if (restoreImpact.requiresConfirmation && !restoreAcknowledged) {
+      setFeedback({ kind: "error", text: "请先确认共享 VM 的受影响项目" });
+      return;
+    }
+    const id = restoreImpact.vmId;
+    setSnapshotBusy((current) => ({ ...current, [id]: true }));
+    try {
+      await api.restoreVmSnapshot(id, restoreImpact.snapshot.id, {
+        confirmSharedImpact: true,
+      });
+      setFeedback({
+        kind: "ok",
+        text: `已恢复整机快照「${restoreImpact.snapshot.label}」，受影响项目：${restoreImpact.affectedProjects
+          .map((project) => project.name)
+          .join("、")}`,
+      });
+      setRestoreImpact(null);
+      setRestoreAcknowledged(false);
+      await load(true);
+    } catch (error) {
+      setFeedback({ kind: "error", text: `恢复快照失败：${errorMessage(error)}` });
+    } finally {
+      setSnapshotBusy((current) => withoutKey(current, id));
+    }
+  }
+
+  async function deleteVm(view: VmInstanceView): Promise<void> {
+    if (
+      !window.confirm(
+        `删除「${view.vm.name}」会移除 VM 记录、覆盖盘和整机快照，且不可恢复。仅当 VM 已停止、没有项目绑定、任务或 Worker 历史时允许删除。确定继续吗？`,
+      )
+    ) {
+      return;
+    }
+    if (vmBusyRef.current.has(view.vm.id)) return;
+    vmBusyRef.current.add(view.vm.id);
+    setVmBusy((current) => ({ ...current, [view.vm.id]: "delete" }));
+    setFeedback(null);
+    try {
+      await api.deleteVm(view.vm.id);
+      setFeedback({ kind: "ok", text: `已删除 VM「${view.vm.name}」` });
+      await load(true);
+    } catch (error) {
+      setFeedback({ kind: "error", text: `删除 VM 失败：${errorMessage(error)}` });
+    } finally {
+      vmBusyRef.current.delete(view.vm.id);
+      setVmBusy((current) => withoutKey(current, view.vm.id));
+    }
+  }
+
   const cpuCount = parseInteger(cpuInput);
   const memoryGb = parseInteger(memoryInput);
   const diskGb = parseInteger(diskInput);
@@ -538,6 +692,11 @@ export function VmManager({ host, hostReserveBytes }: VmManagerProps): React.JSX
               自动刷新中 · 每 2 秒
             </span>
           )}
+          {taskStreamState === "reconnecting" && (
+            <span className="muted small" role="status">
+              任务事件重连中；恢复后完整同步
+            </span>
+          )}
           <button
             type="button"
             className="secondary"
@@ -587,6 +746,123 @@ export function VmManager({ host, hostReserveBytes }: VmManagerProps): React.JSX
             仅代表最后已知状态，不代表当前就绪。启动、停止、休眠、恢复与控制台已暂时禁用。
           </span>
         </div>
+      )}
+
+      {resources && (
+        <div className={`resource-banner pressure-${resources.pressure}`} role="status">
+          <div>
+            <strong>资源调度</strong>
+            <span className="muted small">
+              已分配 {formatBytes(resources.allocatedMemoryBytes)} / 预算{" "}
+              {formatBytes(resources.effectiveBudgetBytes)} · 宿主可用{" "}
+              {formatBytes(resources.freeMemoryBytes)}（保留{" "}
+              {formatBytes(resources.hostReserveBytes)}）
+            </span>
+          </div>
+          <div className="resource-badges">
+            <span className="pill">运行 {resources.runningVmCount}</span>
+            <span className="pill">休眠 {resources.suspendedVmCount}</span>
+            <span className={`pill ${resources.waitingResourceTaskCount > 0 ? "warn" : ""}`}>
+              等待资源 {resources.waitingResourceTaskCount}
+            </span>
+            <span className="pill">等待 VM {resources.waitingVmTaskCount}</span>
+            <span className="pill">排队 {resources.queuedTaskCount}</span>
+            <span className="pill">
+              {resources.autoStartPolicy === "when_needed" ? "有任务时自动启动" : "仅手动启动"}
+            </span>
+            <span className="pill">
+              {resources.idleSuspendEnabled
+                ? `空闲 ${Math.round(resources.idleSuspendTimeoutMs / 60_000)} 分钟休眠`
+                : "空闲不休眠"}
+            </span>
+          </div>
+          {resources.blockedAutoStarts.map((blocked) => (
+            <p key={blocked.vmId} className="warning-line small">
+              「{blocked.vmName}」等待自动启动：{blocked.reason}
+            </p>
+          ))}
+          {resources.pressure !== "ok" && (
+            <p className="warning-line small">
+              宿主内存压力偏高；系统不会停止有任务的 VM，请手动调整预算或结束任务。
+            </p>
+          )}
+        </div>
+      )}
+
+      {restoreImpact && (
+        <section id="snapshot-restore-impact" className="panel snapshot-impact" role="alertdialog">
+          <div className="panel-heading">
+            <h3>恢复整机快照：{restoreImpact.snapshot.label}</h3>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => {
+                setRestoreImpact(null);
+                setRestoreAcknowledged(false);
+              }}
+            >
+              取消
+            </button>
+          </div>
+          <p className="warning-line">{restoreImpact.warning}</p>
+          <p className="muted small">
+            快照时间：{new Date(restoreImpact.snapshot.createdAt).toLocaleString("zh-CN")} · VM
+            当前状态：
+            {VM_POWER_STATE_LABELS[restoreImpact.vmPowerState]} · 快照时绑定项目：
+            {restoreImpact.snapshot.affectedProjects.map((project) => project.name).join("、") ||
+              "无"}
+          </p>
+          {restoreImpact.bindingSetChanged && (
+            <p className="warning-line small">
+              快照创建后项目绑定发生了变化；恢复会影响当前全部绑定项目。
+            </p>
+          )}
+          <ul className="plain-list">
+            {restoreImpact.affectedProjects.map((project) => (
+              <li key={project.id}>
+                <strong>{project.name}</strong>
+                <span className="muted small">
+                  {project.archivedAt ? "（已归档）" : ""} · 活动任务 {project.activeTaskCount} ·
+                  最近活动{" "}
+                  {project.lastActivityAt
+                    ? new Date(project.lastActivityAt).toLocaleString("zh-CN")
+                    : "无记录"}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {restoreImpact.blocked && (
+            <div className="notice">
+              {restoreImpact.conflicts.map((conflict) => (
+                <p key={conflict.reason}>{conflict.message}</p>
+              ))}
+            </div>
+          )}
+          {restoreImpact.requiresConfirmation && !restoreImpact.blocked && (
+            <label className="toggle">
+              <input
+                type="checkbox"
+                checked={restoreAcknowledged}
+                onChange={(event) => setRestoreAcknowledged(event.target.checked)}
+              />
+              <span>
+                我确认恢复整机快照会影响上述全部 {restoreImpact.affectedProjects.length} 个项目。
+              </span>
+            </label>
+          )}
+          <button
+            type="button"
+            className="danger"
+            disabled={
+              restoreImpact.blocked ||
+              snapshotBusy[restoreImpact.vmId] ||
+              (restoreImpact.requiresConfirmation && !restoreAcknowledged)
+            }
+            onClick={() => void confirmSnapshotRestore()}
+          >
+            {snapshotBusy[restoreImpact.vmId] ? "恢复中…" : "恢复整机快照"}
+          </button>
+        </section>
       )}
 
       <div className="vm-subheading-row">
@@ -1029,12 +1305,146 @@ export function VmManager({ host, hostReserveBytes }: VmManagerProps): React.JSX
                   </div>
                 </dl>
 
-                {view.boundProjects.length > 1 && (
-                  <p className="shared-warning">
-                    共享 VM：{view.boundProjects.map((project) => project.name).join("、")}
-                    共用桌面、软件和系统状态；所有项目的任务在此 VM 上串行执行。
+                {view.sharing.warning && <p className="shared-warning">{view.sharing.warning}</p>}
+
+                <section className="vm-subsection">
+                  <h5>调度与队列</h5>
+                  <p className="muted small">
+                    {view.scheduling.autoStartPolicy === "when_needed"
+                      ? view.scheduling.canAutoStart
+                        ? "有等待任务时会按 Soft Memory Budget 自动启动。"
+                        : view.scheduling.blockedReason
+                          ? `当前不会自动启动：${view.scheduling.blockedReason}`
+                          : "没有等待启动的任务。"
+                      : "仅手动启动；等待任务不会自动拉起 VM。"}
+                    {view.scheduling.idleSuspendEnabled
+                      ? ` 空闲休眠：${
+                          view.scheduling.idleSuspendEligibleAt
+                            ? `最早 ${new Date(
+                                view.scheduling.idleSuspendEligibleAt,
+                              ).toLocaleString("zh-CN")}`
+                            : "已配置"
+                        }${
+                          view.scheduling.idleSuspendBlockers.length > 0
+                            ? `；当前阻塞：${view.scheduling.idleSuspendBlockers.join("、")}`
+                            : ""
+                        }。`
+                      : " 空闲不休眠。"}
                   </p>
-                )}
+                  {view.scheduling.warnings.map((warning) => (
+                    <p key={warning} className="warning-line small">
+                      {warning}
+                    </p>
+                  ))}
+                  {view.queue.length > 0 ? (
+                    <ul className="plain-list vm-queue-list">
+                      {view.queue.slice(0, 8).map((item) => (
+                        <li key={item.taskId}>
+                          <div>
+                            <strong>{item.projectName}</strong>
+                            <span className="muted small">
+                              {" "}
+                              · {TASK_STATUS_LABELS[item.status]}
+                            </span>
+                            {item.queuePosition !== null && (
+                              <span className="pill small">队列第 {item.queuePosition} 位</span>
+                            )}
+                            <span className="muted small"> {item.objective.slice(0, 100)}</span>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="muted small">当前没有排队或运行中的任务。</p>
+                  )}
+                  {view.activeWorkers.length > 0 && (
+                    <ul className="plain-list vm-worker-list">
+                      {view.activeWorkers.map((worker) => (
+                        <li key={worker.workerId}>
+                          <strong>{worker.projectName}</strong>
+                          <span className="muted small">
+                            {" "}
+                            · Worker {worker.workerId.slice(0, 8)} · {worker.status}
+                            {worker.currentTaskId
+                              ? ` · 当前任务 ${worker.currentTaskId.slice(0, 8)}`
+                              : ""}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+
+                <section className="vm-subsection">
+                  <div className="section-heading">
+                    <h5>整机快照</h5>
+                    <span className="muted small">仅 stopped 状态可创建与恢复</span>
+                  </div>
+                  {(snapshots[view.vm.id] ?? []).length > 0 ? (
+                    <ul className="plain-list snapshot-list">
+                      {(snapshots[view.vm.id] ?? []).map((snapshot) => (
+                        <li key={snapshot.id}>
+                          <div>
+                            <strong>{snapshot.label}</strong>
+                            <span className="muted small">
+                              {" "}
+                              · {new Date(snapshot.createdAt).toLocaleString("zh-CN")} ·{" "}
+                              {SNAPSHOT_STATUS_LABELS[snapshot.status]}
+                              {snapshot.restoredAt
+                                ? ` · 最近恢复 ${new Date(snapshot.restoredAt).toLocaleString("zh-CN")}`
+                                : ""}
+                            </span>
+                            <span className="muted small">
+                              {" "}
+                              · 影响项目：
+                              {snapshot.affectedProjects
+                                .map((project) => project.name)
+                                .join("、") || "无"}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            className="secondary"
+                            disabled={
+                              power !== "stopped" ||
+                              snapshot.status !== "available" ||
+                              Boolean(snapshotBusy[view.vm.id])
+                            }
+                            onClick={() => void inspectSnapshotRestore(view, snapshot)}
+                          >
+                            恢复…
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="muted small">还没有整机快照。</p>
+                  )}
+                  <div className="action-row">
+                    <input
+                      value={snapshotLabel[view.vm.id] ?? ""}
+                      maxLength={80}
+                      placeholder="快照标签（可选）"
+                      onChange={(event) =>
+                        setSnapshotLabel((current) => ({
+                          ...current,
+                          [view.vm.id]: event.target.value,
+                        }))
+                      }
+                    />
+                    <button
+                      type="button"
+                      className="secondary"
+                      disabled={power !== "stopped" || Boolean(snapshotBusy[view.vm.id])}
+                      onClick={() => void createSnapshot(view)}
+                    >
+                      {snapshotBusy[view.vm.id] ? "处理中…" : "创建整机快照"}
+                    </button>
+                  </div>
+                  <p className="muted small">
+                    整机快照影响全部绑定项目；项目级备份请在项目页单独创建与恢复。
+                  </p>
+                </section>
 
                 {diskPercent !== null && (
                   <div
@@ -1169,6 +1579,17 @@ export function VmManager({ host, hostReserveBytes }: VmManagerProps): React.JSX
                   >
                     {busyAction === "console" ? "获取控制台…" : "打开控制台"}
                   </button>
+                  {power === "stopped" && (
+                    <button
+                      type="button"
+                      className="danger"
+                      onClick={() => void deleteVm(view)}
+                      disabled={Boolean(busyAction) || !supervisorAvailable}
+                      title="删除前会检查项目绑定、任务、Worker 历史和项目备份依赖"
+                    >
+                      {busyAction === "delete" ? "删除中…" : "删除 VM"}
+                    </button>
+                  )}
                 </div>
 
                 <p className="muted small vm-action-hint">
@@ -1199,6 +1620,12 @@ export function VmManager({ host, hostReserveBytes }: VmManagerProps): React.JSX
     </section>
   );
 }
+
+const SNAPSHOT_STATUS_LABELS: Record<VmSnapshotRecord["status"], string> = {
+  creating: "创建中",
+  available: "可用",
+  failed: "失败",
+};
 
 function effectivePower(view: VmInstanceView): VmPowerState {
   return view.runtime?.powerState ?? view.vm.powerState;

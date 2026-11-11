@@ -25,18 +25,20 @@ import (
 const (
 	vmMetadataFilename = "vm.json"
 
-	defaultMaxBodyBytes   = 1 << 20
-	defaultCreateTimeout  = 90 * time.Second
-	defaultStartTimeout   = 90 * time.Second
-	defaultStopTimeout    = 90 * time.Second
-	defaultSuspendTimeout = 30 * time.Second
-	defaultResumeTimeout  = 30 * time.Second
-	defaultStateTimeout   = 10 * time.Second
-	defaultConsoleTimeout = 10 * time.Second
-	defaultListTimeout    = 30 * time.Second
-	defaultHostTimeout    = 20 * time.Second
-	smallBodyBytes        = 64 << 10
-	emptyBodyBytes        = 4 << 10
+	defaultMaxBodyBytes    = 1 << 20
+	defaultCreateTimeout   = 90 * time.Second
+	defaultStartTimeout    = 90 * time.Second
+	defaultStopTimeout     = 90 * time.Second
+	defaultSuspendTimeout  = 30 * time.Second
+	defaultResumeTimeout   = 30 * time.Second
+	defaultStateTimeout    = 10 * time.Second
+	defaultConsoleTimeout  = 10 * time.Second
+	defaultListTimeout     = 30 * time.Second
+	defaultHostTimeout     = 20 * time.Second
+	defaultSnapshotTimeout = 5 * time.Minute
+	defaultDeleteTimeout   = 60 * time.Second
+	smallBodyBytes         = 64 << 10
+	emptyBodyBytes         = 4 << 10
 )
 
 // Config wires the supervisor HTTP surface to a provider.
@@ -55,33 +57,37 @@ type Config struct {
 
 	MaxBodyBytes int64
 
-	CreateTimeout  time.Duration
-	StartTimeout   time.Duration
-	StopTimeout    time.Duration
-	SuspendTimeout time.Duration
-	ResumeTimeout  time.Duration
-	StateTimeout   time.Duration
-	ConsoleTimeout time.Duration
-	ListTimeout    time.Duration
-	HostTimeout    time.Duration
+	CreateTimeout   time.Duration
+	StartTimeout    time.Duration
+	StopTimeout     time.Duration
+	SuspendTimeout  time.Duration
+	ResumeTimeout   time.Duration
+	StateTimeout    time.Duration
+	ConsoleTimeout  time.Duration
+	ListTimeout     time.Duration
+	HostTimeout     time.Duration
+	SnapshotTimeout time.Duration
+	DeleteTimeout   time.Duration
 }
 
 // Server implements the local supervisor API.
 type Server struct {
-	config         Config
-	logger         *slog.Logger
-	health         http.Handler
-	inspectHost    func(context.Context) vmprovider.HostInspection
-	maxBodyBytes   int64
-	createTimeout  time.Duration
-	startTimeout   time.Duration
-	stopTimeout    time.Duration
-	suspendTimeout time.Duration
-	resumeTimeout  time.Duration
-	stateTimeout   time.Duration
-	consoleTimeout time.Duration
-	listTimeout    time.Duration
-	hostTimeout    time.Duration
+	config          Config
+	logger          *slog.Logger
+	health          http.Handler
+	inspectHost     func(context.Context) vmprovider.HostInspection
+	maxBodyBytes    int64
+	createTimeout   time.Duration
+	startTimeout    time.Duration
+	stopTimeout     time.Duration
+	suspendTimeout  time.Duration
+	resumeTimeout   time.Duration
+	stateTimeout    time.Duration
+	consoleTimeout  time.Duration
+	listTimeout     time.Duration
+	hostTimeout     time.Duration
+	snapshotTimeout time.Duration
+	deleteTimeout   time.Duration
 }
 
 // New validates the configuration and builds the supervisor handler.
@@ -106,20 +112,22 @@ func New(config Config) (*Server, error) {
 	}
 
 	server := &Server{
-		config:         config,
-		logger:         config.Logger,
-		health:         health.NewHandler(config.ServiceName, config.Version),
-		inspectHost:    config.HostInspector,
-		maxBodyBytes:   config.MaxBodyBytes,
-		createTimeout:  config.CreateTimeout,
-		startTimeout:   config.StartTimeout,
-		stopTimeout:    config.StopTimeout,
-		suspendTimeout: config.SuspendTimeout,
-		resumeTimeout:  config.ResumeTimeout,
-		stateTimeout:   config.StateTimeout,
-		consoleTimeout: config.ConsoleTimeout,
-		listTimeout:    config.ListTimeout,
-		hostTimeout:    config.HostTimeout,
+		config:          config,
+		logger:          config.Logger,
+		health:          health.NewHandler(config.ServiceName, config.Version),
+		inspectHost:     config.HostInspector,
+		maxBodyBytes:    config.MaxBodyBytes,
+		createTimeout:   config.CreateTimeout,
+		startTimeout:    config.StartTimeout,
+		stopTimeout:     config.StopTimeout,
+		suspendTimeout:  config.SuspendTimeout,
+		resumeTimeout:   config.ResumeTimeout,
+		stateTimeout:    config.StateTimeout,
+		consoleTimeout:  config.ConsoleTimeout,
+		listTimeout:     config.ListTimeout,
+		hostTimeout:     config.HostTimeout,
+		snapshotTimeout: config.SnapshotTimeout,
+		deleteTimeout:   config.DeleteTimeout,
 	}
 	if server.maxBodyBytes <= 0 {
 		server.maxBodyBytes = defaultMaxBodyBytes
@@ -133,6 +141,8 @@ func New(config Config) (*Server, error) {
 	server.consoleTimeout = durationOrDefault(server.consoleTimeout, defaultConsoleTimeout)
 	server.listTimeout = durationOrDefault(server.listTimeout, defaultListTimeout)
 	server.hostTimeout = durationOrDefault(server.hostTimeout, defaultHostTimeout)
+	server.snapshotTimeout = durationOrDefault(server.snapshotTimeout, defaultSnapshotTimeout)
+	server.deleteTimeout = durationOrDefault(server.deleteTimeout, defaultDeleteTimeout)
 
 	if server.inspectHost == nil {
 		qemuConfig := config.QemuConfig
@@ -245,13 +255,22 @@ func (s *Server) handleVmResource(w http.ResponseWriter, r *http.Request, resour
 	vmID := segments[0]
 	switch len(segments) {
 	case 1:
-		if r.Method != http.MethodGet {
-			s.methodNotAllowed(w, http.MethodGet)
-			return
+		switch r.Method {
+		case http.MethodGet:
+			s.handleGetVm(w, r, vmID)
+		case http.MethodDelete:
+			s.handleDeleteVm(w, r, vmID)
+		default:
+			s.methodNotAllowed(w, http.MethodGet, http.MethodDelete)
 		}
-		s.handleGetVm(w, r, vmID)
 	case 2:
 		switch segments[1] {
+		case "snapshots":
+			if r.Method != http.MethodPost {
+				s.methodNotAllowed(w, http.MethodPost)
+				return
+			}
+			s.handleCreateSnapshot(w, r, vmID)
 		case "start":
 			if r.Method != http.MethodPost {
 				s.methodNotAllowed(w, http.MethodPost)
@@ -285,6 +304,16 @@ func (s *Server) handleVmResource(w http.ResponseWriter, r *http.Request, resour
 		default:
 			s.writeError(w, http.StatusNotFound, codeNotFound, "route not found")
 		}
+	case 3:
+		if segments[1] == "snapshots" && segments[2] == "restore" {
+			if r.Method != http.MethodPost {
+				s.methodNotAllowed(w, http.MethodPost)
+				return
+			}
+			s.handleRestoreSnapshot(w, r, vmID)
+			return
+		}
+		s.writeError(w, http.StatusNotFound, codeNotFound, "route not found")
 	default:
 		s.writeError(w, http.StatusNotFound, codeNotFound, "route not found")
 	}
@@ -436,6 +465,57 @@ func (s *Server) handleConsole(w http.ResponseWriter, r *http.Request, vmID stri
 	s.writeJSON(w, http.StatusOK, struct {
 		ConsoleURL string `json:"consoleUrl"`
 	}{ConsoleURL: consoleURL})
+}
+
+func (s *Server) handleCreateSnapshot(w http.ResponseWriter, r *http.Request, vmID string) {
+	var body struct {
+		Tag string `json:"tag"`
+	}
+	if err := s.decodeJSON(w, r, smallBodyBytes, false, &body); err != nil {
+		s.writeRequestError(w, "snapshot-create", vmID, err)
+		return
+	}
+	if body.Tag == "" || len(body.Tag) > 128 {
+		s.writeRequestError(w, "snapshot-create", vmID,
+			newRequestError(http.StatusBadRequest, codeInvalidSpec, "snapshot tag must be 1..128 characters"))
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), s.snapshotTimeout)
+	defer cancel()
+	state, err := s.config.Provider.CreateSnapshot(ctx, vmID, body.Tag)
+	s.writeVmState(w, "snapshot-create", vmID, state, err, http.StatusOK)
+}
+
+func (s *Server) handleRestoreSnapshot(w http.ResponseWriter, r *http.Request, vmID string) {
+	var body struct {
+		Tag string `json:"tag"`
+	}
+	if err := s.decodeJSON(w, r, smallBodyBytes, false, &body); err != nil {
+		s.writeRequestError(w, "snapshot-restore", vmID, err)
+		return
+	}
+	if body.Tag == "" || len(body.Tag) > 128 {
+		s.writeRequestError(w, "snapshot-restore", vmID,
+			newRequestError(http.StatusBadRequest, codeInvalidSpec, "snapshot tag must be 1..128 characters"))
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), s.snapshotTimeout)
+	defer cancel()
+	state, err := s.config.Provider.RestoreSnapshot(ctx, vmID, body.Tag)
+	s.writeVmState(w, "snapshot-restore", vmID, state, err, http.StatusOK)
+}
+
+func (s *Server) handleDeleteVm(w http.ResponseWriter, r *http.Request, vmID string) {
+	ctx, cancel := context.WithTimeout(r.Context(), s.deleteTimeout)
+	defer cancel()
+	if err := s.config.Provider.DeleteVm(ctx, vmID); err != nil {
+		s.logOperationError(w, "delete", vmID, err)
+		return
+	}
+	s.logger.Info("vm operation completed", "operation", "delete", "vm", vmID)
+	s.writeJSON(w, http.StatusOK, struct {
+		Deleted bool `json:"deleted"`
+	}{Deleted: true})
 }
 
 func (s *Server) writeVmState(w http.ResponseWriter, operation, vmID string, state vmprovider.VmState, err error, successStatus int) {

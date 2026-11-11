@@ -1,18 +1,27 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from "@nestjs/common";
 import type {
   ConversationRecord,
+  CreateProjectBackupRequest,
+  ProjectBackupImpact,
+  ProjectBackupRecord,
+  ProjectBackupVerifyResult,
   ProjectBindingRequest,
   ProjectBindingUpdateRequest,
   ProjectCreateRequest,
   ProjectDetail,
   ProjectUpdateRequest,
   ProjectView,
+  RestoreProjectBackupRequest,
 } from "@agent-in-box/protocol";
+import { ProjectBackupService } from "./project-backup.service";
 import { ProjectService } from "./project.service";
 
 @Controller("/api/v1/projects")
 export class ProjectController {
-  constructor(private readonly projects: ProjectService) {}
+  constructor(
+    private readonly projects: ProjectService,
+    private readonly backups: ProjectBackupService,
+  ) {}
 
   @Get()
   list(@Query("includeArchived") includeArchived?: string): Promise<ProjectView[]> {
@@ -74,5 +83,51 @@ export class ProjectController {
     @Body() body: { title?: string },
   ): Promise<ConversationRecord> {
     return this.projects.createConversation(id, body?.title ?? "");
+  }
+
+  @Get(":id/backups")
+  listBackups(@Param("id") id: string): Promise<ProjectBackupRecord[]> {
+    return this.backups.list(id);
+  }
+
+  @Post(":id/backups")
+  createBackup(
+    @Param("id") id: string,
+    @Body() body: CreateProjectBackupRequest,
+  ): Promise<ProjectBackupRecord> {
+    return this.backups.create(id, body ?? {});
+  }
+
+  @Get(":id/backups/:backupId/impact")
+  backupImpact(
+    @Param("id") id: string,
+    @Param("backupId") backupId: string,
+  ): Promise<ProjectBackupImpact> {
+    return this.backups.impact(id, backupId);
+  }
+
+  @Post(":id/backups/:backupId/restore")
+  restoreBackup(
+    @Param("id") id: string,
+    @Param("backupId") backupId: string,
+    @Body() body: RestoreProjectBackupRequest,
+  ): Promise<ProjectBackupRecord> {
+    return this.backups.restore(id, backupId, body ?? { confirm: false });
+  }
+
+  @Post(":id/backups/:backupId/verify")
+  verifyBackup(
+    @Param("id") id: string,
+    @Param("backupId") backupId: string,
+  ): Promise<ProjectBackupVerifyResult> {
+    return this.backups.verify(id, backupId);
+  }
+
+  @Delete(":id/backups/:backupId")
+  deleteBackup(
+    @Param("id") id: string,
+    @Param("backupId") backupId: string,
+  ): Promise<{ deleted: true; backupId: string }> {
+    return this.backups.delete(id, backupId);
   }
 }

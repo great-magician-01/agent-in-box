@@ -1114,6 +1114,103 @@ const migrations: Record<string, MigrationDefinition> = {
       }
     },
   },
+
+  "008_phase9_resources_sharing": {
+    async up(db: Kysely<DatabaseSchema>): Promise<void> {
+      await db.schema
+        .createTable("vm_snapshots")
+        .addColumn("id", "text", (column) => column.primaryKey())
+        .addColumn("vm_id", "text", (column) => column.notNull())
+        .addColumn("tag", "text", (column) => column.notNull())
+        .addColumn("label", "text", (column) => column.notNull())
+        .addColumn("status", "text", (column) => column.notNull())
+        .addColumn("affected_projects_json", "text", (column) => column.notNull().defaultTo("[]"))
+        .addColumn("size_bytes", "integer")
+        .addColumn("error_message", "text")
+        .addColumn("created_at", "text", (column) => column.notNull())
+        .addColumn("updated_at", "text", (column) => column.notNull())
+        .addColumn("restored_at", "text")
+        .addForeignKeyConstraint("vm_snapshots_vm_fk", ["vm_id"], "vm_instances", ["id"], (c) =>
+          c.onDelete("cascade"),
+        )
+        .execute();
+      await db.schema
+        .createIndex("vm_snapshots_vm_idx")
+        .on("vm_snapshots")
+        .columns(["vm_id", "created_at"])
+        .execute();
+      await db.schema
+        .createIndex("vm_snapshots_tag_idx")
+        .on("vm_snapshots")
+        .columns(["vm_id", "tag"])
+        .unique()
+        .execute();
+
+      await db.schema
+        .createTable("project_backups")
+        .addColumn("id", "text", (column) => column.primaryKey())
+        .addColumn("project_id", "text", (column) => column.notNull())
+        .addColumn("label", "text", (column) => column.notNull())
+        .addColumn("status", "text", (column) => column.notNull())
+        .addColumn("artifact_snapshot_json", "text", (column) => column.notNull().defaultTo("[]"))
+        .addColumn("error_message", "text")
+        .addColumn("created_at", "text", (column) => column.notNull())
+        .addColumn("completed_at", "text")
+        .addColumn("restored_at", "text")
+        .addForeignKeyConstraint(
+          "project_backups_project_fk",
+          ["project_id"],
+          "projects",
+          ["id"],
+          (c) => c.onDelete("cascade"),
+        )
+        .execute();
+      await db.schema
+        .createIndex("project_backups_project_idx")
+        .on("project_backups")
+        .columns(["project_id", "created_at"])
+        .execute();
+
+      await db.schema
+        .createTable("project_backup_bindings")
+        .addColumn("id", "text", (column) => column.primaryKey())
+        .addColumn("backup_id", "text", (column) => column.notNull())
+        .addColumn("binding_id", "text", (column) => column.notNull())
+        .addColumn("vm_id", "text", (column) => column.notNull())
+        .addColumn("vm_name", "text", (column) => column.notNull())
+        .addColumn("guest_workspace_path", "text", (column) => column.notNull())
+        .addColumn("file_path", "text")
+        .addColumn("sha256", "text")
+        .addColumn("size_bytes", "integer")
+        .addColumn("file_count", "integer")
+        .addColumn("status", "text", (column) => column.notNull())
+        .addColumn("error_message", "text")
+        .addForeignKeyConstraint(
+          "project_backup_bindings_backup_fk",
+          ["backup_id"],
+          "project_backups",
+          ["id"],
+          (c) => c.onDelete("cascade"),
+        )
+        .execute();
+      await db.schema
+        .createIndex("project_backup_bindings_backup_idx")
+        .on("project_backup_bindings")
+        .column("backup_id")
+        .execute();
+      await db.schema
+        .createIndex("project_backup_bindings_vm_idx")
+        .on("project_backup_bindings")
+        .column("vm_id")
+        .execute();
+    },
+
+    async down(db: Kysely<DatabaseSchema>): Promise<void> {
+      for (const table of ["project_backup_bindings", "project_backups", "vm_snapshots"]) {
+        await db.schema.dropTable(table).ifExists().execute();
+      }
+    },
+  },
 };
 
 export async function migrateToLatest(db: Kysely<DatabaseSchema>): Promise<string[]> {

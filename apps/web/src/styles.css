@@ -2266,3 +2266,66 @@ button.danger:disabled {
   width: 100%;
   height: auto;
 }
+
+/* Phase 9: resource scheduling, shared VM impact and project backups. */
+.resource-banner {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0.75rem 0;
+  padding: 0.85rem 1rem;
+  border: 1px solid rgba(24, 32, 28, 0.14);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.resource-banner.pressure-warning {
+  border-color: rgba(186, 122, 22, 0.45);
+  background: rgba(255, 244, 219, 0.62);
+}
+
+.resource-banner.pressure-critical {
+  border-color: rgba(168, 46, 46, 0.5);
+  background: rgba(255, 233, 233, 0.66);
+}
+
+.resource-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.vm-subsection {
+  margin-top: 0.85rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed rgba(24, 32, 28, 0.16);
+}
+
+.vm-subsection h5 {
+  margin: 0 0 0.35rem;
+  font-size: 0.92rem;
+}
+
+.vm-queue-list,
+.vm-worker-list,
+.snapshot-list,
+.backup-list {
+  margin: 0.4rem 0;
+}
+
+.snapshot-list li,
+.backup-list > li {
+  align-items: flex-start;
+}
+
+.snapshot-impact {
+  border: 1px solid rgba(168, 46, 46, 0.4);
+  background: rgba(255, 246, 246, 0.8);
+}
+
+.project-workers {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0.35rem 0;
+}

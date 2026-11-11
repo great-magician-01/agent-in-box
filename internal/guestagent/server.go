@@ -56,25 +56,31 @@ type ServerOptions struct {
 	// VerifyRoots bounds read-only completion evidence to explicit guest roots.
 	// When empty, file evidence is rejected rather than silently allowed.
 	VerifyRoots []string
-	Now         func() time.Time
+	// WorkspaceRoots bounds project workspace archive/restore operations.
+	WorkspaceRoots []string
+	// MaxWorkspaceArchiveBytes caps both uploaded and downloaded workspace archives.
+	MaxWorkspaceArchiveBytes int64
+	Now                      func() time.Time
 }
 
 // Server exposes authenticated guest desktop RPC over HTTP.
 type Server struct {
-	token            string
-	tokenFile        string
-	agentVersion     string
-	desktop          Desktop
-	logger           *slog.Logger
-	actionTimeout    time.Duration
-	updateDir        string
-	maxUpdateBytes   int64
-	updateTimeout    time.Duration
-	updateHTTPClient *http.Client
-	verifyRoots      []string
-	startedAt        time.Time
-	now              func() time.Time
-	actions          *actionTracker
+	token                    string
+	tokenFile                string
+	agentVersion             string
+	desktop                  Desktop
+	logger                   *slog.Logger
+	actionTimeout            time.Duration
+	updateDir                string
+	maxUpdateBytes           int64
+	updateTimeout            time.Duration
+	updateHTTPClient         *http.Client
+	verifyRoots              []string
+	workspaceRoots           []string
+	maxWorkspaceArchiveBytes int64
+	startedAt                time.Time
+	now                      func() time.Time
+	actions                  *actionTracker
 }
 
 // NewServer preserves the original constructor for existing callers. The
@@ -110,21 +116,27 @@ func NewServerWithOptions(options ServerOptions) *Server {
 	if maxUpdateBytes <= 0 {
 		maxUpdateBytes = defaultMaxUpdateBytes
 	}
+	maxWorkspaceArchiveBytes := options.MaxWorkspaceArchiveBytes
+	if maxWorkspaceArchiveBytes <= 0 || maxWorkspaceArchiveBytes > defaultMaxWorkspaceArchiveBytes {
+		maxWorkspaceArchiveBytes = defaultMaxWorkspaceArchiveBytes
+	}
 	return &Server{
-		token:            options.Token,
-		tokenFile:        strings.TrimSpace(options.TokenFile),
-		agentVersion:     agentVersion,
-		desktop:          options.Desktop,
-		logger:           logger,
-		actionTimeout:    actionTimeout,
-		updateDir:        strings.TrimSpace(options.UpdateDir),
-		maxUpdateBytes:   maxUpdateBytes,
-		updateTimeout:    defaultUpdateTimeout,
-		updateHTTPClient: options.UpdateHTTPClient,
-		verifyRoots:      normalizeVerifyRoots(options.VerifyRoots),
-		startedAt:        now(),
-		now:              now,
-		actions:          newActionTracker(now),
+		token:                    options.Token,
+		tokenFile:                strings.TrimSpace(options.TokenFile),
+		agentVersion:             agentVersion,
+		desktop:                  options.Desktop,
+		logger:                   logger,
+		actionTimeout:            actionTimeout,
+		updateDir:                strings.TrimSpace(options.UpdateDir),
+		maxUpdateBytes:           maxUpdateBytes,
+		updateTimeout:            defaultUpdateTimeout,
+		updateHTTPClient:         options.UpdateHTTPClient,
+		verifyRoots:              normalizeVerifyRoots(options.VerifyRoots),
+		workspaceRoots:           normalizeVerifyRoots(options.WorkspaceRoots),
+		maxWorkspaceArchiveBytes: maxWorkspaceArchiveBytes,
+		startedAt:                now(),
+		now:                      now,
+		actions:                  newActionTracker(now),
 	}
 }
 
@@ -154,6 +166,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/input", s.input)
 	mux.HandleFunc("POST /v1/verify", s.verify)
 	mux.HandleFunc("POST /v1/update", s.update)
+	mux.HandleFunc("GET /v1/workspace/archive", s.archiveWorkspace)
+	mux.HandleFunc("POST /v1/workspace/restore", s.restoreWorkspace)
 	return s.authenticate(mux)
 }
 

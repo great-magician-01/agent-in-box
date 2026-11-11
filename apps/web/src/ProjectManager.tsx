@@ -197,7 +197,8 @@ export function ProjectManager({
               <strong>{view.project.name}</strong>
               <span>
                 {view.project.archivedAt ? "已归档 · " : ""}
-                {view.bindings.length} VM · {view.activeTaskCount} 活跃任务
+                {view.bindings.length} VM · {view.activeTaskCount} 活跃任务 ·{" "}
+                {view.activeWorkerCount} 活跃 Worker
               </span>
             </button>
           ))}
@@ -616,12 +617,27 @@ function BindingRow({
               .map((project) => `${project.name}${project.archivedAt ? "（已归档）" : ""}`)
               .join("、")}
             。桌面、软件和系统状态共同影响；当前 VM 有 {item.sharedActiveTaskCount}{" "}
-            个未结束任务，跨项目串行。
+            个未结束任务，跨项目串行。本项目在此 VM 的活跃任务：{item.queueDepth}。
           </>
         ) : (
-          <>当前仅由此项目绑定；之后新增共享项目时，任务也会进入同一 VM 串行队列。</>
+          <>
+            当前仅由此项目绑定；之后新增共享项目时，任务也会进入同一 VM 串行队列。本项目在此 VM
+            的活跃任务：{item.queueDepth}。
+          </>
         )}
       </p>
+      <div className="project-workers">
+        <span className="muted small">活跃 Worker：</span>
+        {item.activeWorkers.length > 0 ? (
+          item.activeWorkers.map((worker) => (
+            <span key={worker.workerId} className="pill small">
+              {worker.workerId.slice(0, 8)} · {worker.status}
+            </span>
+          ))
+        ) : (
+          <span className="muted small">无</span>
+        )}
+      </div>
       {!archived && (
         <div className="action-row">
           <button

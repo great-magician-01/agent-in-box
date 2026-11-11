@@ -899,7 +899,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     archive: WorkerArchiveRecord | null,
   ): Promise<WorkerResumeEnvironment> {
     const archivedAt = archive?.createdAt ?? worker.archivedAt;
-    const [vm, tasks] = await Promise.all([
+    const [vm, tasks, sharedBindings] = await Promise.all([
       this.db
         .selectFrom("vm_instances")
         .select(["name", "power_state", "guest_health"])
@@ -913,10 +913,103 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
         .orderBy("updated_at", "desc")
         .limit(10)
         .execute(),
+      this.db
+        .selectFrom("project_vm_bindings")
+        .innerJoin("projects", "projects.id", "project_vm_bindings.project_id")
+        .select([
+          "projects.id as id",
+          "projects.name as name",
+          "projects.archived_at as archived_at",
+        ])
+        .where("project_vm_bindings.vm_id", "=", worker.vmId)
+        .where("project_vm_bindings.project_id", "!=", worker.projectId)
+        .orderBy("projects.created_at", "asc")
+        .execute(),
     ]);
     const activeTaskIds = tasks
       .filter((task) => ["running", "waiting_approval", "blocked"].includes(task.status))
       .map((task) => task.id);
+    const sharedProjectIds = sharedBindings.map((project) => project.id);
+    const [sharedTasks, ownActivities, sharedActivities] = await Promise.all([
+      this.db
+        .selectFrom("tasks")
+        .select(["project_id", "status", "updated_at", "objective"])
+        .where("vm_id", "=", worker.vmId)
+        .where("project_id", "in", sharedProjectIds.length > 0 ? sharedProjectIds : [""])
+        .where("status", "in", [
+          "created",
+          "waiting_resources",
+          "waiting_vm",
+          "queued",
+          "running",
+          "waiting_approval",
+          "blocked",
+        ])
+        .execute(),
+      archivedAt
+        ? this.db
+            .selectFrom("project_activities")
+            .select(["type", "created_at"])
+            .where("project_id", "=", worker.projectId)
+            .where("created_at", ">", archivedAt)
+            .orderBy("created_at", "desc")
+            .limit(50)
+            .execute()
+        : Promise.resolve([]),
+      archivedAt && sharedProjectIds.length > 0
+        ? this.db
+            .selectFrom("project_activities")
+            .select(["project_id", "type", "created_at"])
+            .where("project_id", "in", sharedProjectIds)
+            .where("created_at", ">", archivedAt)
+            .orderBy("created_at", "desc")
+            .limit(100)
+            .execute()
+        : Promise.resolve([]),
+    ]);
+    const changesSinceArchive: string[] = [];
+    const restorePoint = archive?.restorePoint ?? null;
+    if (restorePoint && restorePoint.vmPowerState !== vm.power_state) {
+      changesSinceArchive.push(
+        `VM 电源状态从 ${restorePoint.vmPowerState} 变为 ${vm.power_state}。`,
+      );
+    }
+    const ownNewTasks = archivedAt ? tasks.filter((task) => task.created_at > archivedAt) : [];
+    if (ownNewTasks.length > 0) {
+      changesSinceArchive.push(
+        `本项目在本 VM 上新增 ${ownNewTasks.length} 个任务：${ownNewTasks
+          .slice(0, 3)
+          .map((task) => `${task.objective.slice(0, 80)}（${task.status}）`)
+          .join("；")}`,
+      );
+    }
+    if (ownActivities.length > 0) {
+      const counts = new Map<string, number>();
+      for (const activity of ownActivities) {
+        counts.set(activity.type, (counts.get(activity.type) ?? 0) + 1);
+      }
+      const summary = [...counts.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([type, count]) => `${type}×${count}`)
+        .join("、");
+      changesSinceArchive.push(
+        `本项目离开期间记录到最近 ${ownActivities.length} 条项目活动（${summary}）。`,
+      );
+    }
+    for (const project of sharedBindings) {
+      const projectActivities = sharedActivities.filter(
+        (activity) => activity.project_id === project.id,
+      );
+      const projectTasks = sharedTasks.filter((task) => task.project_id === project.id);
+      if (projectActivities.length === 0 && projectTasks.length === 0) continue;
+      changesSinceArchive.push(
+        `共享 VM 上的项目「${project.name}」离开期间记录到最近 ${projectActivities.length} 条活动和 ${projectTasks.length} 个未结束任务；其桌面输入与文件变化可能与你的记忆不同。`,
+      );
+    }
+    if (changesSinceArchive.length === 0 && archivedAt) {
+      changesSinceArchive.push("离开期间未记录到本项目或共享 VM 上其他项目的环境变化。");
+    }
     return {
       vmId: worker.vmId,
       vmName: vm.name,
@@ -935,6 +1028,14 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
       archivedForMs: archivedAt
         ? Math.max(0, this.now().getTime() - new Date(archivedAt).getTime())
         : null,
+      sharedVm: sharedBindings.length > 0,
+      sharedProjects: sharedBindings.map((project) => ({
+        id: project.id,
+        name: project.name,
+        archived: project.archived_at !== null,
+        activeTaskCount: sharedTasks.filter((task) => task.project_id === project.id).length,
+      })),
+      changesSinceArchive: changesSinceArchive.map((line) => line.slice(0, 600)).slice(0, 12),
       capturedAt: nowIso(),
     };
   }
@@ -1749,6 +1850,16 @@ function resumeBrief(
       : "",
     `Active tasks: ${environment.activeTaskIds.length > 0 ? environment.activeTaskIds.join(", ") : "none"}`,
     tasks ? `Recent tasks:\n${tasks}` : "",
+    environment.sharedVm
+      ? `Shared VM projects: ${environment.sharedProjects
+          .map((project) => `${project.name} (${project.activeTaskCount} active tasks)`)
+          .join(", ")}. Other projects may have changed the shared desktop and system state.`
+      : "",
+    environment.changesSinceArchive.length > 0
+      ? `Changes since archive:\n${environment.changesSinceArchive
+          .map((change) => `- ${change}`)
+          .join("\n")}`
+      : "",
     "The attached image is the host's latest observation; it may already be stale.",
     "Do not start or continue any desktop work yet. Call vm_screenshot before any future input,",
     "then reply with one short paragraph acknowledging the restored context.",

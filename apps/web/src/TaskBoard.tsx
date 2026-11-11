@@ -11,7 +11,7 @@ import {
   type TaskTraceView,
 } from "@agent-in-box/protocol";
 import { api } from "./api";
-import { formatDate, TASK_STATUS_LABELS, VM_POWER_STATE_LABELS } from "./format";
+import { formatBytes, formatDate, TASK_STATUS_LABELS, VM_POWER_STATE_LABELS } from "./format";
 
 interface TaskBoardProps {
   board: TaskBoardSnapshot | null;
@@ -22,6 +22,8 @@ interface TaskBoardProps {
   onSelectTask(taskId: string | null): void;
   onSelectProject(projectId: string): void;
   onOpenConversation(projectId: string, conversationId: string): void;
+  onOpenWorker?(projectId: string, workerId: string): void;
+  onOpenVmConsole?(vmId: string): void;
   onChanged(): Promise<void>;
 }
 
@@ -34,6 +36,8 @@ export function TaskBoard({
   onSelectTask,
   onSelectProject,
   onOpenConversation,
+  onOpenWorker,
+  onOpenVmConsole,
   onChanged,
 }: TaskBoardProps): React.JSX.Element {
   const [busy, setBusy] = useState(false);
@@ -161,6 +165,22 @@ export function TaskBoard({
       </div>
       {error && <div className="notice">{error}</div>}
 
+      {board?.resources && (
+        <div className={`resource-banner pressure-${board.resources.pressure}`} role="status">
+          <span>
+            资源预算 {formatBytes(board.resources.allocatedMemoryBytes)} /{" "}
+            {formatBytes(board.resources.effectiveBudgetBytes)} · 等待资源{" "}
+            {board.resources.waitingResourceTaskCount} · 等待 VM{" "}
+            {board.resources.waitingVmTaskCount} · 排队 {board.resources.queuedTaskCount}
+          </span>
+          {board.resources.blockedAutoStarts.map((blocked) => (
+            <span key={blocked.vmId} className="warning-line small">
+              「{blocked.vmName}」自动启动受阻：{blocked.reason}
+            </span>
+          ))}
+        </div>
+      )}
+
       {selectedProject && !selectedProject.project.archivedAt && (
         <details className="create-box task-create-box">
           <summary>在「{selectedProject.project.name}」中新建任务</summary>
@@ -232,8 +252,8 @@ export function TaskBoard({
               </label>
             </div>
             <p className="muted small">
-              停止 VM 上的任务会进入“等待 VM”；依赖未完成时保持“已创建”。Worker 将在阶段 6
-              接入服务端认领接口。
+              停止 VM 上的任务会进入“等待 VM”；资源预算不足且启用自动启动时进入“等待资源”；
+              依赖未完成时保持“已创建”。任务仍由服务端队列和 Worker 认领执行。
             </p>
             <button
               type="submit"
@@ -383,6 +403,14 @@ export function TaskBoard({
                     <a href={`#vm-${detail.task.vmId}`}>
                       {vms.get(detail.task.vmId)?.name ?? detail.task.vmId}
                     </a>
+                    {" · "}
+                    <button
+                      type="button"
+                      className="link-button"
+                      onClick={() => onOpenVmConsole?.(detail.task.vmId)}
+                    >
+                      打开实时控制台
+                    </button>
                   </dd>
                 </div>
                 <div>
@@ -397,6 +425,20 @@ export function TaskBoard({
                     >
                       打开项目会话
                     </button>
+                    {detail.task.assignedWorkerId && (
+                      <>
+                        {" · "}
+                        <button
+                          type="button"
+                          className="link-button"
+                          onClick={() =>
+                            onOpenWorker?.(detail.task.projectId, detail.task.assignedWorkerId!)
+                          }
+                        >
+                          打开 Worker 会话
+                        </button>
+                      </>
+                    )}
                   </dd>
                 </div>
                 <div>
@@ -646,7 +688,13 @@ function TaskRow({
         <button type="button" className="link-button" onClick={onProject}>
           {projectName}
         </button>
-        <span className="muted small">{vmName}</span>
+        <span className="muted small">
+          {vmName} · {VM_POWER_STATE_LABELS[task.vmPowerState]}
+        </span>
+        {task.status === "waiting_resources" && (
+          <span className="pill warn small">等待宿主资源</span>
+        )}
+        {task.status === "waiting_vm" && <span className="pill small">等待 VM 启动</span>}
       </td>
       <td>{workerName}</td>
       <td>

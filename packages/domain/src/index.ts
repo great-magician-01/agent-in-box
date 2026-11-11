@@ -13,7 +13,7 @@ export interface TaskTransitionContext {
 const TASK_TRANSITIONS: Record<TaskStatus, readonly TaskStatus[]> = {
   created: ["waiting_resources", "waiting_vm", "queued", "cancelled"],
   waiting_resources: ["waiting_vm", "queued", "cancelled", "blocked"],
-  waiting_vm: ["queued", "cancelled", "blocked", "failed"],
+  waiting_vm: ["waiting_resources", "queued", "cancelled", "blocked", "failed"],
   queued: ["running", "waiting_vm", "cancelled", "blocked"],
   running: ["waiting_approval", "completed", "failed", "cancelled", "blocked"],
   waiting_approval: ["running", "blocked", "cancelled", "failed"],

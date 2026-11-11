@@ -35,6 +35,9 @@ type fakeProvider struct {
 	stopModes    []string
 	reconciled   []string
 	stateLookups []string
+	snapshotTags []string
+	restoredTags []string
+	deletedVmIDs []string
 }
 
 func newFakeProvider() *fakeProvider {
@@ -137,12 +140,26 @@ func (f *fakeProvider) GetVmState(_ context.Context, vmID string) (vmprovider.Vm
 	return state, nil
 }
 
-func (f *fakeProvider) CreateSnapshot(context.Context, string, string) (vmprovider.VmState, error) {
-	return vmprovider.VmState{}, vmprovider.ErrUnsupported
+func (f *fakeProvider) CreateSnapshot(_ context.Context, vmID string, tag string) (vmprovider.VmState, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	state, ok := f.states[vmID]
+	if !ok {
+		return vmprovider.VmState{}, vmprovider.ErrNotFound
+	}
+	f.snapshotTags = append(f.snapshotTags, tag)
+	return state, nil
 }
 
-func (f *fakeProvider) RestoreSnapshot(context.Context, string, string) (vmprovider.VmState, error) {
-	return vmprovider.VmState{}, vmprovider.ErrUnsupported
+func (f *fakeProvider) RestoreSnapshot(_ context.Context, vmID string, tag string) (vmprovider.VmState, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	state, ok := f.states[vmID]
+	if !ok {
+		return vmprovider.VmState{}, vmprovider.ErrNotFound
+	}
+	f.restoredTags = append(f.restoredTags, tag)
+	return state, nil
 }
 
 func (f *fakeProvider) AttachConsole(_ context.Context, vmID string) (string, error) {
@@ -157,8 +174,15 @@ func (f *fakeProvider) AttachConsole(_ context.Context, vmID string) (string, er
 	return f.consoleURL, nil
 }
 
-func (f *fakeProvider) DeleteVm(context.Context, string) error {
-	return vmprovider.ErrUnsupported
+func (f *fakeProvider) DeleteVm(_ context.Context, vmID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.states[vmID]; !ok {
+		return vmprovider.ErrNotFound
+	}
+	delete(f.states, vmID)
+	f.deletedVmIDs = append(f.deletedVmIDs, vmID)
+	return nil
 }
 
 func (f *fakeProvider) setState(state vmprovider.VmState) {
@@ -447,14 +471,12 @@ func TestMethodAndRouteErrorsAreJSON(t *testing.T) {
 	provider := newFakeProvider()
 	server := newTestServer(t, provider, t.TempDir(), nil)
 
-	for _, target := range []string{"/api/v1/vms", "/api/v1/vms/vm-1"} {
-		recorder := request(t, server, http.MethodDelete, target, "", testToken)
-		if recorder.Code != http.StatusMethodNotAllowed {
-			t.Fatalf("DELETE %s status: %d", target, recorder.Code)
-		}
-		if response := decodeError(t, recorder); response.Error.Code != codeMethodNotAllowed {
-			t.Fatalf("DELETE %s code: %+v", target, response)
-		}
+	recorderDelete := request(t, server, http.MethodDelete, "/api/v1/vms", "", testToken)
+	if recorderDelete.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("DELETE /api/v1/vms status: %d", recorderDelete.Code)
+	}
+	if response := decodeError(t, recorderDelete); response.Error.Code != codeMethodNotAllowed {
+		t.Fatalf("DELETE /api/v1/vms code: %+v", response)
 	}
 
 	recorder := request(t, server, http.MethodGet, "/api/v1/unknown", "", testToken)
@@ -463,6 +485,44 @@ func TestMethodAndRouteErrorsAreJSON(t *testing.T) {
 	}
 	if response := decodeError(t, recorder); response.Error.Code != codeNotFound {
 		t.Fatalf("unknown route code: %+v", response)
+	}
+}
+
+func TestSnapshotAndDeleteRoutes(t *testing.T) {
+	provider := newFakeProvider()
+	provider.setState(vmprovider.VmState{ID: "vm-1", PowerState: vmprovider.PowerStopped})
+	server := newTestServer(t, provider, t.TempDir(), nil)
+
+	recorder := request(t, server, http.MethodPost, "/api/v1/vms/vm-1/snapshots", `{"tag":"aib-test"}`, testToken)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("create snapshot status: %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if len(provider.snapshotTags) != 1 || provider.snapshotTags[0] != "aib-test" {
+		t.Fatalf("unexpected snapshot tags: %+v", provider.snapshotTags)
+	}
+	recorder = request(t, server, http.MethodPost, "/api/v1/vms/vm-1/snapshots", `{}`, testToken)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("missing snapshot tag status: %d", recorder.Code)
+	}
+
+	recorder = request(t, server, http.MethodPost, "/api/v1/vms/vm-1/snapshots/restore", `{"tag":"aib-test"}`, testToken)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("restore snapshot status: %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if len(provider.restoredTags) != 1 || provider.restoredTags[0] != "aib-test" {
+		t.Fatalf("unexpected restored tags: %+v", provider.restoredTags)
+	}
+
+	recorder = request(t, server, http.MethodDelete, "/api/v1/vms/vm-1", "", testToken)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("delete vm status: %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if len(provider.deletedVmIDs) != 1 || provider.deletedVmIDs[0] != "vm-1" {
+		t.Fatalf("unexpected deleted VMs: %+v", provider.deletedVmIDs)
+	}
+	recorder = request(t, server, http.MethodDelete, "/api/v1/vms/missing", "", testToken)
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("delete missing vm status: %d", recorder.Code)
 	}
 }
 

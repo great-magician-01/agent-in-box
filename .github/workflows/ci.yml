@@ -87,6 +87,34 @@ jobs:
         env:
           AGENT_IN_BOX_PHASE7_RESULT: ${{ runner.temp }}/phase7-smoke.json
 
+      - name: Run phase 8 Router, registry and archive smoke test
+        run: pnpm smoke:phase8
+        env:
+          AGENT_IN_BOX_PHASE8_RESULT: ${{ runner.temp }}/phase8-smoke.json
+
+      - name: Run phase 9 resource, sharing and sync smoke test
+        run: pnpm smoke:phase9
+        env:
+          AGENT_IN_BOX_PHASE9_RESULT: ${{ runner.temp }}/phase9-smoke.json
+
+      - name: Upload phase 9 smoke result
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase9-smoke-${{ runner.os }}
+          path: ${{ runner.temp }}/phase9-smoke.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload phase 8 smoke result
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase8-smoke-${{ runner.os }}
+          path: ${{ runner.temp }}/phase8-smoke.json
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload phase 7 smoke result
         if: success()
         uses: actions/upload-artifact@v4

@@ -102,6 +102,10 @@ describe("VmService", () => {
         return state;
       }),
       console: vi.fn(async (id: string) => states.get(id)?.consoleUrl ?? "vnc://127.0.0.1:5900"),
+      delete: vi.fn(async (id: string) => {
+        states.delete(id);
+        return { deleted: true as const };
+      }),
     };
     supervisor = fake as unknown as SupervisorClient;
     const database = {
@@ -176,6 +180,31 @@ describe("VmService", () => {
     expect((await restarted.list()).items[0]?.vm.powerState).toBe("suspended");
     await restarted.resume(created.vm.id);
     expect((await restarted.list()).items[0]?.vm.powerState).toBe("running");
+  });
+
+  it("deletes only an unbound, stopped VM without task or Worker history", async () => {
+    const created = await createVm();
+    await expect(service.delete(created.vm.id)).resolves.toEqual({
+      deleted: true,
+      vmId: created.vm.id,
+    });
+    expect(supervisor.delete).toHaveBeenCalledWith(created.vm.id);
+
+    const bound = await createVm("Bound VM");
+    const catalog = new CatalogRepository(app.db);
+    const project = await catalog.createProject({ name: "Bound project" });
+    await catalog.bindVm({
+      projectId: project.id,
+      vmId: bound.vm.id,
+      guestWorkspacePath: "/home/aib/work",
+      isPrimary: true,
+    });
+    await expect(service.delete(bound.vm.id)).rejects.toMatchObject({ code: "conflict" });
+    expect(supervisor.delete).toHaveBeenCalledTimes(1);
+
+    const running = await createVm("Running VM");
+    states.set(running.vm.id, runtime(running.vm.id, "running"));
+    await expect(service.delete(running.vm.id)).rejects.toMatchObject({ code: "conflict" });
   });
 
   it("persists idempotent stop results, power events, bindings and the current task", async () => {

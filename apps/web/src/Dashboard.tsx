@@ -16,7 +16,7 @@ import type {
 } from "@agent-in-box/protocol";
 import { api, ApiRequestError } from "./api";
 import { chooseDirectory, saveCloseBehavior } from "./desktop";
-import { VmManager } from "./VmManager";
+import { VmManager, type ConsoleRequest } from "./VmManager";
 import { WorkManager } from "./WorkManager";
 import {
   CONTROL_PLANE_STATE_LABELS,
@@ -63,6 +63,13 @@ export function Dashboard({
   const [autoStart, setAutoStart] = useState<AutoStartPolicy>(
     onboarding.resourcePolicy.autoStartPolicy,
   );
+  const [softBudgetGb, setSoftBudgetGb] = useState(
+    formatGb(onboarding.resourcePolicy.softMemoryBudgetBytes),
+  );
+  const [idleSuspend, setIdleSuspend] = useState(onboarding.resourcePolicy.idleSuspendEnabled);
+  const [idleSuspendMinutes, setIdleSuspendMinutes] = useState(
+    String(Math.round(onboarding.resourcePolicy.idleSuspendTimeoutMs / 60_000)),
+  );
   const [approval, setApproval] = useState(onboarding.security.requireApprovalForSensitiveActions);
   const [autoArchive, setAutoArchive] = useState(true);
   const [idleMinutes, setIdleMinutes] = useState("30");
@@ -76,6 +83,7 @@ export function Dashboard({
   const [migrationAcknowledged, setMigrationAcknowledged] = useState(false);
   const [migrationBusy, setMigrationBusy] = useState(false);
   const [migrationError, setMigrationError] = useState<string | null>(null);
+  const [consoleRequest, setConsoleRequest] = useState<ConsoleRequest | null>(null);
 
   const reload = useCallback(async () => {
     setLoadError(null);
@@ -90,6 +98,11 @@ export function Dashboard({
       setSettings(nextSettings);
       setReserveGb(formatGb(nextSettings.resourcePolicy.hostReserveBytes));
       setAutoStart(nextSettings.resourcePolicy.autoStartPolicy);
+      setSoftBudgetGb(formatGb(nextSettings.resourcePolicy.softMemoryBudgetBytes));
+      setIdleSuspend(nextSettings.resourcePolicy.idleSuspendEnabled);
+      setIdleSuspendMinutes(
+        String(Math.round(nextSettings.resourcePolicy.idleSuspendTimeoutMs / 60_000)),
+      );
       setApproval(nextSettings.security.requireApprovalForSensitiveActions);
       setAutoArchive(nextSettings.workerLifecycle.autoArchiveEnabled);
       setIdleMinutes(String(Math.round(nextSettings.workerLifecycle.idleTimeoutMs / 60_000)));
@@ -118,6 +131,20 @@ export function Dashboard({
       setPolicyMessage("Host Reserve 必须是有效数字");
       return;
     }
+    const softBudgetBytes = parseGb(softBudgetGb);
+    if (softBudgetBytes === null) {
+      setPolicyMessage("Soft Memory Budget 必须是有效数字（0 表示自动）");
+      return;
+    }
+    const idleSuspendTimeout = Number(idleSuspendMinutes);
+    if (
+      !Number.isFinite(idleSuspendTimeout) ||
+      idleSuspendTimeout < 5 ||
+      idleSuspendTimeout > 1440
+    ) {
+      setPolicyMessage("VM 空闲休眠时间必须为 5～1440 分钟");
+      return;
+    }
     const minutes = Number(idleMinutes);
     if (!Number.isFinite(minutes) || minutes < 1 || minutes > 1440) {
       setPolicyMessage("Worker 空闲归档时间必须为 1～1440 分钟");
@@ -127,7 +154,13 @@ export function Dashboard({
     setPolicyMessage(null);
     try {
       const next = await api.updateSettings({
-        resourcePolicy: { hostReserveBytes: bytes, autoStartPolicy: autoStart },
+        resourcePolicy: {
+          hostReserveBytes: bytes,
+          softMemoryBudgetBytes: softBudgetBytes,
+          autoStartPolicy: autoStart,
+          idleSuspendEnabled: idleSuspend,
+          idleSuspendTimeoutMs: Math.round(idleSuspendTimeout * 60_000),
+        },
         security: { requireApprovalForSensitiveActions: approval },
         workerLifecycle: {
           autoArchiveEnabled: autoArchive,
@@ -337,10 +370,15 @@ export function Dashboard({
         </article>
       </section>
 
-      <WorkManager />
+      <WorkManager
+        onOpenVmConsole={(vmId) =>
+          setConsoleRequest((current) => ({ vmId, nonce: (current?.nonce ?? 0) + 1 }))
+        }
+      />
 
       <VmManager
         host={host}
+        consoleRequest={consoleRequest}
         hostReserveBytes={
           settings?.resourcePolicy.hostReserveBytes ?? onboarding.resourcePolicy.hostReserveBytes
         }
@@ -517,6 +555,36 @@ export function Dashboard({
               <option value="manual">仅手动启动</option>
               <option value="when_needed">有任务时自动启动</option>
             </select>
+          </label>
+          <label className="field">
+            <span>Soft Memory Budget（GB，0 = 自动）</span>
+            <input
+              type="number"
+              min="0"
+              step="0.5"
+              value={softBudgetGb}
+              onChange={(event) => setSoftBudgetGb(event.target.value)}
+            />
+          </label>
+          <label className="toggle policy-toggle">
+            <input
+              type="checkbox"
+              checked={idleSuspend}
+              onChange={(event) => setIdleSuspend(event.target.checked)}
+            />
+            <span>VM 空闲后自动休眠</span>
+          </label>
+          <label className="field">
+            <span>VM 空闲休眠（分钟）</span>
+            <input
+              type="number"
+              min="5"
+              max="1440"
+              step="1"
+              value={idleSuspendMinutes}
+              onChange={(event) => setIdleSuspendMinutes(event.target.value)}
+              disabled={!idleSuspend}
+            />
           </label>
           {bridge && closeBehavior && (
             <label className="field">

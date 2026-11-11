@@ -1,7 +1,7 @@
 {
   "name": "agent-in-box-phase8-smoke",
-  "startedAt": "2026-11-11T12:26:32.285Z",
-  "finishedAt": "2026-11-11T12:26:35.934Z",
+  "startedAt": "2026-11-11T13:04:34.780Z",
+  "finishedAt": "2026-11-11T13:04:38.402Z",
   "status": "passed",
   "checks": [
     {
@@ -11,7 +11,7 @@
     {
       "name": "创建项目 Worker 并保持 Guest RPC 连接",
       "passed": true,
-      "detail": "worker=443be652-9f48-4f56-9db7-31b519861bc7"
+      "detail": "worker=5e2292f4-a3a0-4fa5-adb4-1ee4a2417e8e"
     },
     {
       "name": "Router 只暴露项目、任务、Worker、看板与归档工具",
@@ -20,7 +20,7 @@
     {
       "name": "Router 查询已有 Worker 后向该 Worker 分派任务",
       "passed": true,
-      "detail": "task=e931c6c4-9ce0-4f6a-91b2-531c08da3cf1"
+      "detail": "task=79aede26-b620-49d4-aacb-74990be2df08"
     },
     {
       "name": "取消任务后 Worker 停止回合并回到 idle",
@@ -37,7 +37,7 @@
     {
       "name": "归档后 Router 检索归档并创建后续任务",
       "passed": true,
-      "detail": "task=ac0199e1-ae9d-4ddc-9c38-41144ed8d027"
+      "detail": "task=879a680a-e76f-4516-9f97-c94351f2d49c"
     },
     {
       "name": "Router 重启后恢复会话并继续读取持久化任务分配",

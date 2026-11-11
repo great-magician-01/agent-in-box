@@ -98,6 +98,20 @@ export class SupervisorClient {
     ).then((result) => result.consoleUrl);
   }
 
+  createSnapshot(id: string, tag: string): Promise<SupervisorVmState> {
+    return this.request("POST", `/api/v1/vms/${encodeURIComponent(id)}/snapshots`, { tag });
+  }
+
+  restoreSnapshot(id: string, tag: string): Promise<SupervisorVmState> {
+    return this.request("POST", `/api/v1/vms/${encodeURIComponent(id)}/snapshots/restore`, {
+      tag,
+    });
+  }
+
+  delete(id: string): Promise<{ deleted: true }> {
+    return this.request("DELETE", `/api/v1/vms/${encodeURIComponent(id)}`);
+  }
+
   private action(id: string, action: string, body: unknown = {}): Promise<SupervisorVmState> {
     return this.request("POST", `/api/v1/vms/${encodeURIComponent(id)}/${action}`, body);
   }

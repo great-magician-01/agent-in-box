@@ -1,0 +1,67 @@
+{
+  "phase": 9,
+  "startedAt": "2026-11-11T13:06:27.032Z",
+  "finishedAt": "2026-11-11T13:06:28.024Z",
+  "passed": true,
+  "checks": [
+    {
+      "name": "真实控制平面应用阶段 9 迁移并提供资源报告",
+      "passed": true,
+      "detail": "running=2"
+    },
+    {
+      "name": "资源不足时任务进入等待资源并发出通知",
+      "passed": true,
+      "detail": "task=c94d2d9f-8796-42cf-bc5d-e1786f75cf82"
+    },
+    {
+      "name": "预算足够后自动启动 VM 并将等待任务放回队列",
+      "passed": true,
+      "detail": "vm=acf596b9-1e44-4c25-8345-97e91878f1c7"
+    },
+    {
+      "name": "看板、VM 页和项目页共享同一任务与 VM 状态",
+      "passed": true,
+      "detail": "task=fb713c53-f779-491a-a45d-ac6585b7a43d"
+    },
+    {
+      "name": "共享 VM 快照恢复前列出全部受影响项目并要求确认",
+      "passed": true,
+      "detail": "Phase 9 Project A、Phase 9 Project B"
+    },
+    {
+      "name": "项目级备份独立校验和恢复，不覆盖共享 VM 的其他项目目录",
+      "passed": true
+    },
+    {
+      "name": "VM 删除检查任务与绑定依赖，仅删除无依赖 stopped VM",
+      "passed": true
+    },
+    {
+      "name": "空闲休眠只休眠无任务 VM，不停止仍有任务的 VM",
+      "passed": true
+    },
+    {
+      "name": "项目删除检查任务和 Worker 历史依赖",
+      "passed": true
+    },
+    {
+      "name": "断线重连式全量快照从数据库重建任务状态",
+      "passed": true,
+      "detail": "cursor=26"
+    }
+  ],
+  "environment": {
+    "realControlPlane": true,
+    "realSqlite": true,
+    "realHostMemoryCounters": true,
+    "fakeSupervisor": true,
+    "fakeGuestAgent": true,
+    "realQemuWxpx": false,
+    "realLinuxGuest": false,
+    "realWorkerPi": false,
+    "realRouterPi": false,
+    "realModel": false,
+    "browserElectronUi": false
+  }
+}

@@ -455,6 +455,10 @@ export class TaskService {
           return;
         }
         if (!(await this.dependenciesCompleted(current.id, trx))) return;
+        // The Resource Manager owns waiting_resources while the VM is not
+        // running. Reconciling a stopped VM must not erase that decision and
+        // make the queue flip between waiting_vm and waiting_resources.
+        if (current.status === "waiting_resources" && vm.power_state !== "running") return;
         const target: TaskStatus = vm.power_state === "running" ? "queued" : "waiting_vm";
         if (target === current.status) return;
         updated.push(
@@ -465,6 +469,33 @@ export class TaskService {
             {},
             trx,
           ),
+        );
+      });
+    }
+    return updated;
+  }
+
+  /**
+   * Resource Manager parks dependency-ready tasks when the host cannot
+   * auto-start their VM within the soft memory budget.
+   */
+  async markWaitingResources(vmId: string, reason: string): Promise<TaskRecord[]> {
+    const vm = await this.db
+      .selectFrom("vm_instances")
+      .select("id")
+      .where("id", "=", vmId)
+      .executeTakeFirst();
+    if (!vm) throw new NotFoundError(`VM 不存在：${vmId}`);
+    const summary = reason.trim() ? `等待宿主资源：${reason.trim().slice(0, 500)}` : "等待宿主资源";
+    const candidates = await this.tasks.listAll({ vmId, statuses: ["waiting_vm"] });
+    const updated: TaskRecord[] = [];
+    for (const candidate of candidates) {
+      await this.db.transaction().execute(async (trx) => {
+        const current = await this.tasks.getTask(candidate.id, trx);
+        if (!current || current.status !== "waiting_vm") return;
+        if (!(await this.dependenciesCompleted(current.id, trx))) return;
+        updated.push(
+          await this.transitionInTransaction(current.id, "waiting_resources", { summary }, {}, trx),
         );
       });
     }
@@ -793,10 +824,14 @@ export class TaskService {
           .sort(compareQueueTasks);
         queue.forEach((task, index) => queuePositions.set(task.id, index + 1));
       }
+      const powerByVm = new Map(
+        vms.map((vm) => [vm.id, vm.power_state as TaskBoardItem["vmPowerState"]]),
+      );
       const items: TaskBoardItem[] = tasks.map((task) => ({
         ...task,
         dependencyIds: dependenciesByTask.get(task.id) ?? [],
         queuePosition: task.status === "queued" ? (queuePositions.get(task.id) ?? null) : null,
+        vmPowerState: powerByVm.get(task.vmId) ?? "error",
       }));
       return {
         tasks: items,

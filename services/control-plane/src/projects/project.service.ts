@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { Inject, Injectable } from "@nestjs/common";
+import { rm } from "node:fs/promises";
+import path from "node:path";
+import { Inject, Injectable, Optional } from "@nestjs/common";
 import type { Kysely } from "kysely";
 import {
   ACTIVE_TASK_STATUSES,
@@ -14,6 +16,7 @@ import {
   type ProjectView,
 } from "@agent-in-box/protocol";
 import { normalizeGuestWorkspacePath } from "@agent-in-box/domain";
+import type { DatabaseService } from "../persistence/database.service";
 import type { DatabaseExecutor } from "../persistence/executor";
 import { NotFoundError, PersistenceError } from "../persistence/errors";
 import {
@@ -34,6 +37,7 @@ export class ProjectService {
   constructor(
     @Inject(KYSELY) private readonly db: Kysely<DatabaseSchema>,
     private readonly outbox: OutboxRepository,
+    @Optional() private readonly database?: DatabaseService,
   ) {}
 
   async list(includeArchived = false): Promise<ProjectView[]> {
@@ -182,14 +186,54 @@ export class ProjectService {
 
   async delete(projectId: string): Promise<{ deleted: true; projectId: string }> {
     await this.requireProject(projectId);
-    const task = await this.db
-      .selectFrom("tasks")
-      .select("id")
-      .where("project_id", "=", projectId)
-      .limit(1)
-      .executeTakeFirst();
-    if (task) {
-      throw new PersistenceError("conflict", "已有任务历史的项目只能归档，不能删除");
+    const [task, worker, archive, backups] = await Promise.all([
+      this.db
+        .selectFrom("tasks")
+        .select("id")
+        .where("project_id", "=", projectId)
+        .limit(1)
+        .executeTakeFirst(),
+      this.db
+        .selectFrom("workers")
+        .select("id")
+        .where("project_id", "=", projectId)
+        .limit(1)
+        .executeTakeFirst(),
+      this.db
+        .selectFrom("worker_archives")
+        .select("id")
+        .where("project_id", "=", projectId)
+        .limit(1)
+        .executeTakeFirst(),
+      this.db
+        .selectFrom("project_backups")
+        .select(["id", "status"])
+        .where("project_id", "=", projectId)
+        .execute(),
+    ]);
+    if (backups.some((backup) => ["creating", "restoring"].includes(backup.status))) {
+      throw new PersistenceError("conflict", "项目备份正在创建或恢复，暂不能删除项目");
+    }
+    const dependencies: Record<string, unknown> = {};
+    if (task) dependencies.tasks = true;
+    if (worker) dependencies.workers = true;
+    if (archive) dependencies.workerArchives = true;
+    if (Object.keys(dependencies).length > 0) {
+      throw new PersistenceError(
+        "conflict",
+        "已有任务、Worker 或归档历史的项目只能归档，不能删除",
+        { dependencies },
+      );
+    }
+    // Project backups are project-owned. Remove their files only after the
+    // dependency check passed; the database rows cascade with the project.
+    if (backups.length > 0 && this.database && isSafeIdentifier(projectId)) {
+      const root = path.resolve(this.database.layout.archives, "project-backups");
+      const directory = path.resolve(root, projectId);
+      const relative = path.relative(root, directory);
+      if (relative === projectId && !path.isAbsolute(relative)) {
+        await rm(directory, { recursive: true, force: true });
+      }
     }
     await this.db.transaction().execute(async (trx) => {
       // Foreign keys cascade only project-owned metadata. VM rows and disks are
@@ -440,7 +484,7 @@ export class ProjectService {
     ]);
     const bindings: ProjectBindingView[] = await Promise.all(
       bindingRows.map(async (row) => {
-        const [vm, shared, active] = await Promise.all([
+        const [vm, shared, active, sharedActive, workers] = await Promise.all([
           this.db
             .selectFrom("vm_instances")
             .selectAll()
@@ -462,7 +506,22 @@ export class ProjectService {
             .selectFrom("tasks")
             .select("id")
             .where("vm_id", "=", row.vm_id)
+            .where("project_id", "=", project.id)
             .where("status", "in", ACTIVE_TASK_STATUSES)
+            .execute(),
+          this.db
+            .selectFrom("tasks")
+            .select("id")
+            .where("vm_id", "=", row.vm_id)
+            .where("status", "in", ACTIVE_TASK_STATUSES)
+            .execute(),
+          this.db
+            .selectFrom("workers")
+            .select(["id", "status", "current_task_id", "last_active_at"])
+            .where("project_id", "=", project.id)
+            .where("vm_id", "=", row.vm_id)
+            .where("status", "not in", ["archived", "failed"])
+            .orderBy("created_at", "asc")
             .execute(),
         ]);
         return {
@@ -474,7 +533,16 @@ export class ProjectService {
             isPrimary: item.is_primary === 1,
             archivedAt: item.archived_at,
           })),
-          sharedActiveTaskCount: active.length,
+          sharedActiveTaskCount: sharedActive.length,
+          activeWorkers: workers.map((worker) => ({
+            workerId: worker.id,
+            projectId: project.id,
+            projectName: project.name,
+            status: worker.status as ProjectBindingView["activeWorkers"][number]["status"],
+            currentTaskId: worker.current_task_id,
+            lastActiveAt: worker.last_active_at,
+          })),
+          queueDepth: active.length,
         };
       }),
     );
@@ -483,6 +551,7 @@ export class ProjectService {
       bindings,
       conversationCount: conversations.length,
       activeTaskCount: activeTasks.length,
+      activeWorkerCount: bindings.reduce((total, item) => total + item.activeWorkers.length, 0),
     };
   }
 
@@ -524,6 +593,10 @@ export class ProjectService {
       .execute();
     await this.outbox.append("project.changed", { projectId, action }, now, trx);
   }
+}
+
+function isSafeIdentifier(value: string): boolean {
+  return /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(value);
 }
 
 function normalizeName(value: unknown): string {

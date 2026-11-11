@@ -8,7 +8,16 @@ import type {
   OnboardingCompleteRequest,
   OnboardingCompleteResult,
   OnboardingState,
+  CreateProjectBackupRequest,
+  CreateVmSnapshotRequest,
+  ProjectBackupImpact,
+  ProjectBackupRecord,
+  ProjectBackupVerifyResult,
   ResourcePolicy,
+  ResourceReconcileResult,
+  ResourceReport,
+  RestoreProjectBackupRequest,
+  RestoreVmSnapshotRequest,
   RuntimeInfo,
   SecuritySettings,
   SettingsView,
@@ -38,6 +47,8 @@ import type {
   VmConsole,
   VmConsoleSession,
   VmControlView,
+  VmSnapshotImpact,
+  VmSnapshotRecord,
   ExecutionLeaseView,
   WorkerLeaseRequest,
   VmCreateRequest,
@@ -480,7 +491,56 @@ export const api = {
     apiFetch<ImageRecord>(`/api/v1/images/${encodeURIComponent(id)}/cancel`, {
       method: "POST",
     }),
+  resources: () => apiFetch<ResourceReport>("/api/v1/resources"),
+  reconcileResources: () =>
+    apiFetch<ResourceReconcileResult>("/api/v1/resources/reconcile", { method: "POST" }),
   vms: () => apiFetch<VmListResponse>("/api/v1/vms"),
+  deleteVm: (id: string) =>
+    apiFetch<{ deleted: true; vmId: string }>(`/api/v1/vms/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
+  vmSnapshots: (id: string) =>
+    apiFetch<VmSnapshotRecord[]>(`/api/v1/vms/${encodeURIComponent(id)}/snapshots`),
+  createVmSnapshot: (id: string, body: CreateVmSnapshotRequest = {}) =>
+    apiFetch<VmSnapshotRecord>(`/api/v1/vms/${encodeURIComponent(id)}/snapshots`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  vmSnapshotImpact: (id: string, snapshotId: string) =>
+    apiFetch<VmSnapshotImpact>(
+      `/api/v1/vms/${encodeURIComponent(id)}/snapshots/${encodeURIComponent(snapshotId)}/impact`,
+    ),
+  restoreVmSnapshot: (id: string, snapshotId: string, body: RestoreVmSnapshotRequest = {}) =>
+    apiFetch<VmSnapshotImpact>(
+      `/api/v1/vms/${encodeURIComponent(id)}/snapshots/${encodeURIComponent(snapshotId)}/restore`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+  projectBackups: (projectId: string) =>
+    apiFetch<ProjectBackupRecord[]>(`/api/v1/projects/${encodeURIComponent(projectId)}/backups`),
+  createProjectBackup: (projectId: string, body: CreateProjectBackupRequest = {}) =>
+    apiFetch<ProjectBackupRecord>(`/api/v1/projects/${encodeURIComponent(projectId)}/backups`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  projectBackupImpact: (projectId: string, backupId: string) =>
+    apiFetch<ProjectBackupImpact>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/backups/${encodeURIComponent(backupId)}/impact`,
+    ),
+  restoreProjectBackup: (projectId: string, backupId: string, body: RestoreProjectBackupRequest) =>
+    apiFetch<ProjectBackupRecord>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/backups/${encodeURIComponent(backupId)}/restore`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+  verifyProjectBackup: (projectId: string, backupId: string) =>
+    apiFetch<ProjectBackupVerifyResult>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/backups/${encodeURIComponent(backupId)}/verify`,
+      { method: "POST" },
+    ),
+  deleteProjectBackup: (projectId: string, backupId: string) =>
+    apiFetch<{ deleted: true; backupId: string }>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/backups/${encodeURIComponent(backupId)}`,
+      { method: "DELETE" },
+    ),
   createVm: (body: VmCreateRequest) =>
     apiFetch<VmInstanceView>("/api/v1/vms", {
       method: "POST",

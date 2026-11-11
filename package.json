@@ -34,6 +34,7 @@
     "smoke:phase6": "pnpm build:packages && pnpm --filter @agent-in-box/control-plane build && pnpm --filter @agent-in-box/web build && tsx scripts/smoke-phase6.mts",
     "smoke:phase7": "pnpm build:packages && pnpm --filter @agent-in-box/control-plane build && pnpm --filter @agent-in-box/web build && tsx scripts/smoke-phase7.mts",
     "smoke:phase8": "pnpm build:packages && pnpm --filter @agent-in-box/control-plane build && pnpm --filter @agent-in-box/web build && tsx scripts/smoke-phase8.mts",
+    "smoke:phase9": "pnpm build:packages && pnpm --filter @agent-in-box/control-plane build && pnpm --filter @agent-in-box/web build && tsx scripts/smoke-phase9.mts",
     "smoke:desktop": "node scripts/smoke-desktop-package.mjs"
   },
   "devDependencies": {

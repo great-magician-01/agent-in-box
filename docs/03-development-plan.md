@@ -21,7 +21,8 @@
 - **阶段 6 完成（代码、自动化与真实本地进程 Smoke）**：Guest Worker RPC（认证、事件重连、版本握手、归档校验）、固定 Pi 1.5.1 运行时与 `images/linux` 安装资产；Model Broker（Provider/模型白名单、短期令牌、撤销中断流、流式 usage/错误记录、长期 Key 仅存宿主机）；Worker Engine Adapter 接入 TaskService/Lease/Registry、心跳、Steer/Follow-up、取消→Abort、断线/重启对账与 Native Resume；项目 Worker 会话面板。`pnpm smoke:phase6` 11 项通过。真实 QEMU/WHPX、Golden Image、真实 Pi/模型与人工 UI 仍未验收，详见 [`tests/phase6/summary.md`](../tests/phase6/summary.md)。
 - **阶段 7 完成（代码、自动化与真实本地进程 Smoke）**：Host 侧 Computer Use Broker + 短期令牌 + Pi CUA 工具集；动作必须持有 Lease、引用最新截图并经显示分辨率校验；前后截图/Trace、最大步数/时长、无进展与重复动作保护、Blocked/Cancelled 处理；项目 Policy、敏感动作等待审批、批准/拒绝/超时/取消；完成必须通过 Guest 文件/进程或重新截图证据，模型自述不再进入完成状态；任务看板展示 Trace 与审批。`pnpm smoke:phase7` 覆盖 15 项主链路。首轮真实 QEMU/WHPX + 真实 Pi/模型任务评测尚未执行，详见 [`tests/phase7/summary.md`](../tests/phase7/summary.md)。
 - **阶段 8 完成（代码、自动化与真实本地进程 Smoke）**：Worker Registry/Active Roster、可搜索 Archive Registry、空闲自动归档及阻塞条件；宿主 Pi Router 仅持有项目/任务/Worker/看板/归档工具，工具调用审计、短期 Router 模型/工具令牌；Native Resume、版本不兼容时的摘要语义恢复和新 Worker 加载归档摘要，恢复时注入最新截图与离开期间环境变化。`pnpm smoke:phase8` 10 项通过。真实 QEMU/WHPX、真实 Router Pi/模型决策质量和人工 UI 仍未验收，详见 [`tests/phase8/summary.md`](../tests/phase8/summary.md)。
-- **下一步**：进入阶段 9（多 VM 资源调度和共享环境完善）。真实 QEMU/WHPX 与 noVNC 回归、真实 Pi/模型 Computer Use 任务评测、Windows NSIS 安装包与干净 Windows Smoke Test、真实飞书/QQ 和长时稳定性作为发布前验收门槛持续跟踪。
+- **阶段 9 完成（代码、自动化与真实本地进程 Smoke）**：Resource Manager 统一宿主内存/运行 VM/软预算报告，`when_needed` 自动启动/恢复、`waiting_resources` 和资源通知，空闲休眠只作用于无任务/无 Worker/无 Lease 的 VM；共享 VM 整机快照影响预览与确认、独立项目目录备份/恢复、VM/项目删除依赖检查；看板/VM/项目页统一资源与队列快照、任务跳转控制台/Worker 会话、Worker 恢复环境增量摘要。`pnpm smoke:phase9` 10 项通过。真实 QEMU 快照、真实 Guest workspace 归档、真实 Pi/模型和人工 UI 仍未验收，详见 [`tests/phase9/summary.md`](../tests/phase9/summary.md)。
+- **下一步**：进入阶段 10（飞书和 QQ 本地机器人）。真实 QEMU/WHPX 与 noVNC 回归、真实 Pi/模型 Computer Use 任务评测、Windows NSIS 安装包与干净 Windows Smoke Test、真实飞书/QQ 和长时稳定性作为发布前验收门槛持续跟踪。
 
 1. 先验证 Hypervisor、镜像、Pi Computer Use 和模型代理等高风险链路，再大规模开发 UI。
 2. 每个阶段形成可运行、可测试的纵向能力，避免一次性生成大量空模块。
@@ -706,6 +707,15 @@
 
 - 同一任务在 Router、看板、项目和 VM 页状态一致；
 - 所有页面在断线重连后能对账恢复。
+
+**完成记录（2026-11-11）**
+
+- Resource Manager：`GET /api/v1/resources` 提供宿主总/可用内存、Host Reserve、Soft Memory Budget、运行 VM 分配、等待任务和自动启动阻塞列表；`POST /api/v1/resources/reconcile` 可手动触发同一套调度。`resourcePolicy` 扩展 `softMemoryBudgetBytes`、`idleSuspendEnabled`、`idleSuspendTimeoutMs`，兼容旧设置并在读取时归一化。
+- 任务状态：`waiting_vm → waiting_resources` 合法迁移；资源不足时写入 `resource.waiting_for_memory`，预算恢复后自动启动/恢复 VM 并回到队列。自动启动只使用宿主内存软预算和实际可用内存，手动启动可突破预算但界面告警；空闲休眠检查活动任务、活动 Worker、Execution Lease 和模板/Worker 最后活动时间，绝不停止有任务 VM。
+- 共享 VM：`vm_snapshots`、影响预览和确认恢复（必须 stopped、无活动任务/Lease）；`project_backups`/`project_backup_bindings` 保存项目目录 tar.gz、SHA-256、文件数和产物引用；Guest Agent 新增受 workspace roots 限制的 archive/restore 端点，恢复使用 staging + rename，拒绝符号链接和路径逃逸；共享目录路径冲突阻止项目恢复。
+- 删除依赖：项目删除检查任务/Worker/归档历史并清理项目备份文件；VM 删除检查绑定、任务、Worker/归档、项目备份引用和 Lease，只允许 stopped 且无依赖的 VM。`DELETE /api/v1/vms/:id` 已接入 Go Supervisor Provider。
+- 多端同步：`TaskBoardItem.vmPowerState`、`TaskBoardSnapshot.resources`、`VmInstanceView.queue/activeWorkers/sharing/scheduling`、`ProjectBindingView.activeWorkers/queueDepth`、`ProjectView.activeWorkerCount`；看板、VM 页、项目页使用同一数据库快照；任务详情可跳转控制台和 Worker 会话。Worker 恢复环境新增 `sharedVm`、`sharedProjects` 和 `changesSinceArchive`。
+- `pnpm smoke:phase9` 使用真实控制平面、SQLite、宿主内存计数和真实 HTTP 调用，Supervisor/Guest Agent 为协议替身；10 项通过。真实 QEMU `qemu-img snapshot`、真实 Guest workspace 归档/恢复、真实 Pi/模型和浏览器/Electron 人工 UI 仍待显式验收。
 
 ---
 

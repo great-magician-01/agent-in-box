@@ -14,9 +14,13 @@ import type { DatabaseExecutor } from "../persistence/executor";
 import type { DatabaseSchema } from "../persistence/schema";
 import {
   DEFAULT_SECURITY_SETTINGS,
+  DEFAULT_VM_IDLE_SUSPEND_TIMEOUT_MS,
   DEFAULT_WORKER_LIFECYCLE_POLICY,
+  MAX_VM_IDLE_SUSPEND_TIMEOUT_MS,
   MAX_WORKER_IDLE_TIMEOUT_MS,
   MIN_HOST_RESERVE_BYTES,
+  MIN_SOFT_MEMORY_BUDGET_BYTES,
+  MIN_VM_IDLE_SUSPEND_TIMEOUT_MS,
   MIN_WORKER_IDLE_TIMEOUT_MS,
   defaultResourcePolicy,
 } from "./defaults";
@@ -106,7 +110,48 @@ export function normalizeResourcePolicy(raw: unknown, totalMemoryBytes: number):
     throw new PersistenceError("validation_failed", "自动启动策略无效");
   }
 
-  return { hostReserveBytes, autoStartPolicy };
+  const softMemoryBudgetBytes = input.softMemoryBudgetBytes ?? 0;
+  if (
+    typeof softMemoryBudgetBytes !== "number" ||
+    !Number.isInteger(softMemoryBudgetBytes) ||
+    softMemoryBudgetBytes < 0
+  ) {
+    throw new PersistenceError("validation_failed", "Soft Memory Budget 必须是非负整数字节数");
+  }
+  if (softMemoryBudgetBytes > 0 && softMemoryBudgetBytes < MIN_SOFT_MEMORY_BUDGET_BYTES) {
+    throw new PersistenceError(
+      "validation_failed",
+      `Soft Memory Budget 至少为 ${Math.round(MIN_SOFT_MEMORY_BUDGET_BYTES / 1024 / 1024)} MiB`,
+    );
+  }
+  if (totalMemoryBytes > 0 && softMemoryBudgetBytes > totalMemoryBytes) {
+    throw new PersistenceError("validation_failed", "Soft Memory Budget 不能超过宿主机物理内存");
+  }
+
+  const idleSuspendEnabled = input.idleSuspendEnabled ?? false;
+  if (typeof idleSuspendEnabled !== "boolean") {
+    throw new PersistenceError("validation_failed", "VM 空闲休眠开关无效");
+  }
+  const idleSuspendTimeoutMs = input.idleSuspendTimeoutMs ?? DEFAULT_VM_IDLE_SUSPEND_TIMEOUT_MS;
+  if (
+    typeof idleSuspendTimeoutMs !== "number" ||
+    !Number.isInteger(idleSuspendTimeoutMs) ||
+    idleSuspendTimeoutMs < MIN_VM_IDLE_SUSPEND_TIMEOUT_MS ||
+    idleSuspendTimeoutMs > MAX_VM_IDLE_SUSPEND_TIMEOUT_MS
+  ) {
+    throw new PersistenceError(
+      "validation_failed",
+      `VM 空闲休眠超时必须为 ${MIN_VM_IDLE_SUSPEND_TIMEOUT_MS}～${MAX_VM_IDLE_SUSPEND_TIMEOUT_MS} ms 的整数`,
+    );
+  }
+
+  return {
+    hostReserveBytes,
+    softMemoryBudgetBytes,
+    autoStartPolicy,
+    idleSuspendEnabled,
+    idleSuspendTimeoutMs,
+  };
 }
 
 export function normalizeSecuritySettings(raw: unknown): SecuritySettings {
@@ -202,7 +247,10 @@ export class SettingsService {
 
     return {
       onboarding: onboarding ?? null,
-      resourcePolicy: resourcePolicy ?? defaultResourcePolicy(totalMemoryBytes),
+      resourcePolicy:
+        resourcePolicy === undefined
+          ? defaultResourcePolicy(totalMemoryBytes)
+          : normalizeResourcePolicy(resourcePolicy, totalMemoryBytes),
       security: security ?? DEFAULT_SECURITY_SETTINGS,
       workerLifecycle: workerLifecycle ?? DEFAULT_WORKER_LIFECYCLE_POLICY,
       preferredModelProvider: preferredModelProvider ?? null,
@@ -216,6 +264,13 @@ export class SettingsService {
       (await this.getJson<WorkerLifecyclePolicy>(SETTINGS_KEYS.workerLifecycle)) ??
       DEFAULT_WORKER_LIFECYCLE_POLICY
     );
+  }
+
+  async resourcePolicy(totalMemoryBytes: number): Promise<ResourcePolicy> {
+    const stored = await this.getJson<ResourcePolicy>(SETTINGS_KEYS.resourcePolicy);
+    return stored === undefined
+      ? defaultResourcePolicy(totalMemoryBytes)
+      : normalizeResourcePolicy(stored, totalMemoryBytes);
   }
 
   async getLocalAdmin(executor: DatabaseExecutor = this.db): Promise<LocalUserRecord | null> {

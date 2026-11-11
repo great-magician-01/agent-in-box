@@ -419,6 +419,47 @@ export interface RouterModelTokensTable {
   last_used_at: string | null;
 }
 
+export interface VmSnapshotsTable {
+  id: string;
+  vm_id: string;
+  tag: string;
+  label: string;
+  status: string;
+  affected_projects_json: string;
+  size_bytes: number | null;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+  restored_at: string | null;
+}
+
+export interface ProjectBackupsTable {
+  id: string;
+  project_id: string;
+  label: string;
+  status: string;
+  artifact_snapshot_json: string;
+  error_message: string | null;
+  created_at: string;
+  completed_at: string | null;
+  restored_at: string | null;
+}
+
+export interface ProjectBackupBindingsTable {
+  id: string;
+  backup_id: string;
+  binding_id: string;
+  vm_id: string;
+  vm_name: string;
+  guest_workspace_path: string;
+  file_path: string | null;
+  sha256: string | null;
+  size_bytes: number | null;
+  file_count: number | null;
+  status: string;
+  error_message: string | null;
+}
+
 export interface SchemaMigrationsTable {
   id: string;
   applied_at: string;
@@ -487,4 +528,7 @@ export interface DatabaseSchema {
   router_messages: RouterMessagesTable;
   router_tool_calls: RouterToolCallsTable;
   router_model_tokens: RouterModelTokensTable;
+  vm_snapshots: VmSnapshotsTable;
+  project_backups: ProjectBackupsTable;
+  project_backup_bindings: ProjectBackupBindingsTable;
 }

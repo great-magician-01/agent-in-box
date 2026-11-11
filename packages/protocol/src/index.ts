@@ -462,7 +462,68 @@ export type AutoStartPolicy = "manual" | "when_needed";
 export interface ResourcePolicy {
   /** Memory the host scheduler must keep available for the operating system. */
   hostReserveBytes: number;
+  /**
+   * Soft memory budget for running VMs. Zero derives the budget from total
+   * memory minus the host reserve. Manual starts may exceed the budget.
+   */
+  softMemoryBudgetBytes: number;
   autoStartPolicy: AutoStartPolicy;
+  /** Suspends a running VM after the idle timeout when no task or Worker needs it. */
+  idleSuspendEnabled: boolean;
+  idleSuspendTimeoutMs: number;
+}
+
+export type ResourcePressure = "ok" | "warning" | "critical";
+
+export interface VmResourceAllocation {
+  vmId: Id;
+  vmName: string;
+  powerState: VmPowerState;
+  memoryBytes: number;
+  activeTaskCount: number;
+  queuedTaskCount: number;
+  activeWorkerCount: number;
+}
+
+export interface ResourceBlockedStart {
+  vmId: Id;
+  vmName: string;
+  requiredBytes: number;
+  allocatedBytes: number;
+  budgetBytes: number;
+  reason: string;
+}
+
+/** Host-wide read model rebuilt from the database and live host memory counters. */
+export interface ResourceReport {
+  capturedAt: IsoTimestamp;
+  totalMemoryBytes: number;
+  freeMemoryBytes: number;
+  hostReserveBytes: number;
+  softMemoryBudgetBytes: number;
+  effectiveBudgetBytes: number;
+  allocatedMemoryBytes: number;
+  remainingBudgetBytes: number;
+  pressure: ResourcePressure;
+  runningVmCount: number;
+  suspendedVmCount: number;
+  totalVmCount: number;
+  waitingResourceTaskCount: number;
+  waitingVmTaskCount: number;
+  queuedTaskCount: number;
+  blockedAutoStarts: ResourceBlockedStart[];
+  autoStartPolicy: AutoStartPolicy;
+  idleSuspendEnabled: boolean;
+  idleSuspendTimeoutMs: number;
+  allocations: VmResourceAllocation[];
+}
+
+export interface ResourceReconcileResult {
+  report: ResourceReport;
+  startedVmIds: Id[];
+  resumedVmIds: Id[];
+  suspendedVmIds: Id[];
+  waitingTaskIds: Id[];
 }
 
 export interface SecuritySettings {
@@ -789,12 +850,54 @@ export interface VmTaskReference {
   status: TaskStatus;
 }
 
+export interface VmQueueItem {
+  taskId: Id;
+  projectId: Id;
+  projectName: string;
+  objective: string;
+  status: TaskStatus;
+  priority: number;
+  /** One-based position among runnable queued tasks; null for non-queued states. */
+  queuePosition: number | null;
+  createdAt: IsoTimestamp;
+}
+
+export interface VmActiveWorkerView {
+  workerId: Id;
+  projectId: Id;
+  projectName: string;
+  status: WorkerStatus;
+  currentTaskId: Id | null;
+  lastActiveAt: IsoTimestamp;
+}
+
+export interface VmSharingView {
+  shared: boolean;
+  projectCount: number;
+  projects: VmProjectReference[];
+  warning: string | null;
+}
+
+export interface VmSchedulingView {
+  autoStartPolicy: AutoStartPolicy;
+  canAutoStart: boolean;
+  blockedReason: string | null;
+  idleSuspendEnabled: boolean;
+  idleSuspendEligibleAt: IsoTimestamp | null;
+  idleSuspendBlockers: string[];
+  warnings: string[];
+}
+
 export interface VmInstanceView {
   vm: VmInstanceRecord;
   runtime: SupervisorVmState | null;
   diskUsageBytes: number;
   boundProjects: VmProjectReference[];
   currentTask: VmTaskReference | null;
+  queue: VmQueueItem[];
+  activeWorkers: VmActiveWorkerView[];
+  sharing: VmSharingView;
+  scheduling: VmSchedulingView;
 }
 
 export interface SupervisorAvailability {
@@ -811,6 +914,153 @@ export interface VmConsole {
   vmId: Id;
   consoleUrl: string;
   message: string;
+}
+
+/* Phase 9: whole-VM snapshots with explicit shared-VM impact. */
+export type VmSnapshotStatus = "creating" | "available" | "failed";
+
+export interface VmSnapshotRecord {
+  id: Id;
+  vmId: Id;
+  tag: string;
+  label: string;
+  status: VmSnapshotStatus;
+  /** Projects bound to the VM when the snapshot was taken. */
+  affectedProjects: VmProjectReference[];
+  sizeBytes: number | null;
+  errorMessage: string | null;
+  createdAt: IsoTimestamp;
+  restoredAt: IsoTimestamp | null;
+}
+
+export interface VmSnapshotProjectImpact extends VmProjectReference {
+  activeTaskCount: number;
+  lastActivityAt: IsoTimestamp | null;
+}
+
+export interface VmSnapshotConflict {
+  reason: "vm_not_stopped" | "active_tasks" | "execution_lease";
+  message: string;
+}
+
+export interface VmSnapshotImpact {
+  snapshot: VmSnapshotRecord;
+  vmId: Id;
+  vmName: string;
+  vmPowerState: VmPowerState;
+  affectedProjects: VmSnapshotProjectImpact[];
+  /** Projects bound now but not when the snapshot was created, or vice versa. */
+  bindingSetChanged: boolean;
+  activeTaskCount: number;
+  requiresConfirmation: boolean;
+  warning: string;
+  blocked: boolean;
+  conflicts: VmSnapshotConflict[];
+}
+
+export interface CreateVmSnapshotRequest {
+  label?: string;
+}
+
+export interface RestoreVmSnapshotRequest {
+  confirmSharedImpact?: boolean;
+}
+
+/* Phase 9: project-level workspace backups independent from whole-VM snapshots. */
+export type ProjectBackupStatus = "creating" | "available" | "failed" | "restoring" | "restored";
+export type ProjectBackupBindingStatus = "pending" | "available" | "failed" | "restored";
+
+export interface ProjectBackupBindingRecord {
+  id: Id;
+  backupId: Id;
+  bindingId: Id;
+  vmId: Id;
+  vmName: string;
+  guestWorkspacePath: string;
+  sizeBytes: number | null;
+  fileCount: number | null;
+  sha256: string | null;
+  status: ProjectBackupBindingStatus;
+  errorMessage: string | null;
+}
+
+export interface ProjectBackupArtifactRef {
+  artifactId: Id;
+  taskId: Id;
+  name: string;
+  relativePath: string;
+  sha256: string;
+  sizeBytes: number;
+}
+
+export interface ProjectBackupRecord {
+  id: Id;
+  projectId: Id;
+  label: string;
+  status: ProjectBackupStatus;
+  bindings: ProjectBackupBindingRecord[];
+  artifactSnapshot: ProjectBackupArtifactRef[];
+  createdAt: IsoTimestamp;
+  completedAt: IsoTimestamp | null;
+  restoredAt: IsoTimestamp | null;
+  errorMessage: string | null;
+}
+
+export interface ProjectBackupConflict {
+  bindingId: Id;
+  vmId: Id;
+  vmName: string;
+  reason:
+    | "binding_missing"
+    | "workspace_path_changed"
+    | "shared_workspace_path"
+    | "vm_not_running"
+    | "active_tasks"
+    | "lease_active"
+    | "missing_file";
+  message: string;
+  affectedProjects: VmProjectReference[];
+}
+
+export interface ProjectBackupImpact {
+  backup: ProjectBackupRecord;
+  blocked: boolean;
+  conflicts: ProjectBackupConflict[];
+  /** Other projects sharing the affected VMs; their directories are not restored. */
+  otherProjects: VmProjectReference[];
+  warning: string;
+}
+
+export interface CreateProjectBackupRequest {
+  label?: string;
+}
+
+export interface RestoreProjectBackupRequest {
+  confirm: boolean;
+}
+
+export interface ProjectBackupVerifyBinding {
+  bindingId: Id;
+  vmId: Id;
+  exists: boolean;
+  sha256Matches: boolean;
+  sizeMatches: boolean;
+}
+
+export interface ProjectBackupVerifyArtifact {
+  artifactId: Id;
+  relativePath: string;
+  exists: boolean;
+  sha256Matches: boolean;
+  sizeMatches: boolean;
+}
+
+export interface ProjectBackupVerifyResult {
+  backupId: Id;
+  ok: boolean;
+  bindings: ProjectBackupVerifyBinding[];
+  artifacts: ProjectBackupVerifyArtifact[];
+  checkedAt: IsoTimestamp;
 }
 
 /* Phase 4: authenticated consoles, guest RPC and unified execution control. */
@@ -985,6 +1235,10 @@ export interface ProjectBindingView {
   vm: VmInstanceRecord;
   sharedProjects: VmProjectReference[];
   sharedActiveTaskCount: number;
+  /** Workers of this project currently attached to this VM. */
+  activeWorkers: VmActiveWorkerView[];
+  /** Active tasks of this project on this VM, including waiting states. */
+  queueDepth: number;
 }
 
 export interface ProjectView {
@@ -992,6 +1246,7 @@ export interface ProjectView {
   bindings: ProjectBindingView[];
   conversationCount: number;
   activeTaskCount: number;
+  activeWorkerCount: number;
 }
 
 export interface ProjectDetail extends ProjectView {
@@ -1042,6 +1297,8 @@ export interface TaskBoardItem extends TaskRecord {
   dependencyIds: Id[];
   /** One-based position among runnable queued tasks on this VM; null otherwise. */
   queuePosition: number | null;
+  /** Power state of the task's target VM at snapshot time. */
+  vmPowerState: VmPowerState;
 }
 
 export interface TaskBoardSnapshot {
@@ -1049,6 +1306,8 @@ export interface TaskBoardSnapshot {
   projects: ProjectRecord[];
   vms: VmInstanceRecord[];
   workers: WorkerRecord[];
+  /** Filled by the HTTP board route so all pages share one resource read model. */
+  resources?: ResourceReport;
   snapshotAt: IsoTimestamp;
   eventCursor: number;
 }
@@ -1450,6 +1709,16 @@ export interface WorkerResumeEnvironment {
   recentTasks: ActiveTaskCard[];
   archivedAt: IsoTimestamp | null;
   archivedForMs: number | null;
+  /** True when other projects are bound to the same VM. */
+  sharedVm: boolean;
+  sharedProjects: Array<{
+    id: Id;
+    name: string;
+    archived: boolean;
+    activeTaskCount: number;
+  }>;
+  /** Deterministic environment delta since the archive timestamp. */
+  changesSinceArchive: string[];
   capturedAt: IsoTimestamp;
 }
 

@@ -106,7 +106,8 @@ describe("launch at login", () => {
       },
     });
     expect(calls).toEqual([{ openAtLogin: true, openAsHidden: true, args: ["--hidden"] }]);
-    expect(linuxAutostartEntry(process.execPath)).toContain(process.execPath);
+    const escapedExecPath = process.execPath.replace(/(["\\`$])/g, "\\$1");
+    expect(linuxAutostartEntry(process.execPath)).toContain(escapedExecPath);
   });
 });
 

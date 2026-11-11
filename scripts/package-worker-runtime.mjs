@@ -1,0 +1,66 @@
+import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const runtimeRoot = path.join(repository, "packages", "agent-runtime");
+const outputDirectory = path.join(repository, "release", "worker-runtime");
+const version = JSON.parse(await readFile(path.join(repository, "package.json"), "utf8")).version;
+const filename = `agent-in-box-worker-${version}.tar.gz`;
+
+const staging = await mkdtemp(path.join(os.tmpdir(), "agent-in-box-worker-package-"));
+try {
+  const dist = path.join(staging, "dist");
+  await mkdir(dist, { recursive: true });
+  await copyFile(
+    path.join(runtimeRoot, "dist", "worker-rpc-main.js"),
+    path.join(dist, "worker-rpc-main.js"),
+  );
+  await copyFile(path.join(runtimeRoot, "dist", "index.js"), path.join(dist, "index.js"));
+  for (const module of [
+    "pi-engine.js",
+    "pi-rpc-process.js",
+    "worker-rpc-client.js",
+    "worker-rpc-server.js",
+  ]) {
+    await copyFile(path.join(runtimeRoot, "dist", module), path.join(dist, module));
+  }
+  await writeFile(
+    path.join(staging, "package.json"),
+    `${JSON.stringify(
+      {
+        name: "@agent-in-box/worker-runtime",
+        version,
+        private: true,
+        main: "dist/worker-rpc-main.js",
+      },
+      null,
+      2,
+    )}\n`,
+    { mode: 0o644 },
+  );
+
+  await mkdir(outputDirectory, { recursive: true });
+  const archive = path.join(outputDirectory, filename);
+  await rm(archive, { force: true });
+  const result = spawnSync("tar", ["-czf", archive, "-C", staging, "."], {
+    stdio: "inherit",
+  });
+  if (result.status !== 0) throw new Error("tar failed to create the Worker runtime archive");
+  const bytes = await readFile(archive);
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
+  await writeFile(`${archive}.sha256`, `${sha256}  ${filename}\n`, { mode: 0o644 });
+  console.log(
+    JSON.stringify({
+      archive,
+      sha256,
+      sizeBytes: bytes.byteLength,
+      entry: "dist/worker-rpc-main.js",
+    }),
+  );
+} finally {
+  await rm(staging, { recursive: true, force: true });
+}

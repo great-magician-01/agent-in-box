@@ -1,0 +1,62 @@
+{
+  "name": "agent-in-box-phase6-smoke",
+  "startedAt": "2026-11-11T06:40:16.426Z",
+  "finishedAt": "2026-11-11T06:40:18.875Z",
+  "status": "passed",
+  "checks": [
+    {
+      "name": "真实控制平面应用阶段 6 SQLite 迁移并启动 Model Broker",
+      "passed": true
+    },
+    {
+      "name": "Worker 通过 Guest RPC 握手并建立 Pi 会话",
+      "passed": true,
+      "detail": "worker=131f017f-f69e-43fb-a6d4-1a1835e490a0"
+    },
+    {
+      "name": "Guest 只持有短期 Broker 令牌，镜像/会话文件中没有长期 Provider Key",
+      "passed": true
+    },
+    {
+      "name": "Pi 事件映射为 TaskEvent/会话消息并释放 Execution Lease",
+      "passed": true
+    },
+    {
+      "name": "Steer 与 Follow-up 区分，任务取消会触发 Pi Abort 并释放 Lease",
+      "passed": true
+    },
+    {
+      "name": "Guest Worker RPC 令牌原子轮换后旧令牌立即失效",
+      "passed": true
+    },
+    {
+      "name": "Model Broker 流式透传、用量记录，撤销令牌和长期 Key 均被拒绝",
+      "passed": true
+    },
+    {
+      "name": "控制平面重启不重复执行，Worker 绑定与会话引用保留",
+      "passed": true
+    },
+    {
+      "name": "Worker 通过持久会话引用 Native Resume 恢复",
+      "passed": true
+    },
+    {
+      "name": "Worker 会话归档与从归档恢复入口可用",
+      "passed": true
+    },
+    {
+      "name": "恢复后的 Worker 可继续接收任务",
+      "passed": true
+    }
+  ],
+  "boundaries": {
+    "realChildProcess": true,
+    "realPiProcess": false,
+    "realModel": false,
+    "realQemuWxpx": false,
+    "browserElectronUi": false,
+    "workerGuestIsFakePi": true
+  },
+  "upstreamRequests": 1
+}

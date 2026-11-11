@@ -69,7 +69,7 @@ describe("PiWorkerEngine", () => {
     await engine.abort(session.sessionId);
 
     const archive = await engine.archive(session.sessionId);
-    expect(archive.archiveRef).toMatch(/fake-session\.jsonl$/);
+    expect(archive.archiveRef).toMatch(/backups\/worker-1-.*\.jsonl$/);
     expect(archive.summary).toBe("done");
 
     const startArgs = JSON.parse(await readFile(argsLog, "utf8")) as string[];
@@ -79,7 +79,7 @@ describe("PiWorkerEngine", () => {
     expect(startArgs).toContain("--system-prompt");
 
     const resumed = await engine.resume(archive.archiveRef);
-    expect(resumed).toEqual({ sessionId: "resumed-session", mode: "native" });
+    expect(resumed).toMatchObject({ sessionId: "resumed-session", mode: "native" });
 
     const resumeArgs = JSON.parse(await readFile(argsLog, "utf8")) as string[];
     expect(resumeArgs).toContain("--session");

@@ -218,5 +218,13 @@ export function toWorkerRecord(row: Selectable<WorkersTable>): WorkerRecord {
     createdAt: row.created_at,
     lastActiveAt: row.last_active_at,
     archivedAt: row.archived_at,
+    agentSessionRef: row.agent_session_ref,
+    sessionVersion: row.session_version,
+    lastHeartbeatAt: row.last_heartbeat_at,
+    archiveSummary: row.archive_summary,
+    lastErrorCode: row.last_error_code,
+    lastErrorMessage: row.last_error_message,
+    providerId: row.provider_id,
+    modelId: row.model_id,
   };
 }

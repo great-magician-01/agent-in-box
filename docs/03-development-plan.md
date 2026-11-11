@@ -18,7 +18,8 @@
 - **阶段 3 完成（代码与本机服务验证）**：Image Service 的 Manifest/白名单/不可变版本、续传/取消/去重/SSE/重启恢复；Supervisor 的完整 QEMU 生命周期 API、ACL、进程/QMP 对账；Linux VM 控制平面与资源/绑定/任务/健康分离的管理 UI。`pnpm check` 与 Windows 服务 Smoke 通过。当前环境未重新执行真实 QEMU/WHPX 回归，未关闭门槛见 [`tests/phase3/summary.md`](../tests/phase3/summary.md)。
 - **阶段 4 完成（代码与本机服务验证）**：Guest Agent 认证/令牌轮换、心跳、版本握手、动作 ID/超时/去重、安全更新暂存；X11 动态分辨率/DPI；noVNC 实时控制台、回环一次性票据与逐帧 RFB 输入门控；统一 Per-VM Execution Lease 和人工抢占 AI。Windows 真实进程 Smoke 与自动化回归通过。真实 QEMU/WHPX、X11 和浏览器/Electron 人工桌面交互、服务管理器更新激活仍需显式验收，详见 [`tests/phase4/summary.md`](../tests/phase4/summary.md)。
 - **阶段 5 完成（代码、自动化与真实控制平面 Smoke）**：Project CRUD/归档/工作区配置、多对多 VM 绑定和主 VM、项目会话/活动/产物引用；Task 依赖/优先级/幂等/取消/重试、Per-VM 持久队列、完成结果与产物 SHA-256 校验；任务看板筛选、详情和 WebSocket 重连全量同步。真实控制平面重启后运行任务不重复认领，HTTP 不提供伪造完成路由。Pi Worker、真实浏览器/Electron 人工看板验收仍未在本轮执行，详见 [`tests/phase5/summary.md`](../tests/phase5/summary.md)。
-- **下一步**：进入阶段 6（Pi Worker Runtime、Model Broker、Worker Engine Adapter），将 Worker 接入 TaskService 认领、Execution Lease 和 Worker Registry。真实 QEMU/WHPX 与 noVNC 回归、Electron 托管 Supervisor、Windows NSIS 安装包与干净 Windows Smoke Test、真实飞书/QQ 和长时稳定性作为发布前验收门槛持续跟踪。
+- **阶段 6 完成（代码、自动化与真实本地进程 Smoke）**：Guest Worker RPC（认证、事件重连、版本握手、归档校验）、固定 Pi 1.5.1 运行时与 `images/linux` 安装资产；Model Broker（Provider/模型白名单、短期令牌、撤销中断流、流式 usage/错误记录、长期 Key 仅存宿主机）；Worker Engine Adapter 接入 TaskService/Lease/Registry、心跳、Steer/Follow-up、取消→Abort、断线/重启对账与 Native Resume；项目 Worker 会话面板。`pnpm smoke:phase6` 11 项通过。真实 QEMU/WHPX、Golden Image、真实 Pi/模型与人工 UI 仍未验收，详见 [`tests/phase6/summary.md`](../tests/phase6/summary.md)。
+- **下一步**：进入阶段 7（完整 Computer Use 工具集、执行闭环保护、Policy/Approval 和首轮真实任务评测）。阶段 6 的 Blocked 完成状态必须由阶段 7 的独立校验替换。真实 QEMU/WHPX 与 noVNC 回归、Electron 托管 Supervisor、Windows NSIS 安装包与干净 Windows Smoke Test、真实飞书/QQ 和长时稳定性作为发布前验收门槛持续跟踪。
 
 1. 先验证 Hypervisor、镜像、Pi Computer Use 和模型代理等高风险链路，再大规模开发 UI。
 2. 每个阶段形成可运行、可测试的纵向能力，避免一次性生成大量空模块。
@@ -497,6 +498,13 @@
 - Steer 与 Follow-up 行为可区分；
 - Abort 后工具执行停止且任务状态准确；
 - 控制平面重启不丢 Worker 绑定。
+
+**完成记录（2026-11-11）**
+
+- Guest Worker Runtime：认证 JSONL/SSE RPC、固定 Pi 1.5.1 / Session 1、独立 Worker HOME/session、版本不兼容明确失败、令牌轮换、命令超时与大小限制；安装资产位于 `images/linux/`，运行时归档由 `pnpm package:worker-runtime` 生成。
+- Model Broker：Provider/模型白名单、短期令牌（Worker/VM/session/任务绑定、TTL、撤销中断流）、OpenAI-compatible 与 Anthropic Messages 透传、用量/错误记录、上游有限重试；长期凭据只由 Electron `safeStorage` 解密并通过 0600 描述文件的凭据桥提供。
+- Worker Engine Adapter：TaskService 认领、统一 Lease、心跳、事件→TaskEvent/会话消息、Steer/Follow-up、取消→Pi Abort、断线失败对账、重启保留绑定、归档/Native Resume。
+- `pnpm smoke:phase6` 真实控制平面 11 项检查通过；真实 QEMU/WHPX、Linux Golden Image、真实 Pi/模型和人工 UI 仍未验收，详见 [`tests/phase6/summary.md`](../tests/phase6/summary.md)。
 
 ---
 

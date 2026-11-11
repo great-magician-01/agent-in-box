@@ -321,6 +321,40 @@ WebSocket             /api/v1/events/ws
 
 Outbox 发布器将提交后的消息标记为已发布并广播带单调 `eventId`、`eventVersion`、协议版本、时间和可用项目/任务/VM 上下文的失效通知。当前 WebSocket 不是可靠增量日志，离线期间也不承诺逐条重放；客户端在每次打开/重连时读取 `/tasks/board` 完整数据库快照，事件只触发重新同步。noVNC 与事件 WebSocket 各自只处理自己的 upgrade 路径，最终 fallback 对未被认领的路径返回 404 并关闭 socket，避免未知升级连接悬挂。
 
+### 5.8 阶段 6 Worker 与会话持久化（2026-11-11）
+
+Migration `005_phase6_workers_models` 为 `workers` 增加 `agent_session_ref`、`session_version`、`last_heartbeat_at`、`archive_summary`、错误字段、`broker_token_id`、`provider_id`、`model_id`，并新增：
+
+- `model_providers`：`base_url`、`api`（`openai-completions` / `anthropic-messages`）、`credential_provider_id`、模型白名单 JSON、启用状态；不保存长期密钥。
+- `model_tokens`：短期 Broker 令牌的 SHA-256、Worker/VM/session/任务/Provider/模型绑定、过期时间和撤销原因。原文只存在于 Guest 会话配置；控制平面重启时全部撤销。
+- `model_requests`：上游状态、尝试次数、时长、token usage 和错误代码；不保存请求/响应正文。
+- `conversation_messages`：Worker 会话的用户/Assistant 文本、Prompt/Steer/Follow-up/事件模式和任务引用。
+
+Guest Worker RPC 使用 `packages/agent-runtime` 的 `WorkerRpcServer`，监听 Guest `0.0.0.0:7612`；QEMU 只把该端口转发到宿主机回环。RPC 使用每请求重读的 Bearer 令牌文件、明确协议/Engine/Session 版本握手、2 MiB 请求上限、SSE 事件流（`after` 序号回放）和命令超时。Pi 进程默认使用 Host 分配的回环端口（`workerHostPort`）。
+
+Worker Runtime 在 Host 侧按 VM 周期对账：认领 `queued` 任务、获取统一 Lease、将任务目标发给 Pi、把 Pi 事件写成 TaskEvent 和会话消息；取消任务会调用 Pi `abort`、释放 Lease 并保持 `cancelled`。Pi 回合自然结束但尚无阶段 7 独立校验时，任务进入 `blocked`（`awaiting_verification`），不自动完成。RPC 断线使任务 `failed`、Worker `failed` 并保留 `agent_session_ref`。控制平面重启后将旧 Worker 标记 `failed`（`control_plane_restarted`），将仍在运行的任务标记 `failed`（`worker_runtime_restarted`），绑定保留；恢复必须是显式 `POST /api/v1/workers/:id/resume`，通过归档 manifest 校验后执行 Native Resume。
+
+模型 Broker 只接受宿主机配置的 Provider/模型，每次请求重新校验短期令牌、模型白名单、任务仍在该 Worker 上运行、并发与频率。上游请求体按原字节转发，SSE 字节流不改写；仅在收到上游响应前对连接错误与 429/502/503/504 做有限重试。撤销令牌会中断进行中的流。长期 Provider Key 由 Electron Main 通过 `safeStorage` 解密，控制平面通过 0600 `credential-bridge.json` 描述的文件和进程内 Bearer 桥按需获取，不用普通配置、数据库或日志保存。
+
+主要路由：
+
+```text
+GET/POST              /api/v1/workers
+GET                   /api/v1/workers/:id
+GET                   /api/v1/workers/:id/messages
+POST                  /api/v1/workers/:id/prompt
+POST                  /api/v1/workers/:id/steer
+POST                  /api/v1/workers/:id/follow-up
+POST                  /api/v1/workers/:id/abort
+POST                  /api/v1/workers/:id/archive
+POST                  /api/v1/workers/:id/resume
+GET/PUT               /api/v1/models/providers
+GET                   /api/v1/models/requests
+POST                  /api/v1/models/tokens/:id/revoke
+POST                  /v1/chat/completions      (Model Broker)
+POST                  /v1/messages              (Model Broker)
+```
+
 ## 6. 状态机与调度
 
 ### 6.1 Task 状态机
@@ -562,6 +596,8 @@ getCapabilities()
 
 Pi 是第一个 General Worker Engine。Computer Use 专用引擎可作为另一实现，不影响 Task 和 Router。
 
+**阶段 6 实现**：`WorkerEngine` 增加可选 `engineVersion` / `sessionVersion` 与 `WorkerSessionHandle`。Pi 实现 `PiWorkerEngine`，每个 Worker 独立进程、HOME 和 session 目录；Host 侧不再直接 `spawn` Guest Pi，而是通过 `WorkerRpcClient` 访问 Guest `WorkerRpcServer`。归档返回宿主机可验证的 JSONL 备份引用，`resume` 只做 Native Resume；Summary 恢复是 Host 显式启动的新会话，不伪装成无损恢复。Worker Runtime 负责 TaskService 认领/Lease/心跳/事件映射，Engine Adapter 不直接修改任务库。
+
 ### 10.4 必须验证的 Pi 兼容问题
 
 通用 `click` 自定义工具不自动等于完整 Computer Use。需要验证：
@@ -592,6 +628,8 @@ Agent S 等开源项目用于对照评测和专用引擎研究，不直接承担
 - 重启或撤销令牌后 VM 不能继续使用旧凭据。
 
 技术验证必须覆盖 Provider 流式响应、工具调用、图片、Thinking 块、取消和重试。若 Pi 的 Proxy 协议与目标模型能力不兼容，应先做专用 Provider Adapter，不通过降低安全边界解决。
+
+**阶段 6 实现**：Broker 模块位于控制平面 `models/`；Provider 配置不持有密钥，`HostCredentialProvider` 优先读取 Electron 凭据桥描述文件，开发/Smoke 可使用 0600 凭据文件。Guest 的 `models.json` 只写入短期 `model_tokens` 原文，令牌绑定 Worker/VM/session/可选任务；Broker 每次请求校验模型白名单与任务归属。撤销会 `AbortController` 中断活动流，控制平面启动时撤销全部旧令牌。OpenAI-compatible 与 Anthropic Messages 请求/响应按原字节透传；图片、工具和 Thinking 块不做内容改写。
 
 ## 12. Router、看板和归档实现
 

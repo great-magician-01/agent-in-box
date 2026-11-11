@@ -1,9 +1,14 @@
-import { mkdir, readFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { constants } from "node:fs";
+import { copyFile, lstat, mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
+  PI_ENGINE_VERSION,
+  PI_SESSION_FORMAT_VERSION,
   type WorkerEngine,
   type WorkerEngineEvent,
   type WorkerInput,
+  type WorkerSessionHandle,
   type WorkerSessionSpec,
 } from "./index";
 import { PiRpcProcess } from "./pi-rpc-process";
@@ -15,6 +20,8 @@ export interface PiWorkerEngineOptions {
   env?: NodeJS.ProcessEnv;
   provider?: string;
   model?: string;
+  engineVersion?: string;
+  sessionVersion?: string;
   /** Test hook: arguments placed before the generated Pi CLI arguments. */
   argsPrefix?: readonly string[];
 }
@@ -23,11 +30,29 @@ interface PiSession {
   process: PiRpcProcess;
   workerId: string;
   sessionFile: string | null;
+  closing: boolean;
+  homeDirectory: string;
 }
 
 interface PiState {
   sessionId?: string;
   sessionFile?: string;
+}
+
+interface SessionManifest {
+  format: "agent-in-box.pi-session";
+  version: 1;
+  workerId: string;
+  sessionId: string;
+  engineType: "pi-rpc";
+  engineVersion: string;
+  sessionVersion: string;
+  sessionFile: string;
+  archiveFile?: string;
+  sizeBytes?: number;
+  sha256?: string;
+  spec?: WorkerSessionSpec;
+  createdAt: string;
 }
 
 const IMAGE_MIME_TYPES: Record<string, string> = {
@@ -38,27 +63,60 @@ const IMAGE_MIME_TYPES: Record<string, string> = {
 };
 
 /**
- * Pi-backed full Worker. Each Worker owns one Pi subprocess and one persistent
- * session file; the engine never shares a session across projects or VMs.
+ * Pi-backed full Worker. Each Worker owns one Pi subprocess, isolated HOME and
+ * persistent session directory; sessions are never shared across projects/VMs.
  */
 export class PiWorkerEngine implements WorkerEngine {
   readonly type = "pi-rpc";
   private readonly sessions = new Map<string, PiSession>();
+  private readonly engineVersion: string;
+  private readonly sessionVersion: string;
 
-  constructor(private readonly options: PiWorkerEngineOptions) {}
+  constructor(private readonly options: PiWorkerEngineOptions) {
+    this.engineVersion = options.engineVersion ?? PI_ENGINE_VERSION;
+    this.sessionVersion = options.sessionVersion ?? PI_SESSION_FORMAT_VERSION;
+  }
 
-  async startSession(spec: WorkerSessionSpec): Promise<{ sessionId: string }> {
+  async startSession(spec: WorkerSessionSpec): Promise<WorkerSessionHandle> {
+    this.assertCompatible(spec);
     const session = await this.startPi(spec);
-    return { sessionId: this.registerSession(session) };
+    return this.registerSession(session, false);
+  }
+
+  private assertCompatible(spec: WorkerSessionSpec): void {
+    if (spec.engineType !== this.type) {
+      throw new Error(`Unsupported Worker engine: ${spec.engineType}`);
+    }
+    if (spec.engineVersion && spec.engineVersion !== this.engineVersion) {
+      throw new Error(
+        `Incompatible Pi engine version ${spec.engineVersion}; required ${this.engineVersion}`,
+      );
+    }
+    if (spec.sessionVersion && spec.sessionVersion !== this.sessionVersion) {
+      throw new Error(
+        `Incompatible Pi session format ${spec.sessionVersion}; required ${this.sessionVersion}`,
+      );
+    }
   }
 
   private async startPi(
     spec?: WorkerSessionSpec,
     resumeRef?: string,
-  ): Promise<PiSession & { sessionId: string }> {
-    const workerId = spec?.workerId ?? `resume-${Date.now()}`;
+  ): Promise<PiSession & WorkerSessionHandle> {
+    const resumed = resumeRef ? await this.resolveResumeReference(resumeRef, spec) : null;
+    const workerId = spec?.workerId ?? resumed?.manifest.workerId;
+    if (!workerId) throw new Error("A workerId is required to start or resume a Pi session");
+    assertSafeId(workerId, "workerId");
+    if (resumed && resumed.manifest.workerId !== workerId) {
+      throw new Error("Pi session archive belongs to a different Worker");
+    }
+    if (spec) this.assertCompatible(spec);
+
     const directory = path.join(this.options.sessionRoot, workerId);
-    await mkdir(directory, { recursive: true });
+    const homeDirectory = path.join(directory, "home");
+    await mkdir(path.join(directory, "sessions"), { recursive: true, mode: 0o700 });
+    await mkdir(homeDirectory, { recursive: true, mode: 0o700 });
+    if (spec?.modelBroker) await this.writeModelsConfig(homeDirectory, spec);
 
     const args: string[] = [
       ...(this.options.argsPrefix ?? []),
@@ -73,11 +131,11 @@ export class PiWorkerEngine implements WorkerEngine {
       "--no-context-files",
       "--no-prompt-templates",
     ];
-    if (resumeRef) {
-      args.push("--session", resumeRef);
+    if (resumed) {
+      args.push("--session", resumed.launchFile);
     } else {
-      const provider = spec?.provider ?? this.options.provider;
-      const model = spec?.model ?? this.options.model;
+      const provider = spec?.modelBroker?.provider ?? spec?.provider ?? this.options.provider;
+      const model = spec?.modelBroker?.model ?? spec?.model ?? this.options.model;
       if (provider) args.push("--provider", provider);
       if (model) args.push("--model", model);
     }
@@ -96,21 +154,101 @@ export class PiWorkerEngine implements WorkerEngine {
     const process = new PiRpcProcess({
       command: this.options.piBinary ?? "pi",
       args,
-      cwd: spec?.workspacePath,
-      env: this.options.env,
+      cwd: spec?.workspacePath ?? resumed?.manifest.spec?.workspacePath,
+      env: {
+        ...globalThis.process.env,
+        ...this.options.env,
+        HOME: homeDirectory,
+        USERPROFILE: homeDirectory,
+      },
     });
     await process.start();
     const state = await process.command<PiState>("get_state");
     const sessionId = state.sessionId ?? workerId;
-    return { process, workerId, sessionFile: state.sessionFile ?? null, sessionId };
+    const sessionFile = state.sessionFile ? path.resolve(state.sessionFile) : null;
+    const handle: WorkerSessionHandle = {
+      sessionId,
+      ...(sessionFile ? { archiveRef: sessionFile } : {}),
+      engineVersion: this.engineVersion,
+      sessionVersion: this.sessionVersion,
+    };
+    const session = { process, workerId, sessionFile, closing: false, homeDirectory, ...handle };
+    await this.writeSessionManifest(session, spec ?? resumed?.manifest.spec);
+    return session;
   }
 
-  private registerSession(session: PiSession & { sessionId: string }): string {
-    if (this.sessions.has(session.sessionId)) {
-      throw new Error(`Pi session already registered: ${session.sessionId}`);
+  private async writeModelsConfig(homeDirectory: string, spec: WorkerSessionSpec): Promise<void> {
+    const broker = spec.modelBroker;
+    if (!broker) return;
+    const url = new URL(broker.baseUrl);
+    if ((url.protocol !== "http:" && url.protocol !== "https:") || url.username || url.password) {
+      throw new Error("Model Broker URL must be HTTP(S) without embedded credentials");
     }
+    assertSafeId(broker.provider, "model provider");
+    if (!broker.token || broker.token.length > 4096 || !broker.model || broker.model.length > 200) {
+      throw new Error("Invalid Model Broker session configuration");
+    }
+    const directory = path.join(homeDirectory, ".pi", "agent");
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    const models = {
+      $schema: "https://pi.dev/schemas/models.schema.json",
+      providers: {
+        [broker.provider]: {
+          baseUrl: broker.baseUrl.replace(/\/$/, ""),
+          api: broker.api,
+          apiKey: broker.token,
+          models: [
+            {
+              id: broker.model,
+              name: broker.model,
+              input: ["text", "image"],
+              reasoning: broker.reasoning === true,
+            },
+          ],
+        },
+      },
+    };
+    await atomicWrite(path.join(directory, "models.json"), `${JSON.stringify(models, null, 2)}\n`);
+  }
+
+  private async writeSessionManifest(
+    session: PiSession & WorkerSessionHandle,
+    spec?: WorkerSessionSpec,
+  ): Promise<void> {
+    if (!session.sessionFile) return;
+    const manifest: SessionManifest = {
+      format: "agent-in-box.pi-session",
+      version: 1,
+      workerId: session.workerId,
+      sessionId: session.sessionId,
+      engineType: "pi-rpc",
+      engineVersion: this.engineVersion,
+      sessionVersion: this.sessionVersion,
+      sessionFile: session.sessionFile,
+      ...(spec ? { spec: sanitizeSpec(spec) } : {}),
+      createdAt: new Date().toISOString(),
+    };
+    await atomicWrite(
+      path.join(this.options.sessionRoot, session.workerId, "session.json"),
+      `${JSON.stringify(manifest, null, 2)}\n`,
+    );
+  }
+
+  private registerSession(
+    session: PiSession & WorkerSessionHandle,
+    replace: boolean,
+  ): WorkerSessionHandle {
+    const existing = this.sessions.get(session.sessionId);
+    if (existing && !replace)
+      throw new Error(`Pi session already registered: ${session.sessionId}`);
+    if (existing) void existing.process.close();
     this.sessions.set(session.sessionId, session);
-    return session.sessionId;
+    return {
+      sessionId: session.sessionId,
+      ...(session.sessionFile ? { archiveRef: session.sessionFile } : {}),
+      engineVersion: this.engineVersion,
+      sessionVersion: this.sessionVersion,
+    };
   }
 
   private getSession(sessionId: string): PiSession {
@@ -152,6 +290,17 @@ export class PiWorkerEngine implements WorkerEngine {
   subscribe(sessionId: string, listener: (event: WorkerEngineEvent) => void): () => void {
     const session = this.getSession(sessionId);
     return session.process.onEvent((event) => {
+      if (event.type === "process_exit") {
+        if (session.closing || event.expected === true) {
+          listener({ type: "session_ended", reason: "completed" });
+        } else {
+          listener({
+            type: "session_failed",
+            message: `Pi RPC exited unexpectedly (code=${String(event.code)}, signal=${String(event.signal)})`,
+          });
+        }
+        return;
+      }
       const mapped = mapPiEvent(event);
       if (mapped) listener(mapped);
     });
@@ -160,29 +309,143 @@ export class PiWorkerEngine implements WorkerEngine {
   async archive(sessionId: string): Promise<{ archiveRef: string; summary: string }> {
     const session = this.getSession(sessionId);
     const state = await session.process.command<PiState>("get_state");
-    const archiveRef = state.sessionFile ?? session.sessionFile;
-    if (!archiveRef) {
+    const liveFile = state.sessionFile ? path.resolve(state.sessionFile) : session.sessionFile;
+    if (!liveFile) {
       throw new Error(
         "Pi session has no persistent session file; refusing to claim a restorable archive",
       );
     }
     const messages = await session.process.command<{ messages?: unknown[] }>("get_messages");
     const summary = summarizeMessages(messages.messages ?? [], sessionId);
+    session.closing = true;
     await session.process.close();
     this.sessions.delete(sessionId);
+
+    const liveManifest = await this.readManifest(
+      path.join(this.options.sessionRoot, session.workerId, "session.json"),
+    );
+    this.validateManifest(liveManifest);
+    if (path.resolve(liveManifest.sessionFile) !== liveFile) {
+      throw new Error("Pi live session file does not match its manifest");
+    }
+    await assertRegularFile(liveFile);
+    const backupDirectory = path.join(this.options.sessionRoot, "backups");
+    await mkdir(backupDirectory, { recursive: true, mode: 0o700 });
+    const archiveRef = path.join(
+      backupDirectory,
+      `${session.workerId}-${Date.now()}-${randomUUID()}.jsonl`,
+    );
+    await copyFile(liveFile, archiveRef, constants.COPYFILE_EXCL);
+    const bytes = await readFile(archiveRef);
+    const manifest: SessionManifest = {
+      ...liveManifest,
+      sessionFile: archiveRef,
+      archiveFile: archiveRef,
+      sizeBytes: bytes.byteLength,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      createdAt: new Date().toISOString(),
+    };
+    await atomicWrite(`${archiveRef}.manifest.json`, `${JSON.stringify(manifest, null, 2)}\n`);
+    await rm(path.join(session.homeDirectory, ".pi", "agent", "models.json"), { force: true });
     return { archiveRef, summary };
   }
 
-  async resume(archiveRef: string): Promise<{ sessionId: string; mode: "native" | "summary" }> {
-    // A native Pi session restore either works or fails explicitly. There is no
-    // fabricated lossless fallback; summary restoration is a separate path.
-    const session = await this.startPi(undefined, archiveRef);
-    const sessionId = this.registerSession(session);
-    return { sessionId, mode: "native" };
+  async resume(
+    archiveRef: string,
+    spec?: WorkerSessionSpec,
+  ): Promise<WorkerSessionHandle & { mode: "native" | "summary" }> {
+    // Native restore either works or fails explicitly. Summary restoration is a
+    // separate host-driven startSession path, never a fabricated lossless fallback.
+    const session = await this.startPi(spec, archiveRef);
+    const handle = this.registerSession(session, true);
+    return { ...handle, mode: "native" };
+  }
+
+  private async resolveResumeReference(
+    archiveRef: string,
+    spec?: WorkerSessionSpec,
+  ): Promise<{ manifest: SessionManifest; launchFile: string }> {
+    if (!path.isAbsolute(archiveRef)) throw new Error("Pi session reference must be absolute");
+    const resolved = path.resolve(archiveRef);
+    assertInside(this.options.sessionRoot, resolved);
+    await assertRegularFile(resolved);
+    const backupDirectory = path.join(this.options.sessionRoot, "backups");
+    const isBackup = isInside(backupDirectory, resolved);
+    let manifest: SessionManifest;
+    let launchFile = resolved;
+    if (isBackup) {
+      manifest = await this.readManifest(`${resolved}.manifest.json`);
+      this.validateManifest(manifest);
+      if (path.resolve(manifest.sessionFile) !== resolved || manifest.archiveFile !== resolved) {
+        throw new Error("Pi archive manifest does not match the requested archive");
+      }
+      const bytes = await readFile(resolved);
+      if (
+        manifest.sizeBytes !== bytes.byteLength ||
+        manifest.sha256 !== createHash("sha256").update(bytes).digest("hex")
+      ) {
+        throw new Error("Pi archive checksum or size does not match its manifest");
+      }
+    } else {
+      const workerId =
+        spec?.workerId ?? path.relative(this.options.sessionRoot, resolved).split(path.sep)[0];
+      if (!workerId) throw new Error("Cannot determine the Worker for a live Pi session");
+      assertSafeId(workerId, "workerId");
+      manifest = await this.readManifest(
+        path.join(this.options.sessionRoot, workerId, "session.json"),
+      );
+      this.validateManifest(manifest);
+      if (path.resolve(manifest.sessionFile) !== resolved) {
+        throw new Error("Pi live session reference does not match its manifest");
+      }
+    }
+    if (spec && manifest.workerId !== spec.workerId) {
+      throw new Error("Pi session archive belongs to a different Worker");
+    }
+
+    if (isBackup) {
+      const restoreDirectory = path.join(this.options.sessionRoot, manifest.workerId, "sessions");
+      await mkdir(restoreDirectory, { recursive: true, mode: 0o700 });
+      launchFile = path.join(restoreDirectory, `restored-${Date.now()}-${randomUUID()}.jsonl`);
+      await copyFile(resolved, launchFile, constants.COPYFILE_EXCL);
+    }
+    return { manifest, launchFile };
+  }
+
+  private async readManifest(file: string): Promise<SessionManifest> {
+    await assertRegularFile(file);
+    const handle = await open(file, constants.O_RDONLY | noFollowFlag());
+    try {
+      const content = await handle.readFile("utf8");
+      return JSON.parse(content) as SessionManifest;
+    } finally {
+      await handle.close();
+    }
+  }
+
+  private validateManifest(manifest: SessionManifest): void {
+    if (
+      manifest?.format !== "agent-in-box.pi-session" ||
+      manifest.version !== 1 ||
+      manifest.engineType !== this.type ||
+      manifest.engineVersion !== this.engineVersion ||
+      manifest.sessionVersion !== this.sessionVersion
+    ) {
+      throw new Error(
+        `Incompatible Pi session archive; required engine=${this.engineVersion}, session=${this.sessionVersion}`,
+      );
+    }
   }
 
   async dispose(): Promise<void> {
-    await Promise.all([...this.sessions.values()].map((session) => session.process.close()));
+    const sessions = [...this.sessions.values()];
+    for (const session of sessions) session.closing = true;
+    await Promise.all(sessions.map((session) => session.process.close()));
+    await Promise.all(
+      sessions.map((session) =>
+        rm(path.join(session.homeDirectory, ".pi", "agent", "models.json"), { force: true }),
+      ),
+    );
     this.sessions.clear();
   }
 
@@ -190,11 +453,17 @@ export class PiWorkerEngine implements WorkerEngine {
     if (!attachments || attachments.length === 0) return {};
     const images = [];
     for (const attachment of attachments) {
+      if (typeof attachment !== "string" || !path.isAbsolute(attachment)) {
+        throw new Error("Worker image attachments must be absolute guest-local paths");
+      }
       const mimeType = IMAGE_MIME_TYPES[path.extname(attachment).toLowerCase()];
       if (!mimeType) {
         throw new Error(`Unsupported Worker image attachment: ${attachment}`);
       }
       const data = await readFile(attachment);
+      if (data.byteLength > 20 * 1024 * 1024) {
+        throw new Error(`Worker image attachment exceeds 20 MiB: ${attachment}`);
+      }
       images.push({ type: "image", data: data.toString("base64"), mimeType });
     }
     return { images };
@@ -220,8 +489,6 @@ function mapPiEvent(event: Record<string, unknown>): WorkerEngineEvent | null {
       };
     case "agent_settled":
       return { type: "turn_finished" };
-    case "process_exit":
-      return { type: "session_ended", reason: "completed" };
     case "protocol_error":
       return { type: "session_failed", message: String(event.message) };
     default:
@@ -243,4 +510,66 @@ function summarizeMessages(messages: unknown[], sessionId: string): string {
     }
   }
   return `Pi Worker session ${sessionId} archived with ${messages.length} messages; no assistant text summary available.`;
+}
+
+function sanitizeSpec(spec: WorkerSessionSpec): WorkerSessionSpec {
+  return {
+    workerId: spec.workerId,
+    projectId: spec.projectId,
+    vmId: spec.vmId,
+    workspacePath: spec.workspacePath,
+    engineType: spec.engineType,
+    ...(spec.engineVersion !== undefined ? { engineVersion: spec.engineVersion } : {}),
+    ...(spec.sessionVersion !== undefined ? { sessionVersion: spec.sessionVersion } : {}),
+    systemPrompt: spec.systemPrompt,
+    capabilities: [...spec.capabilities],
+    ...(spec.provider !== undefined ? { provider: spec.provider } : {}),
+    ...(spec.model !== undefined ? { model: spec.model } : {}),
+  };
+}
+
+function assertSafeId(value: string, label: string): void {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value)) {
+    throw new Error(`Invalid ${label}`);
+  }
+}
+
+function isInside(root: string, candidate: string): boolean {
+  const relative = path.relative(path.resolve(root), path.resolve(candidate));
+  return (
+    relative !== "" &&
+    relative !== ".." &&
+    !relative.startsWith(`..${path.sep}`) &&
+    !path.isAbsolute(relative)
+  );
+}
+
+function assertInside(root: string, candidate: string): void {
+  if (!isInside(root, candidate))
+    throw new Error("Pi session reference escapes the runtime session root");
+}
+
+async function assertRegularFile(file: string): Promise<void> {
+  const info = await lstat(file);
+  if (!info.isFile() || info.isSymbolicLink()) throw new Error(`Not a regular file: ${file}`);
+}
+
+function noFollowFlag(): number {
+  return constants.O_NOFOLLOW ?? 0;
+}
+
+async function atomicWrite(file: string, content: string): Promise<void> {
+  const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
+  await writeFile(temporary, content, { mode: 0o600, flag: "wx" });
+  try {
+    await rename(temporary, file);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "EEXIST" && code !== "EPERM") {
+      await rm(temporary, { force: true });
+      throw error;
+    }
+    await rm(file, { force: true });
+    await rename(temporary, file);
+  }
 }

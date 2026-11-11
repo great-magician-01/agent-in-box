@@ -26,6 +26,7 @@ export interface SupervisorCreateSpec {
   qmpPort: 0;
   sshHostPort: 0;
   guestHostPort: 0;
+  workerHostPort: 0;
   vncDisplay: 0;
 }
 

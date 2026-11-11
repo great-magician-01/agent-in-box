@@ -16,6 +16,7 @@ import {
 import type { CloseBehavior } from "@agent-in-box/protocol";
 import { getCloseBehavior, resolveDesktopPaths, setCloseBehavior } from "./app-config";
 import { ControlPlaneSupervisor } from "./control-plane-supervisor";
+import { CredentialBridge } from "./credential-bridge";
 import { CredentialStore } from "./credential-store";
 import { registerDesktopIpc } from "./ipc";
 import { JsonLineLogger } from "./logger";
@@ -47,6 +48,12 @@ const credentialStore = new CredentialStore({
   filePath: paths.credentialsPath,
   safeStorage,
   logger: logger.child("credentials"),
+});
+
+const credentialBridge = new CredentialBridge({
+  descriptorPath: path.join(paths.configDirectory, "credential-bridge.json"),
+  credentialStore,
+  logger: logger.child("credential-bridge"),
 });
 
 function controlPlaneEntry(): {
@@ -396,6 +403,7 @@ async function bootstrap(): Promise<void> {
     shutdownStarted = true;
     logger.info("正在停止本地控制平面并退出");
     void supervisor.stop().finally(() => {
+      credentialBridge.stop();
       disposeIpc?.();
       app.quit();
     });
@@ -455,6 +463,16 @@ async function bootstrap(): Promise<void> {
       void mainWindow.loadURL(mainPageUrl());
     }
   });
+
+  try {
+    await credentialBridge.start();
+    process.env.AGENT_IN_BOX_CREDENTIAL_BRIDGE_DESCRIPTOR = path.join(
+      paths.configDirectory,
+      "credential-bridge.json",
+    );
+  } catch (error) {
+    logger.error("模型凭据桥启动失败；模型调用将明确失败", { error: String(error) });
+  }
 
   try {
     await supervisor.start();

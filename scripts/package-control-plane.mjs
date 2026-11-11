@@ -122,6 +122,7 @@ for (const required of [
   "runtime_modules/ws/package.json",
   "runtime_modules/@agent-in-box/config/dist/index.js",
   "runtime_modules/@agent-in-box/protocol/dist/index.js",
+  "runtime_modules/@agent-in-box/agent-runtime/dist/index.js",
 ]) {
   const file = path.join(target, required);
   if (!existsSync(file)) {

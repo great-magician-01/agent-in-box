@@ -39,6 +39,13 @@ import type {
   VmCreateRequest,
   VmInstanceView,
   VmListResponse,
+  ConversationMessageRecord,
+  ModelProviderUpsert,
+  ModelProviderView,
+  WorkerCreateRequest,
+  WorkerPromptRequest,
+  WorkerSteerResult,
+  WorkerView,
 } from "@agent-in-box/protocol";
 
 export class ApiRequestError extends Error {
@@ -303,6 +310,49 @@ export const api = {
     apiFetch<ConversationRecord>(`/api/v1/projects/${encodeURIComponent(id)}/conversations`, {
       method: "POST",
       body: JSON.stringify({ title }),
+    }),
+  modelProviders: () => apiFetch<ModelProviderView[]>("/api/v1/models/providers"),
+  upsertModelProvider: (id: string, body: ModelProviderUpsert) =>
+    apiFetch<ModelProviderView>(`/api/v1/models/providers/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  workers: (projectId?: string) =>
+    apiFetch<WorkerView[]>(
+      `/api/v1/workers${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ""}`,
+    ),
+  createWorker: (body: WorkerCreateRequest) =>
+    apiFetch<WorkerView>("/api/v1/workers", { method: "POST", body: JSON.stringify(body) }),
+  worker: (id: string) => apiFetch<WorkerView>(`/api/v1/workers/${encodeURIComponent(id)}`),
+  workerMessages: (id: string) =>
+    apiFetch<ConversationMessageRecord[]>(`/api/v1/workers/${encodeURIComponent(id)}/messages`),
+  workerPrompt: (id: string, body: WorkerPromptRequest) =>
+    apiFetch<{ taskId: string; worker: WorkerView }>(
+      `/api/v1/workers/${encodeURIComponent(id)}/prompt`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+  workerSteer: (id: string, body: WorkerPromptRequest) =>
+    apiFetch<WorkerSteerResult>(`/api/v1/workers/${encodeURIComponent(id)}/steer`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  workerFollowUp: (id: string, body: WorkerPromptRequest) =>
+    apiFetch<WorkerSteerResult>(`/api/v1/workers/${encodeURIComponent(id)}/follow-up`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  workerAbort: (id: string, reason?: string) =>
+    apiFetch<WorkerView>(`/api/v1/workers/${encodeURIComponent(id)}/abort`, {
+      method: "POST",
+      body: JSON.stringify(reason ? { reason } : {}),
+    }),
+  workerArchive: (id: string) =>
+    apiFetch<WorkerView>(`/api/v1/workers/${encodeURIComponent(id)}/archive`, {
+      method: "POST",
+    }),
+  workerResume: (id: string) =>
+    apiFetch<WorkerView>(`/api/v1/workers/${encodeURIComponent(id)}/resume`, {
+      method: "POST",
     }),
   taskBoard: (filters: TaskListFilters = {}) =>
     apiFetch<TaskBoardSnapshot>(`/api/v1/tasks/board${taskBoardQuery(filters)}`),

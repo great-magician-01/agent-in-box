@@ -20,6 +20,7 @@ function runtime(id: string, powerState: VmPowerState = "stopped"): SupervisorVm
     qmpPort: 14444,
     sshHostPort: 10022,
     guestHostPort: 17611,
+    workerHostPort: 17612,
     consoleUrl: "vnc://127.0.0.1:5900",
     diskPath: path.join("vm-root", id, "disk.qcow2"),
     guestHealth: "unknown",
@@ -137,6 +138,7 @@ describe("VmService", () => {
       diskSizeGb: 20,
       desktop: true,
       guestHostPort: 0,
+      workerHostPort: 0,
     });
     expect(createSpec?.baseImagePath).toBe(path.join(directory, "base.qcow2"));
     expect(first.vm.storageRoot).toBe(path.join(directory, "vms", first.vm.id));

@@ -524,6 +524,160 @@ const migrations: Record<string, MigrationDefinition> = {
       }
     },
   },
+
+  "005_phase6_workers_models": {
+    async up(db: Kysely<DatabaseSchema>): Promise<void> {
+      for (const column of [
+        "agent_session_ref",
+        "session_version",
+        "last_heartbeat_at",
+        "archive_summary",
+        "last_error_code",
+        "last_error_message",
+        "broker_token_id",
+        "provider_id",
+        "model_id",
+      ]) {
+        await db.schema.alterTable("workers").addColumn(column, "text").execute();
+      }
+
+      await db.schema
+        .createTable("model_providers")
+        .addColumn("id", "text", (column) => column.primaryKey())
+        .addColumn("base_url", "text", (column) => column.notNull())
+        .addColumn("api", "text", (column) => column.notNull())
+        .addColumn("credential_provider_id", "text", (column) => column.notNull())
+        .addColumn("models_json", "text", (column) => column.notNull())
+        .addColumn("enabled", "integer", (column) => column.notNull().defaultTo(1))
+        .addColumn("created_at", "text", (column) => column.notNull())
+        .addColumn("updated_at", "text", (column) => column.notNull())
+        .execute();
+
+      await db.schema
+        .createTable("model_tokens")
+        .addColumn("id", "text", (column) => column.primaryKey())
+        .addColumn("token_hash", "text", (column) => column.notNull().unique())
+        .addColumn("worker_id", "text", (column) => column.notNull())
+        .addColumn("task_id", "text")
+        .addColumn("vm_id", "text", (column) => column.notNull())
+        .addColumn("provider_id", "text", (column) => column.notNull())
+        .addColumn("model", "text", (column) => column.notNull())
+        .addColumn("session_id", "text", (column) => column.notNull())
+        .addColumn("expires_at", "text", (column) => column.notNull())
+        .addColumn("revoked_at", "text")
+        .addColumn("revoke_reason", "text")
+        .addColumn("created_at", "text", (column) => column.notNull())
+        .addColumn("last_used_at", "text")
+        .addForeignKeyConstraint("model_tokens_worker_fk", ["worker_id"], "workers", ["id"], (c) =>
+          c.onDelete("cascade"),
+        )
+        .addForeignKeyConstraint("model_tokens_task_fk", ["task_id"], "tasks", ["id"], (c) =>
+          c.onDelete("set null"),
+        )
+        .addForeignKeyConstraint("model_tokens_vm_fk", ["vm_id"], "vm_instances", ["id"], (c) =>
+          c.onDelete("cascade"),
+        )
+        .execute();
+      await db.schema
+        .createIndex("model_tokens_worker_idx")
+        .on("model_tokens")
+        .columns(["worker_id", "created_at"])
+        .execute();
+
+      await db.schema
+        .createTable("model_requests")
+        .addColumn("id", "text", (column) => column.primaryKey())
+        .addColumn("token_id", "text")
+        .addColumn("provider_id", "text", (column) => column.notNull())
+        .addColumn("model", "text", (column) => column.notNull())
+        .addColumn("worker_id", "text", (column) => column.notNull())
+        .addColumn("task_id", "text")
+        .addColumn("vm_id", "text", (column) => column.notNull())
+        .addColumn("status", "text", (column) => column.notNull())
+        .addColumn("upstream_status", "integer")
+        .addColumn("attempts", "integer", (column) => column.notNull().defaultTo(1))
+        .addColumn("duration_ms", "integer")
+        .addColumn("usage_json", "text")
+        .addColumn("error_code", "text")
+        .addColumn("created_at", "text", (column) => column.notNull())
+        .addColumn("completed_at", "text")
+        .addForeignKeyConstraint(
+          "model_requests_token_fk",
+          ["token_id"],
+          "model_tokens",
+          ["id"],
+          (c) => c.onDelete("set null"),
+        )
+        .execute();
+      await db.schema
+        .createIndex("model_requests_created_idx")
+        .on("model_requests")
+        .columns(["created_at", "id"])
+        .execute();
+
+      await db.schema
+        .createTable("conversation_messages")
+        .addColumn("id", "text", (column) => column.primaryKey())
+        .addColumn("conversation_id", "text", (column) => column.notNull())
+        .addColumn("worker_id", "text", (column) => column.notNull())
+        .addColumn("task_id", "text")
+        .addColumn("role", "text", (column) => column.notNull())
+        .addColumn("mode", "text", (column) => column.notNull())
+        .addColumn("content", "text", (column) => column.notNull())
+        .addColumn("created_at", "text", (column) => column.notNull())
+        .addForeignKeyConstraint(
+          "conversation_messages_conversation_fk",
+          ["conversation_id"],
+          "conversations",
+          ["id"],
+          (c) => c.onDelete("cascade"),
+        )
+        .addForeignKeyConstraint(
+          "conversation_messages_worker_fk",
+          ["worker_id"],
+          "workers",
+          ["id"],
+          (c) => c.onDelete("cascade"),
+        )
+        .addForeignKeyConstraint(
+          "conversation_messages_task_fk",
+          ["task_id"],
+          "tasks",
+          ["id"],
+          (c) => c.onDelete("set null"),
+        )
+        .execute();
+      await db.schema
+        .createIndex("conversation_messages_conversation_idx")
+        .on("conversation_messages")
+        .columns(["conversation_id", "created_at", "id"])
+        .execute();
+    },
+
+    async down(db: Kysely<DatabaseSchema>): Promise<void> {
+      for (const table of [
+        "conversation_messages",
+        "model_requests",
+        "model_tokens",
+        "model_providers",
+      ]) {
+        await db.schema.dropTable(table).ifExists().execute();
+      }
+      for (const column of [
+        "model_id",
+        "provider_id",
+        "broker_token_id",
+        "last_error_message",
+        "last_error_code",
+        "archive_summary",
+        "last_heartbeat_at",
+        "session_version",
+        "agent_session_ref",
+      ]) {
+        await db.schema.alterTable("workers").dropColumn(column).execute();
+      }
+    },
+  },
 };
 
 export async function migrateToLatest(db: Kysely<DatabaseSchema>): Promise<string[]> {

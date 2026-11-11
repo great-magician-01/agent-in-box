@@ -150,6 +150,7 @@ export class VmService {
       qmpPort: 0,
       sshHostPort: 0,
       guestHostPort: 0,
+      workerHostPort: 0,
       vncDisplay: 0,
     });
     const now = nowIso();

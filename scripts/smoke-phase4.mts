@@ -145,6 +145,7 @@ try {
     qmpPort: 14444,
     sshHostPort: 10022,
     guestHostPort: guestPort,
+    workerHostPort: 0,
     consoleUrl: `vnc://127.0.0.1:${vncPort}`,
     diskPath: path.join(temporary, "vms", vmId, "disk.qcow2"),
     guestHealth: "healthy",

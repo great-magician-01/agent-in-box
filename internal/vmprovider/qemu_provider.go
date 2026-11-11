@@ -213,6 +213,12 @@ func (p *QemuProvider) CreateVm(ctx context.Context, spec VmSpec) (VmState, erro
 			return VmState{}, fmt.Errorf("allocate guest agent port: %w", err)
 		}
 	}
+	if spec.WorkerHostPort == 0 {
+		spec.WorkerHostPort, err = freePort()
+		if err != nil {
+			return VmState{}, fmt.Errorf("allocate worker rpc port: %w", err)
+		}
+	}
 	if spec.VNCDisplay == 0 {
 		spec.VNCDisplay, err = freeVNCDisplay()
 		if err != nil {
@@ -244,14 +250,15 @@ func (p *QemuProvider) CreateVm(ctx context.Context, spec VmSpec) (VmState, erro
 		Spec:      spec,
 		CreatedAt: time.Now().UTC(),
 		State: VmState{
-			ID:            spec.ID,
-			PowerState:    PowerStopped,
-			QMPPort:       spec.QMPPort,
-			SSHHostPort:   spec.SSHHostPort,
-			GuestHostPort: spec.GuestHostPort,
-			ConsoleURL:    fmt.Sprintf("vnc://127.0.0.1:%d", 5900+spec.VNCDisplay),
-			DiskPath:      diskPath,
-			GuestHealth:   "unknown",
+			ID:             spec.ID,
+			PowerState:     PowerStopped,
+			QMPPort:        spec.QMPPort,
+			SSHHostPort:    spec.SSHHostPort,
+			GuestHostPort:  spec.GuestHostPort,
+			WorkerHostPort: spec.WorkerHostPort,
+			ConsoleURL:     fmt.Sprintf("vnc://127.0.0.1:%d", 5900+spec.VNCDisplay),
+			DiskPath:       diskPath,
+			GuestHealth:    "unknown",
 		},
 	}
 	if err := p.save(metadata); err != nil {
@@ -305,6 +312,9 @@ func buildQemuArgsWithResolver(metadata *vmMetadata, accelerator string, cpuMode
 	network := fmt.Sprintf("user,id=n0,hostfwd=tcp:127.0.0.1:%d-:22", spec.SSHHostPort)
 	if spec.GuestHostPort > 0 {
 		network += fmt.Sprintf(",hostfwd=tcp:127.0.0.1:%d-:7611", spec.GuestHostPort)
+	}
+	if spec.WorkerHostPort > 0 {
+		network += fmt.Sprintf(",hostfwd=tcp:127.0.0.1:%d-:7612", spec.WorkerHostPort)
 	}
 	args = append(args,
 		"-netdev", network,

@@ -498,6 +498,51 @@ export class TaskService {
     });
   }
 
+  /**
+   * Worker runtime uses Blocked when a turn ends or is interrupted without the
+   * phase-7 completion verifier. The task keeps its evidence but releases the VM.
+   */
+  async block(
+    taskId: string,
+    code: string,
+    message: string,
+    summary?: string,
+  ): Promise<TaskRecord> {
+    if (!code.trim() || !message.trim()) {
+      throw new PersistenceError("validation_failed", "阻塞任务必须包含错误代码和说明");
+    }
+    return this.transition(taskId, "blocked", {
+      errorCode: code.trim(),
+      errorMessage: message.trim(),
+      summary: summary?.trim() || message.trim(),
+    });
+  }
+
+  /**
+   * Appends a Worker/Trace event to the task timeline. Unlike status changes it
+   * does not mutate the task row; the event and Outbox notification commit
+   * together so the board can observe Worker activity without polling Pi.
+   */
+  async recordWorkerEvent(taskId: string, type: string, payload: unknown): Promise<void> {
+    if (typeof type !== "string" || !/^[a-z0-9][a-z0-9._-]{0,79}$/.test(type)) {
+      throw new PersistenceError("validation_failed", "Worker 事件类型无效");
+    }
+    const current = await this.tasks.getTask(taskId);
+    if (!current) throw new NotFoundError(`任务不存在：${taskId}`);
+    const now = nowIso();
+    const eventPayload = {
+      taskId,
+      ...(typeof payload === "object" && payload !== null
+        ? (payload as Record<string, unknown>)
+        : { value: payload }),
+    };
+    await this.db.transaction().execute(async (trx) => {
+      await this.tasks.appendEvent(taskId, type, eventPayload, now, trx);
+      await this.outbox.append(type, eventPayload, now, trx);
+      await this.appendActivity(current.projectId, type, eventPayload, now, trx);
+    });
+  }
+
   /** Server-side Worker completion API. There is intentionally no browser route for this method. */
   async complete(taskId: string, input: TaskCompletionInput): Promise<TaskRecord> {
     const summary = typeof input.summary === "string" ? input.summary.trim() : "";

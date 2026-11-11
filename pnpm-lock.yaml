@@ -121,6 +121,9 @@ importers:
 
   services/control-plane:
     dependencies:
+      '@agent-in-box/agent-runtime':
+        specifier: workspace:*
+        version: link:../../packages/agent-runtime
       '@agent-in-box/config':
         specifier: workspace:*
         version: link:../../packages/config

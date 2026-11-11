@@ -35,35 +35,37 @@ var (
 // the HTTP boundary contract; encoding/json still accepts the historical
 // upper-case field names from vm.json case-insensitively.
 type VmSpec struct {
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	BaseImagePath string `json:"baseImagePath"`
-	SeedImagePath string `json:"seedImagePath"`
-	CPUCount      int    `json:"cpuCount"`
-	MemoryMB      int    `json:"memoryMb"`
-	DiskSizeGB    int    `json:"diskSizeGb"`
-	Desktop       bool   `json:"desktop"`
-	QMPPort       int    `json:"qmpPort"`
-	SSHHostPort   int    `json:"sshHostPort"`
-	GuestHostPort int    `json:"guestHostPort"`
-	VNCDisplay    int    `json:"vncDisplay"`
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	BaseImagePath  string `json:"baseImagePath"`
+	SeedImagePath  string `json:"seedImagePath"`
+	CPUCount       int    `json:"cpuCount"`
+	MemoryMB       int    `json:"memoryMb"`
+	DiskSizeGB     int    `json:"diskSizeGb"`
+	Desktop        bool   `json:"desktop"`
+	QMPPort        int    `json:"qmpPort"`
+	SSHHostPort    int    `json:"sshHostPort"`
+	GuestHostPort  int    `json:"guestHostPort"`
+	WorkerHostPort int    `json:"workerHostPort"`
+	VNCDisplay     int    `json:"vncDisplay"`
 }
 
 // VmState is persisted in the VM directory and reconciled with the real
 // process. PowerState and GuestHealth are deliberately separate: suspend/resume
 // only changes the power state and never fabricates guest health.
 type VmState struct {
-	ID            string     `json:"id"`
-	PowerState    PowerState `json:"powerState"`
-	PID           int        `json:"pid"`
-	QMPPort       int        `json:"qmpPort"`
-	SSHHostPort   int        `json:"sshHostPort"`
-	GuestHostPort int        `json:"guestHostPort"`
-	ConsoleURL    string     `json:"consoleUrl"`
-	DiskPath      string     `json:"diskPath"`
-	GuestHealth   string     `json:"guestHealth"`
-	LastError     string     `json:"lastError"`
-	UpdatedAt     time.Time  `json:"updatedAt"`
+	ID             string     `json:"id"`
+	PowerState     PowerState `json:"powerState"`
+	PID            int        `json:"pid"`
+	QMPPort        int        `json:"qmpPort"`
+	SSHHostPort    int        `json:"sshHostPort"`
+	GuestHostPort  int        `json:"guestHostPort"`
+	WorkerHostPort int        `json:"workerHostPort"`
+	ConsoleURL     string     `json:"consoleUrl"`
+	DiskPath       string     `json:"diskPath"`
+	GuestHealth    string     `json:"guestHealth"`
+	LastError      string     `json:"lastError"`
+	UpdatedAt      time.Time  `json:"updatedAt"`
 }
 
 // Provider is the Go counterpart of the shared protocol VmProvider contract.

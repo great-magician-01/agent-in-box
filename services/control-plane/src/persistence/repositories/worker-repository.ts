@@ -34,6 +34,14 @@ export class WorkerRepository {
       createdAt: now,
       lastActiveAt: now,
       archivedAt: null,
+      agentSessionRef: null,
+      sessionVersion: null,
+      lastHeartbeatAt: null,
+      archiveSummary: null,
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      providerId: null,
+      modelId: null,
     };
 
     await this.db
@@ -51,6 +59,15 @@ export class WorkerRepository {
         created_at: record.createdAt,
         last_active_at: record.lastActiveAt,
         archived_at: null,
+        agent_session_ref: null,
+        session_version: null,
+        last_heartbeat_at: null,
+        archive_summary: null,
+        last_error_code: null,
+        last_error_message: null,
+        broker_token_id: null,
+        provider_id: null,
+        model_id: null,
       })
       .execute();
 
@@ -109,6 +126,77 @@ export class WorkerRepository {
       .where("id", "=", workerId)
       .execute();
     return this.getWorker(workerId);
+  }
+
+  async findReusable(
+    projectId: string,
+    vmId: string,
+    conversationId: string,
+  ): Promise<WorkerRecord | undefined> {
+    const row = await this.db
+      .selectFrom("workers")
+      .selectAll()
+      .where("project_id", "=", projectId)
+      .where("vm_id", "=", vmId)
+      .where("conversation_id", "=", conversationId)
+      .where("status", "in", ["starting", "running", "idle"])
+      .orderBy("created_at", "desc")
+      .limit(1)
+      .executeTakeFirst();
+    return row ? toWorkerRecord(row) : undefined;
+  }
+
+  async updateRuntime(
+    workerId: string,
+    patch: {
+      status?: WorkerStatus;
+      currentTaskId?: string | null;
+      agentSessionRef?: string | null;
+      sessionVersion?: string | null;
+      lastHeartbeatAt?: string | null;
+      lastErrorCode?: string | null;
+      lastErrorMessage?: string | null;
+      archiveSummary?: string | null;
+      brokerTokenId?: string | null;
+      providerId?: string | null;
+      modelId?: string | null;
+    },
+    at: string = nowIso(),
+  ): Promise<WorkerRecord | undefined> {
+    await this.db
+      .updateTable("workers")
+      .set({
+        ...(patch.status !== undefined ? { status: patch.status } : {}),
+        ...(patch.currentTaskId !== undefined ? { current_task_id: patch.currentTaskId } : {}),
+        ...(patch.agentSessionRef !== undefined
+          ? { agent_session_ref: patch.agentSessionRef }
+          : {}),
+        ...(patch.sessionVersion !== undefined ? { session_version: patch.sessionVersion } : {}),
+        ...(patch.lastHeartbeatAt !== undefined
+          ? { last_heartbeat_at: patch.lastHeartbeatAt }
+          : {}),
+        ...(patch.lastErrorCode !== undefined ? { last_error_code: patch.lastErrorCode } : {}),
+        ...(patch.lastErrorMessage !== undefined
+          ? { last_error_message: patch.lastErrorMessage }
+          : {}),
+        ...(patch.archiveSummary !== undefined ? { archive_summary: patch.archiveSummary } : {}),
+        ...(patch.brokerTokenId !== undefined ? { broker_token_id: patch.brokerTokenId } : {}),
+        ...(patch.providerId !== undefined ? { provider_id: patch.providerId } : {}),
+        ...(patch.modelId !== undefined ? { model_id: patch.modelId } : {}),
+        last_active_at: at,
+      })
+      .where("id", "=", workerId)
+      .execute();
+    return this.getWorker(workerId);
+  }
+
+  async brokerTokenId(workerId: string): Promise<string | null> {
+    const row = await this.db
+      .selectFrom("workers")
+      .select("broker_token_id")
+      .where("id", "=", workerId)
+      .executeTakeFirst();
+    return row?.broker_token_id ?? null;
   }
 
   async archive(workerId: string, at: string = nowIso()): Promise<WorkerRecord | undefined> {

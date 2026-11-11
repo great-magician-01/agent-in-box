@@ -1,0 +1,59 @@
+[Unit]
+Description=Agent-in-Box Guest Worker RPC (Pi 1.5.1)
+# The worker process itself listens on 0.0.0.0:7612 inside the guest. The
+# host-side QEMU port forward must bind 127.0.0.1 or an ACL-protected address,
+# never an untrusted LAN interface.
+After=network-online.target
+Wants=network-online.target
+# Do not enter a failing restart loop before provisioning has injected the
+# per-VM RPC token. A later `systemctl start` will start the service once the
+# token exists; deletion while running still fails closed at request time.
+ConditionPathExists=/var/lib/agent-in-box/worker/rpc-token
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=aib-worker
+Group=aib-worker
+WorkingDirectory=/home/aib-worker/workspace
+Environment=HOME=/home/aib-worker
+Environment=PATH=/opt/agent-in-box/node/bin:/opt/agent-in-box/pi/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=AGENT_IN_BOX_WORKER_TOKEN_FILE=/var/lib/agent-in-box/worker/rpc-token
+Environment=AGENT_IN_BOX_PI_BINARY=/opt/agent-in-box/pi/bin/pi
+Environment=AGENT_IN_BOX_SESSION_ROOT=/var/lib/agent-in-box/worker/sessions
+Environment=AGENT_IN_BOX_WORKER_HOST=0.0.0.0
+Environment=AGENT_IN_BOX_WORKER_PORT=7612
+# Optional overrides live here (for example AGENT_IN_BOX_CUA_EXTENSION). The
+# file must never contain provider API keys or Model Broker tokens.
+EnvironmentFile=-/etc/agent-in-box/worker/worker.env
+
+ExecStart=/opt/agent-in-box/node/bin/node /opt/agent-in-box/worker/dist/worker-rpc-main.js
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=15s
+KillMode=mixed
+LimitNOFILE=65536
+UMask=0077
+
+# The worker never runs as root and cannot gain privileges.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/aib-worker/workspace /var/lib/agent-in-box/worker
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+RemoveIPC=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

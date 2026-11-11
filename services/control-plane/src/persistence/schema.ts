@@ -80,6 +80,15 @@ export interface WorkersTable {
   created_at: string;
   last_active_at: string;
   archived_at: string | null;
+  agent_session_ref: string | null;
+  session_version: string | null;
+  last_heartbeat_at: string | null;
+  archive_summary: string | null;
+  last_error_code: string | null;
+  last_error_message: string | null;
+  broker_token_id: string | null;
+  provider_id: string | null;
+  model_id: string | null;
 }
 
 export interface TasksTable {
@@ -169,6 +178,62 @@ export interface IdempotencyKeysTable {
   created_at: string;
 }
 
+export interface ModelProvidersTable {
+  id: string;
+  base_url: string;
+  api: string;
+  credential_provider_id: string;
+  models_json: string;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ModelTokensTable {
+  id: string;
+  token_hash: string;
+  worker_id: string;
+  task_id: string | null;
+  vm_id: string;
+  provider_id: string;
+  model: string;
+  session_id: string;
+  expires_at: string;
+  revoked_at: string | null;
+  revoke_reason: string | null;
+  created_at: string;
+  last_used_at: string | null;
+}
+
+export interface ModelRequestsTable {
+  id: string;
+  token_id: string | null;
+  provider_id: string;
+  model: string;
+  worker_id: string;
+  task_id: string | null;
+  vm_id: string;
+  status: string;
+  upstream_status: number | null;
+  attempts: number;
+  duration_ms: number | null;
+  usage_json: string | null;
+  error_code: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export interface ConversationMessagesTable {
+  id: string;
+  conversation_id: string;
+  worker_id: string;
+  task_id: string | null;
+  role: string;
+  mode: string;
+  content: string;
+  created_at: string;
+}
+
 export interface SchemaMigrationsTable {
   id: string;
   applied_at: string;
@@ -220,4 +285,8 @@ export interface DatabaseSchema {
   app_settings: AppSettingsTable;
   local_users: LocalUsersTable;
   storage_migrations: StorageMigrationsTable;
+  model_providers: ModelProvidersTable;
+  model_tokens: ModelTokensTable;
+  model_requests: ModelRequestsTable;
+  conversation_messages: ConversationMessagesTable;
 }

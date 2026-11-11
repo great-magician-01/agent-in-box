@@ -10,6 +10,7 @@ import type {
 import { api, subscribeTaskEvents } from "./api";
 import { ProjectManager } from "./ProjectManager";
 import { TaskBoard } from "./TaskBoard";
+import { WorkerPanel } from "./WorkerPanel";
 
 export function WorkManager(): React.JSX.Element {
   const [projects, setProjects] = useState<ProjectView[]>([]);
@@ -162,6 +163,13 @@ export function WorkManager(): React.JSX.Element {
             onSelect={selectProject}
             onChanged={() => load(true)}
           />
+          {selectedDetail && selectedDetail.project.archivedAt === null && (
+            <WorkerPanel
+              project={selectedDetail}
+              revision={revision}
+              onChanged={() => load(true)}
+            />
+          )}
           <TaskBoard
             board={board}
             selectedProject={selectedDetail}

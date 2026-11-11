@@ -1,0 +1,37 @@
+#cloud-config
+# Example only. Do not commit a real token. All __PLACEHOLDER__ values are
+# replaced by the Host provisioning pipeline. See README.md in this directory.
+#
+# Assumptions:
+# - a booted Ubuntu Linux guest with systemd and a root-owned/read-only
+#   /opt/agent-in-box/provision directory containing install.sh, the unit,
+#   worker.env.example, and the three verified packages;
+# - the current directory is never used: every script and asset below is an
+#   absolute path;
+# - this per-VM Worker RPC token is NOT a provider API key and NOT a Model
+#   Broker token. The Host keeps its matching copy for RpcClient.
+#
+# cloud-init write_files runs before users-groups, so the token is staged as
+# root:root and only becomes aib-worker:0600 inside install.sh.
+
+write_files:
+  - path: /run/agent-in-box/rpc-token
+    owner: root:root
+    permissions: '0600'
+    content: |
+      __PER_VM_WORKER_RPC_TOKEN__
+
+runcmd:
+  - |
+    set -eu
+    trap 'rm -f /run/agent-in-box/rpc-token' EXIT
+    bash /opt/agent-in-box/provision/install.sh \
+      --node-archive /opt/agent-in-box/provision/node-v24.18.0-linux-x64.tar.xz \
+      --node-sha256 __NODE_TARBALL_SHA256__ \
+      --pi-package /opt/agent-in-box/provision/earendil-works-pi-coding-agent-1.5.1.tgz \
+      --pi-sha256 __PI_TARBALL_SHA256__ \
+      --worker-bundle /opt/agent-in-box/provision/agent-runtime-worker.tar.gz \
+      --worker-sha256 __WORKER_BUNDLE_SHA256__ \
+      --unit-file /opt/agent-in-box/provision/agent-in-box-worker.service \
+      --rpc-token-file /run/agent-in-box/rpc-token
+    systemctl start agent-in-box-worker.service

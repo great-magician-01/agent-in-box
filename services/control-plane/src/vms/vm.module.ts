@@ -14,6 +14,6 @@ import { VmService } from "./vm.service";
   imports: [PersistenceModule, ImageModule],
   controllers: [VmController, ExecutionController, GuestController],
   providers: [SupervisorClient, VmService, ConsoleService, GuestClient, GuestService],
-  exports: [VmService, ConsoleService, GuestService],
+  exports: [SupervisorClient, VmService, ConsoleService, GuestService],
 })
 export class VmModule {}

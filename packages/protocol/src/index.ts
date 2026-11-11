@@ -175,6 +175,14 @@ export interface WorkerRecord {
   createdAt: IsoTimestamp;
   lastActiveAt: IsoTimestamp;
   archivedAt: IsoTimestamp | null;
+  agentSessionRef: string | null;
+  sessionVersion: string | null;
+  lastHeartbeatAt: IsoTimestamp | null;
+  archiveSummary: string | null;
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+  providerId: string | null;
+  modelId: string | null;
 }
 
 export interface ConversationRecord {
@@ -715,6 +723,7 @@ export interface SupervisorVmState {
   qmpPort: number;
   sshHostPort: number;
   guestHostPort: number;
+  workerHostPort: number;
   consoleUrl: string;
   diskPath: string;
   guestHealth: GuestHealthState;
@@ -1006,6 +1015,100 @@ export interface TaskListFilters {
   vmId?: Id;
   workerId?: Id;
   statuses?: TaskStatus[];
+}
+
+/* Phase 6: in-guest Worker sessions and the host-side Model Broker. */
+export type WorkerModelApi = "openai-completions" | "anthropic-messages";
+
+export interface WorkerCreateRequest {
+  projectId: Id;
+  vmId: Id;
+  conversationId?: Id;
+  providerId?: string;
+  model?: string;
+}
+
+export interface WorkerRuntimeView {
+  connected: boolean;
+  protocolVersion: string | null;
+  engineVersion: string | null;
+  sessionVersion: string | null;
+  lastError: string | null;
+}
+
+export interface WorkerView {
+  worker: WorkerRecord;
+  runtime: WorkerRuntimeView;
+}
+
+export interface WorkerPromptRequest {
+  text: string;
+  attachments?: string[];
+}
+
+export interface WorkerSteerResult {
+  disposition: "queued" | "handled";
+  /** Null when a follow-up targets the idle conversation rather than a task. */
+  taskId: Id | null;
+}
+
+export interface ConversationMessageRecord {
+  id: Id;
+  conversationId: Id;
+  workerId: Id;
+  taskId: Id | null;
+  role: "user" | "assistant";
+  mode: "prompt" | "steer" | "follow_up" | "event";
+  content: string;
+  createdAt: IsoTimestamp;
+}
+
+export interface ModelDefinition {
+  id: string;
+  name?: string;
+  reasoning?: boolean;
+}
+
+export interface ModelProviderView {
+  id: string;
+  baseUrl: string;
+  api: WorkerModelApi;
+  credentialProviderId: string;
+  models: ModelDefinition[];
+  enabled: boolean;
+  createdAt: IsoTimestamp;
+  updatedAt: IsoTimestamp;
+}
+
+export interface ModelProviderUpsert {
+  baseUrl: string;
+  api: WorkerModelApi;
+  credentialProviderId: string;
+  models: ModelDefinition[];
+  enabled?: boolean;
+}
+
+export interface ModelRequestUsage {
+  inputTokens: number | null;
+  outputTokens: number | null;
+  cacheReadInputTokens: number | null;
+  cacheCreationInputTokens: number | null;
+}
+
+export interface ModelRequestRecord {
+  id: Id;
+  providerId: string;
+  model: string;
+  workerId: Id;
+  taskId: Id | null;
+  status: "started" | "completed" | "failed" | "cancelled";
+  upstreamStatus: number | null;
+  attempts: number;
+  durationMs: number | null;
+  usage: ModelRequestUsage | null;
+  errorCode: string | null;
+  createdAt: IsoTimestamp;
+  completedAt: IsoTimestamp | null;
 }
 
 export type TaskStreamState = "live" | "reconnecting";

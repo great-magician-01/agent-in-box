@@ -11,6 +11,8 @@ import { VmModule } from "./vms/vm.module";
 import { ProjectModule } from "./projects/project.module";
 import { TaskModule } from "./tasks/task.module";
 import { EventsModule } from "./events/events.module";
+import { ModelsModule } from "./models/models.module";
+import { WorkerModule } from "./workers/worker.module";
 
 @Module({
   imports: [
@@ -24,6 +26,8 @@ import { EventsModule } from "./events/events.module";
     ProjectModule,
     TaskModule,
     EventsModule,
+    ModelsModule,
+    WorkerModule,
   ],
   controllers: [HealthController, RuntimeController],
 })

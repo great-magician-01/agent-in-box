@@ -3,7 +3,22 @@
  * of the domain, task service or UI.
  */
 
+export const WORKER_RPC_PROTOCOL_VERSION = "0.1.0" as const;
+export const PI_ENGINE_VERSION = "1.5.1" as const;
+export const PI_SESSION_FORMAT_VERSION = "1" as const;
+
 export type WorkerCapability = "filesystem" | "shell" | "computer_use" | "browser" | "read_only";
+export type WorkerModelApi = "openai-completions" | "anthropic-messages";
+
+/** Short-lived, host-issued broker access. The upstream credential never enters this object. */
+export interface WorkerModelBrokerSpec {
+  baseUrl: string;
+  token: string;
+  provider: string;
+  model: string;
+  api: WorkerModelApi;
+  reasoning?: boolean;
+}
 
 export interface WorkerSessionSpec {
   workerId: string;
@@ -11,10 +26,13 @@ export interface WorkerSessionSpec {
   vmId: string;
   workspacePath: string;
   engineType: string;
+  engineVersion?: string;
+  sessionVersion?: string;
   systemPrompt: string;
   capabilities: readonly WorkerCapability[];
   provider?: string;
   model?: string;
+  modelBroker?: WorkerModelBrokerSpec;
 }
 
 export interface WorkerInput {
@@ -32,16 +50,27 @@ export type WorkerEngineEvent =
   | { type: "session_failed"; message: string }
   | { type: "session_ended"; reason: "completed" | "cancelled" | "failed" };
 
+export interface WorkerSessionHandle {
+  sessionId: string;
+  /** Opaque to the host. It is a guest-local live or archived session reference. */
+  archiveRef?: string;
+  engineVersion?: string;
+  sessionVersion?: string;
+}
+
 export interface WorkerEngine {
   readonly type: string;
-  startSession(spec: WorkerSessionSpec): Promise<{ sessionId: string }>;
+  startSession(spec: WorkerSessionSpec): Promise<WorkerSessionHandle>;
   prompt(sessionId: string, input: WorkerInput): Promise<void>;
   steer(sessionId: string, input: WorkerInput): Promise<"queued" | "handled">;
   followUp(sessionId: string, input: WorkerInput): Promise<"queued" | "handled">;
   abort(sessionId: string): Promise<void>;
   subscribe(sessionId: string, listener: (event: WorkerEngineEvent) => void): () => void;
   archive(sessionId: string): Promise<{ archiveRef: string; summary: string }>;
-  resume(archiveRef: string): Promise<{ sessionId: string; mode: "native" | "summary" }>;
+  resume(
+    archiveRef: string,
+    spec?: WorkerSessionSpec,
+  ): Promise<WorkerSessionHandle & { mode: "native" | "summary" }>;
 }
 
 export interface WorkerEngineRegistry {
@@ -70,3 +99,10 @@ export function createWorkerEngineRegistry(): WorkerEngineRegistry {
 
 export { PiRpcProcess } from "./pi-rpc-process";
 export { PiWorkerEngine, type PiWorkerEngineOptions } from "./pi-engine";
+export {
+  WorkerRpcClient,
+  WorkerRpcError,
+  type WorkerRpcClientOptions,
+  type WorkerSessionView,
+} from "./worker-rpc-client";
+export { WorkerRpcServer, type WorkerRpcServerOptions } from "./worker-rpc-server";

@@ -491,6 +491,139 @@ export interface StorageMigrationsTable {
   bytes_copied: number;
 }
 
+export interface BotAccountsTable {
+  id: string;
+  platform: string;
+  name: string;
+  enabled: number;
+  app_id: string;
+  credential_provider_id: string;
+  config_json: string;
+  device_id: string | null;
+  state: string;
+  last_connected_at: string | null;
+  last_error: string | null;
+  last_event_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BotIdentitiesTable {
+  id: string;
+  platform: string;
+  platform_user_id: string;
+  display_name: string;
+  role: string;
+  bound: number;
+  local_user_id: string | null;
+  created_at: string;
+  last_seen_at: string;
+}
+
+export interface BotChatsTable {
+  id: string;
+  platform: string;
+  conversation_id: string;
+  kind: string;
+  title: string;
+  allowed: number;
+  project_id: string | null;
+  last_message_id: string | null;
+  created_at: string;
+  last_seen_at: string;
+}
+
+export interface BotEventsTable {
+  dedup_key: string;
+  account_id: string;
+  platform: string;
+  event_id: string;
+  platform_user_id: string;
+  conversation_id: string;
+  text: string;
+  received_at: string;
+  raw_json: string;
+  state: string;
+  attempts: number;
+  last_error: string | null;
+  next_attempt_at: string;
+  created_at: string;
+  updated_at: string;
+  processed_at: string | null;
+}
+
+export interface BotOutboundTable {
+  id: string;
+  account_id: string;
+  platform: string;
+  conversation_id: string;
+  text: string;
+  kind: string;
+  ref_id: string | null;
+  dedupe_key: string;
+  reply_to_message_id: string | null;
+  state: string;
+  attempts: number;
+  next_attempt_at: string;
+  last_error: string | null;
+  created_at: string;
+  sent_at: string | null;
+}
+
+export interface BotTurnsTable {
+  id: string;
+  account_id: string;
+  platform: string;
+  platform_conversation_id: string;
+  local_conversation_id: string;
+  user_text: string;
+  status: string;
+  assistant_text: string | null;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+}
+
+export interface BotTaskLinksTable {
+  task_id: string;
+  turn_id: string;
+  account_id: string;
+  platform: string;
+  platform_conversation_id: string;
+  created_at: string;
+}
+
+export interface BotApprovalLinksTable {
+  approval_id: string;
+  task_id: string;
+  account_id: string;
+  platform: string;
+  platform_conversation_id: string;
+  created_at: string;
+}
+
+export interface BotAccessCodesTable {
+  id: string;
+  code_hash: string;
+  role: string;
+  expires_at: string;
+  created_at: string;
+  used_at: string | null;
+  used_by: string | null;
+}
+
+export interface BotConfirmationsTable {
+  id: string;
+  platform: string;
+  conversation_id: string;
+  platform_user_id: string;
+  action: string;
+  ref_id: string;
+  expires_at: string;
+  created_at: string;
+}
+
 export interface DatabaseSchema {
   schema_migrations: SchemaMigrationsTable;
   images: ImagesTable;
@@ -531,4 +664,14 @@ export interface DatabaseSchema {
   vm_snapshots: VmSnapshotsTable;
   project_backups: ProjectBackupsTable;
   project_backup_bindings: ProjectBackupBindingsTable;
+  bot_accounts: BotAccountsTable;
+  bot_identities: BotIdentitiesTable;
+  bot_chats: BotChatsTable;
+  bot_events: BotEventsTable;
+  bot_outbound: BotOutboundTable;
+  bot_turns: BotTurnsTable;
+  bot_task_links: BotTaskLinksTable;
+  bot_approval_links: BotApprovalLinksTable;
+  bot_access_codes: BotAccessCodesTable;
+  bot_confirmations: BotConfirmationsTable;
 }

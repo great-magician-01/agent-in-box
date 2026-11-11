@@ -30,6 +30,7 @@ import {
   type BotProtocol,
   type BotProtocolSession,
   type DedupeStore,
+  type DurableIngressStore,
   type InboundEventDraft,
   type ManagedBotConnectionOptions,
   type ProtocolContext,
@@ -167,6 +168,7 @@ export interface QqBotConnectorOptions {
   wsConnector?: WsConnector;
   tokenProvider?: QqAccessTokenProvider;
   dedupeStore?: DedupeStore;
+  ingressStore?: DurableIngressStore;
   reconnect?: Partial<ReconnectPolicy>;
   logger?: BotConnectorLogger;
   ingressCapacity?: number;
@@ -257,6 +259,7 @@ export function createQqBotConnector(options: QqBotConnectorOptions): ManagedBot
     wsConnector: options.wsConnector ?? new DefaultWsConnector(),
   };
   if (options.dedupeStore) managedOptions.dedupeStore = options.dedupeStore;
+  if (options.ingressStore) managedOptions.ingressStore = options.ingressStore;
   if (options.reconnect) managedOptions.reconnect = options.reconnect;
   if (options.logger) managedOptions.logger = options.logger;
   if (options.ingressCapacity !== undefined)

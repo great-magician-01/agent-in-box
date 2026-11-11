@@ -16,6 +16,7 @@ import { ComputerUseModule } from "./computer-use/computer-use.module";
 import { WorkerModule } from "./workers/worker.module";
 import { RouterModule } from "./router/router.module";
 import { ResourceModule } from "./resources/resources.module";
+import { BotsModule } from "./bots/bots.module";
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { ResourceModule } from "./resources/resources.module";
     ResourceModule,
     WorkerModule,
     RouterModule,
+    BotsModule,
   ],
   controllers: [HealthController, RuntimeController],
 })

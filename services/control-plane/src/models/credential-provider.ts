@@ -15,6 +15,8 @@ export interface HostCredentialProviderOptions {
   descriptorPath?: string;
   developmentCredentialsFile?: string;
   fetchImpl?: typeof fetch;
+  /** Used in operator-facing errors, e.g. 模型 or 机器人. */
+  purpose?: string;
 }
 
 /**
@@ -25,6 +27,7 @@ export class HostCredentialProvider implements ModelCredentialProvider {
   private readonly descriptorPath?: string;
   private readonly developmentCredentialsFile?: string;
   private readonly fetchImpl: typeof fetch;
+  private readonly purpose: string;
 
   constructor(options: HostCredentialProviderOptions = {}) {
     const descriptor =
@@ -34,6 +37,7 @@ export class HostCredentialProvider implements ModelCredentialProvider {
     if (descriptor) this.descriptorPath = path.resolve(descriptor);
     if (credentials) this.developmentCredentialsFile = path.resolve(credentials);
     this.fetchImpl = options.fetchImpl ?? fetch;
+    this.purpose = options.purpose ?? "模型";
   }
 
   async getSecret(providerId: string): Promise<string> {
@@ -53,7 +57,7 @@ export class HostCredentialProvider implements ModelCredentialProvider {
     if (this.developmentCredentialsFile) return this.fromDevelopmentFile(providerId);
     throw new PersistenceError(
       "unavailable",
-      "模型凭据桥未配置。请从 Electron 启动，或仅在开发环境设置 AGENT_IN_BOX_MODEL_CREDENTIALS_FILE。",
+      `${this.purpose}凭据桥未配置。请从 Electron 启动，或仅在开发环境设置开发凭据文件。`,
     );
   }
 

@@ -235,6 +235,27 @@ export interface DomainEventPayloads {
   };
   "bot.connected": { platform: "feishu" | "qq" };
   "bot.disconnected": { platform: "feishu" | "qq"; reason: string };
+  "bot.account_changed": { accountId: Id; platform: BotPlatform; action: string };
+  "bot.ingress_received": {
+    accountId: Id;
+    platform: BotPlatform;
+    eventId: string;
+    conversationId: string;
+  };
+  "bot.ingress_failed": {
+    accountId: Id;
+    platform: BotPlatform;
+    eventId: string;
+    error: string;
+  };
+  "bot.message_sent": { accountId: Id; platform: BotPlatform; conversationId: string };
+  "bot.identity_bound": { platform: BotPlatform; platformUserId: string; role: BotIdentityRole };
+  "bot.turn_finished": {
+    accountId: Id;
+    platform: BotPlatform;
+    turnId: Id;
+    status: BotTurnStatus;
+  };
 }
 
 export type DomainEventType = keyof DomainEventPayloads;
@@ -1794,6 +1815,210 @@ export interface RouterSendResult {
   conversationId: Id;
   status: RouterStatus;
   message: RouterMessageRecord;
+}
+
+/* Phase 10: local Feishu and QQ connectors. */
+
+export const BOT_PLATFORMS = ["feishu", "qq"] as const;
+export type BotPlatform = (typeof BOT_PLATFORMS)[number];
+
+/** `disabled` means the account is configured but not connected by policy. */
+export type BotRuntimeState = "disabled" | "disconnected" | "connecting" | "connected" | "degraded";
+export type BotIdentityRole = "admin" | "member";
+export type BotChatKind = "p2p" | "group";
+export type BotIngressState = "pending" | "processing" | "processed" | "failed";
+export type BotOutboundState = "pending" | "sending" | "sent" | "failed";
+export type BotTurnStatus = "running" | "completed" | "failed";
+
+export interface BotAccountConfig {
+  /** Feishu Open API base; defaults to https://open.feishu.cn. */
+  domain?: string;
+  /** QQ Bot API base; defaults to https://api.bot.qq.com. */
+  apiBase?: string;
+  /** QQ token base; defaults to https://bots.qq.com for production. */
+  tokenBaseUrl?: string;
+  /** Bot's own Open ID, used to require an explicit group mention on Feishu. */
+  botUserId?: string;
+  /** QQ gateway intents; defaults to GROUP_AND_C2C_EVENT. */
+  intents?: number;
+}
+
+export interface BotAccountRecord {
+  id: Id;
+  platform: BotPlatform;
+  name: string;
+  enabled: boolean;
+  appId: string;
+  credentialProviderId: string;
+  config: BotAccountConfig;
+  deviceId: Id | null;
+  state: BotRuntimeState;
+  lastConnectedAt: IsoTimestamp | null;
+  lastError: string | null;
+  lastEventAt: IsoTimestamp | null;
+  createdAt: IsoTimestamp;
+  updatedAt: IsoTimestamp;
+}
+
+export interface BotAccountView extends BotAccountRecord {
+  connected: boolean;
+  ingressPending: number;
+  outboundPending: number;
+  outboundFailed: number;
+}
+
+export interface BotIdentityRecord {
+  id: Id;
+  platform: BotPlatform;
+  platformUserId: string;
+  displayName: string;
+  role: BotIdentityRole;
+  bound: boolean;
+  createdAt: IsoTimestamp;
+  lastSeenAt: IsoTimestamp;
+}
+
+export interface BotChatRecord {
+  id: Id;
+  platform: BotPlatform;
+  conversationId: string;
+  kind: BotChatKind;
+  title: string;
+  allowed: boolean;
+  projectId: Id | null;
+  lastMessageId: string | null;
+  createdAt: IsoTimestamp;
+  lastSeenAt: IsoTimestamp;
+}
+
+export interface BotTurnRecord {
+  id: Id;
+  accountId: Id;
+  platform: BotPlatform;
+  platformConversationId: string;
+  localConversationId: Id;
+  userText: string;
+  status: BotTurnStatus;
+  assistantText: string | null;
+  errorMessage: string | null;
+  createdAt: IsoTimestamp;
+  updatedAt: IsoTimestamp;
+  completedAt: IsoTimestamp | null;
+}
+
+export interface BotEventView {
+  dedupKey: string;
+  accountId: Id;
+  platform: BotPlatform;
+  eventId: string;
+  conversationId: string;
+  text: string;
+  state: BotIngressState;
+  attempts: number;
+  lastError: string | null;
+  receivedAt: IsoTimestamp;
+  updatedAt: IsoTimestamp;
+}
+
+export interface BotPlatformCapability {
+  platform: BotPlatform;
+  label: string;
+  longConnection: boolean;
+  textTasks: boolean;
+  progress: boolean;
+  approvals: boolean;
+  groupChat: boolean;
+  attachments: boolean;
+  notes: string[];
+}
+
+export interface BotOverview {
+  deviceId: Id;
+  deviceName: string;
+  activeDeviceId: Id | null;
+  thisDeviceActive: boolean;
+  computerOnline: boolean;
+  startedAt: IsoTimestamp;
+  accounts: BotAccountView[];
+  identities: BotIdentityRecord[];
+  chats: BotChatRecord[];
+  recentTurns: BotTurnRecord[];
+  recentEvents: BotEventView[];
+  pendingIngress: number;
+  failedIngress: number;
+  pendingOutbound: number;
+  failedOutbound: number;
+  platforms: BotPlatformCapability[];
+}
+
+export interface BotAccountCreateRequest {
+  platform: BotPlatform;
+  name?: string;
+  appId: string;
+  credentialProviderId?: string;
+  /** Transient validation secret; never persisted or logged by the control plane. */
+  secret?: string;
+  config?: BotAccountConfig;
+  enabled?: boolean;
+}
+
+export interface BotAccountUpdateRequest {
+  name?: string;
+  appId?: string;
+  credentialProviderId?: string;
+  secret?: string;
+  config?: BotAccountConfig;
+  enabled?: boolean;
+}
+
+export interface BotAccountTestRequest {
+  /** Transient validation secret; falls back to the configured credential provider. */
+  secret?: string;
+}
+
+export interface BotAccountTestResult {
+  ok: boolean;
+  accountId: Id;
+  state: BotRuntimeState;
+  lastError: string | null;
+  checkedAt: IsoTimestamp;
+}
+
+export interface BotIdentityUpsertRequest {
+  platformUserId: string;
+  displayName?: string;
+  role?: BotIdentityRole;
+  bound?: boolean;
+}
+
+export interface BotChatUpsertRequest {
+  platform: BotPlatform;
+  conversationId: string;
+  kind: BotChatKind;
+  title?: string;
+  allowed?: boolean;
+  projectId?: Id | null;
+}
+
+export interface BotAccessCodeRequest {
+  role?: BotIdentityRole;
+  expiresInMs?: number;
+}
+
+export interface BotAccessCodeView {
+  code: string;
+  role: BotIdentityRole;
+  expiresAt: IsoTimestamp;
+}
+
+export interface BotDeviceUpdateRequest {
+  active: boolean;
+}
+
+export interface BotOutboundTestRequest {
+  accountId: Id;
+  conversationId: string;
+  text: string;
 }
 
 export interface ModelDefinition {

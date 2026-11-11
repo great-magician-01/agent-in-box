@@ -22,7 +22,8 @@
 - **阶段 7 完成（代码、自动化与真实本地进程 Smoke）**：Host 侧 Computer Use Broker + 短期令牌 + Pi CUA 工具集；动作必须持有 Lease、引用最新截图并经显示分辨率校验；前后截图/Trace、最大步数/时长、无进展与重复动作保护、Blocked/Cancelled 处理；项目 Policy、敏感动作等待审批、批准/拒绝/超时/取消；完成必须通过 Guest 文件/进程或重新截图证据，模型自述不再进入完成状态；任务看板展示 Trace 与审批。`pnpm smoke:phase7` 覆盖 15 项主链路。首轮真实 QEMU/WHPX + 真实 Pi/模型任务评测尚未执行，详见 [`tests/phase7/summary.md`](../tests/phase7/summary.md)。
 - **阶段 8 完成（代码、自动化与真实本地进程 Smoke）**：Worker Registry/Active Roster、可搜索 Archive Registry、空闲自动归档及阻塞条件；宿主 Pi Router 仅持有项目/任务/Worker/看板/归档工具，工具调用审计、短期 Router 模型/工具令牌；Native Resume、版本不兼容时的摘要语义恢复和新 Worker 加载归档摘要，恢复时注入最新截图与离开期间环境变化。`pnpm smoke:phase8` 10 项通过。真实 QEMU/WHPX、真实 Router Pi/模型决策质量和人工 UI 仍未验收，详见 [`tests/phase8/summary.md`](../tests/phase8/summary.md)。
 - **阶段 9 完成（代码、自动化与真实本地进程 Smoke）**：Resource Manager 统一宿主内存/运行 VM/软预算报告，`when_needed` 自动启动/恢复、`waiting_resources` 和资源通知，空闲休眠只作用于无任务/无 Worker/无 Lease 的 VM；共享 VM 整机快照影响预览与确认、独立项目目录备份/恢复、VM/项目删除依赖检查；看板/VM/项目页统一资源与队列快照、任务跳转控制台/Worker 会话、Worker 恢复环境增量摘要。`pnpm smoke:phase9` 10 项通过。真实 QEMU 快照、真实 Guest workspace 归档、真实 Pi/模型和人工 UI 仍未验收，详见 [`tests/phase9/summary.md`](../tests/phase9/summary.md)。
-- **下一步**：进入阶段 10（飞书和 QQ 本地机器人）。真实 QEMU/WHPX 与 noVNC 回归、真实 Pi/模型 Computer Use 任务评测、Windows NSIS 安装包与干净 Windows Smoke Test、真实飞书/QQ 和长时稳定性作为发布前验收门槛持续跟踪。
+- **阶段 10 完成（代码、自动化与真实本地进程 Smoke）**：Bot Connector 持久 Ingress（事件与去重同事务落库后再 ACK）、连接/心跳/重连状态、平台身份一次性绑定码、用户/群白名单与管理员/只读权限；飞书官方 SDK WebSocket + Open API、QQ Bot API v2 WebSocket Intents + REST；机器人自然语言进入同一主 Router 会话，任务/审批/Router 回复回传来源会话，敏感操作二次确认。`pnpm smoke:phase10` 13 项通过。真实飞书/QQ 应用凭据、平台权限矩阵和长时连接仍未验收，详见 [`tests/phase10/summary.md`](../tests/phase10/summary.md)。
+- **下一步**：进入阶段 11（Web、Electron 和安装体验完善）。真实 QEMU/WHPX 与 noVNC 回归、真实 Pi/模型 Computer Use 任务评测、Windows NSIS 安装包与干净 Windows Smoke Test、真实飞书/QQ 和长时稳定性作为发布前验收门槛持续跟踪。
 
 1. 先验证 Hypervisor、镜像、Pi Computer Use 和模型代理等高风险链路，再大规模开发 UI。
 2. 每个阶段形成可运行、可测试的纵向能力，避免一次性生成大量空模块。
@@ -783,6 +784,15 @@
 - 飞书/QQ 与 Web 对同一任务看到一致状态；
 - 机器人只是另一入口，不创建独立任务事实；
 - 离线重连后不会重复执行旧消息。
+
+**完成记录（2026-11-11）**
+
+- Connector 框架：复用 `packages/bot-connector` 的长连接/心跳/重连/Ingress；新增 `DurableIngressStore`，`bot_events` 在同一 SQLite 事务中完成事件去重与完整消息落库后才允许平台 ACK。连接、入站、出站、通知和事件年龄均有独立配置项；控制平面重启后继续消费 pending 事件，重复事件 ID 不再执行。
+- 身份与权限：`bot_identities`、`bot_chats`、`bot_access_codes` 与一次性绑定码；单聊按绑定身份授权，群聊必须显式白名单；管理员可创建/取消任务和处理审批，只读成员仅查询；取消、重试、批准、拒绝和 Abort 使用 2 分钟二次确认（`bot_confirmations`）。未授权群静默忽略，未授权单聊返回绑定提示但不执行命令。
+- 活跃执行电脑：持久 `botDeviceId` 和 `botActiveDeviceId`；只有活跃设备运行连接器，避免同账号多实例随机消费。Web 机器人面板展示连接状态、错误、入站/出站队列、最近事件和 Router 回合。
+- 飞书：官方 `@larksuiteoapi/node-sdk` WSClient + Open API；App ID 校验、群聊 @ Open ID 严格匹配、文本发送与错误脱敏。QQ：Bot API v2 WebSocket 网关（Hello/Identify/Resume/Heartbeat/Intents）+ REST 文本被动回复；群聊只处理 @ 事件，平台不支持的富媒体/主动推送给出明确提示。连接与错误日志统一脱敏 Secret、Bearer/QQBot 令牌和凭据 JSON 字段。
+- 机器人 → Router：自然语言进入同一主 Router 会话并附带来源/默认项目提示；`bot_turns` 记录平台会话与 Router 回合，`bot_task_links` 将回合内创建的任务绑定回来源会话。任务创建/排队/运行/待审批/完成/失败/取消、审批请求/本地处理和 Router 回复经 Outbox + 持久出站队列回传；Web 与机器人读取同一任务数据库。
+- 验证：`pnpm smoke:phase10` 使用真实控制平面/SQLite、QQ 协议替身、官方飞书 SDK 对端替身、真实 Router Tool Broker 与伪造 Router Pi，13 项检查通过；控制平面分别执行 QQ 和飞书绑定、状态、未授权拒绝、群白名单、飞书 @ 校验、Router 建任务、任务通知、去重、取消确认和重启去重。真实飞书/QQ 应用凭据、实际权限矩阵、平台网络重推和长时连接稳定性仍未验收。
 
 ---
 

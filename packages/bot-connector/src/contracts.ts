@@ -46,6 +46,8 @@ export interface BotConnector {
   getStatus(): BotConnectorStatus;
   send(message: OutboundBotMessage): Promise<void>;
   onMessage(listener: (message: InboundBotMessage) => void): () => void;
+  /** Present on the built-in adapters; lets durable consumers clear the memory queue. */
+  drainIngress?(): InboundBotMessage[];
 }
 
 /**

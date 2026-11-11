@@ -33,6 +33,16 @@ export interface DedupeStore {
   addIfAbsent(key: string): boolean | Promise<boolean>;
 }
 
+/**
+ * A durable admission store receives the complete message together with its
+ * dedupe key in one atomic call. Implementations must persist the message
+ * before resolving `true`; the transport only ACKs after `accept` returns.
+ * This closes the crash window between dedupe and the caller's own queue.
+ */
+export interface DurableIngressStore {
+  admit(key: string, message: InboundBotMessage): boolean | Promise<boolean>;
+}
+
 export class InMemoryDedupeStore implements DedupeStore {
   private readonly keys = new Set<string>();
 
@@ -105,6 +115,8 @@ export interface InboundPipelineOptions {
   platform: BotPlatform;
   deviceId: string;
   dedupeStore?: DedupeStore;
+  /** Takes precedence over `dedupeStore` and persists the full message atomically. */
+  ingressStore?: DurableIngressStore;
   ingressCapacity?: number;
   /**
    * When false, listeners registered through `onMessage` are not dispatched
@@ -118,6 +130,7 @@ export class InboundPipeline {
   private readonly platform: BotPlatform;
   private readonly deviceId: string;
   private readonly dedupeStore: DedupeStore;
+  private readonly ingressStore: DurableIngressStore | null;
   private readonly logger: BotConnectorLogger;
   private readonly autoDispatchIngress: boolean;
   private readonly ingress: IngressQueue<InboundBotMessage>;
@@ -138,6 +151,7 @@ export class InboundPipeline {
     this.platform = options.platform;
     this.deviceId = options.deviceId;
     this.dedupeStore = options.dedupeStore ?? new InMemoryDedupeStore();
+    this.ingressStore = options.ingressStore ?? null;
     this.logger = options.logger ?? NOOP_BOT_LOGGER;
     this.autoDispatchIngress = options.autoDispatchIngress ?? true;
     this.ingress = new IngressQueue<InboundBotMessage>(options.ingressCapacity);
@@ -146,16 +160,6 @@ export class InboundPipeline {
   async accept(draft: InboundEventDraft): Promise<AcceptInboundResult> {
     this.metrics.received += 1;
     const key = dedupKey(this.platform, this.deviceId, draft.eventId);
-    const isNew = await this.dedupeStore.addIfAbsent(key);
-    if (!isNew) {
-      this.metrics.duplicates += 1;
-      this.logger.debug("duplicate bot event ignored", {
-        platform: this.platform,
-        eventId: draft.eventId,
-      });
-      return "duplicate";
-    }
-
     const message: InboundBotMessage = {
       platform: this.platform,
       eventId: draft.eventId,
@@ -165,6 +169,18 @@ export class InboundPipeline {
       receivedAt: draft.receivedAt,
       raw: draft.raw,
     };
+    const isNew = this.ingressStore
+      ? await this.ingressStore.admit(key, message)
+      : await this.dedupeStore.addIfAbsent(key);
+    if (!isNew) {
+      this.metrics.duplicates += 1;
+      this.logger.debug("duplicate bot event ignored", {
+        platform: this.platform,
+        eventId: draft.eventId,
+      });
+      return "duplicate";
+    }
+
     this.ingress.push(message);
     this.metrics.enqueued += 1;
     this.scheduleDispatch();

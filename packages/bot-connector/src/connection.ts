@@ -24,6 +24,7 @@ import {
   InboundPipeline,
   type AcceptInboundResult,
   type DedupeStore,
+  type DurableIngressStore,
   type InboundEventDraft,
   type InboundPipelineOptions,
   type IngressMetrics,
@@ -36,6 +37,7 @@ export { InMemoryDedupeStore, IngressQueue } from "./ingress";
 export type {
   AcceptInboundResult,
   DedupeStore,
+  DurableIngressStore,
   InboundEventDraft,
   IngressMetrics,
 } from "./ingress";
@@ -106,6 +108,7 @@ export interface ManagedBotConnectionOptions {
   deviceId: string;
   wsConnector: WsConnector;
   dedupeStore?: DedupeStore;
+  ingressStore?: DurableIngressStore;
   reconnect?: Partial<ReconnectPolicy>;
   logger?: BotConnectorLogger;
   ingressCapacity?: number;
@@ -177,6 +180,7 @@ export class ManagedBotConnection implements BotConnector {
       logger: this.logger,
     };
     if (options.dedupeStore) pipelineOptions.dedupeStore = options.dedupeStore;
+    if (options.ingressStore) pipelineOptions.ingressStore = options.ingressStore;
     if (options.ingressCapacity !== undefined)
       pipelineOptions.ingressCapacity = options.ingressCapacity;
     if (options.autoDispatchIngress !== undefined) {

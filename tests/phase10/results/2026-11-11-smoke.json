@@ -1,0 +1,68 @@
+{
+  "phase": 10,
+  "startedAt": "2026-11-11T13:42:56.286Z",
+  "finishedAt": "2026-11-11T13:43:07.698Z",
+  "checks": [
+    {
+      "name": "控制平面启动并暴露机器人状态与持久设备身份",
+      "passed": true,
+      "detail": "device=47993573-1fcb-4e9a-bf38-d149a9122f75"
+    },
+    {
+      "name": "绑定本机为唯一活跃执行电脑",
+      "passed": true
+    },
+    {
+      "name": "QQ 与飞书机器人通过本机出站长连接上线",
+      "passed": true
+    },
+    {
+      "name": "QQ 单聊一次性绑定码完成平台身份与本地管理员绑定",
+      "passed": true
+    },
+    {
+      "name": "飞书单聊一次性绑定码完成绑定",
+      "passed": true
+    },
+    {
+      "name": "QQ 与飞书查询本机、Router、任务和资源状态",
+      "passed": true
+    },
+    {
+      "name": "未授权平台用户被拒绝执行命令，且不会操作 VM",
+      "passed": true
+    },
+    {
+      "name": "未加入白名单的群聊被忽略，授权群聊可正常响应",
+      "passed": true
+    },
+    {
+      "name": "飞书群聊必须 @ 配置的机器人 Open ID 才响应",
+      "passed": true
+    },
+    {
+      "name": "机器人消息进入主 Router 会话，Router 创建持久任务并回传任务通知",
+      "passed": true,
+      "detail": "task=97c23c36-ddca-43ce-b12d-627076b63087 turn=completed"
+    },
+    {
+      "name": "平台重推同一事件 ID 不会重复创建任务或回复",
+      "passed": true
+    },
+    {
+      "name": "取消任务等敏感操作需要管理员二次确认后执行",
+      "passed": true
+    },
+    {
+      "name": "控制平面重启后持久去重仍生效，旧消息不会重复执行",
+      "passed": true
+    }
+  ],
+  "passed": 13,
+  "failed": 0,
+  "accounts": {
+    "qq": "69530f03-ba76-4e7c-b7bf-fe8a38c63224",
+    "feishu": "5d513437-9ed2-4398-83ab-6abbc843e4ca"
+  },
+  "taskId": "97c23c36-ddca-43ce-b12d-627076b63087"
+}

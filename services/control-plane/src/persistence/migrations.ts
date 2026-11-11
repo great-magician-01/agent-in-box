@@ -1211,6 +1211,280 @@ const migrations: Record<string, MigrationDefinition> = {
       }
     },
   },
+
+  "009_phase10_bots": {
+    async up(db: Kysely<DatabaseSchema>): Promise<void> {
+      await db.schema
+        .createTable("bot_accounts")
+        .addColumn("id", "text", (column) => column.primaryKey())
+        .addColumn("platform", "text", (column) => column.notNull())
+        .addColumn("name", "text", (column) => column.notNull())
+        .addColumn("enabled", "integer", (column) => column.notNull().defaultTo(0))
+        .addColumn("app_id", "text", (column) => column.notNull())
+        .addColumn("credential_provider_id", "text", (column) => column.notNull())
+        .addColumn("config_json", "text", (column) => column.notNull().defaultTo("{}"))
+        .addColumn("device_id", "text")
+        .addColumn("state", "text", (column) => column.notNull().defaultTo("disabled"))
+        .addColumn("last_connected_at", "text")
+        .addColumn("last_error", "text")
+        .addColumn("last_event_at", "text")
+        .addColumn("created_at", "text", (column) => column.notNull())
+        .addColumn("updated_at", "text", (column) => column.notNull())
+        .execute();
+      await db.schema
+        .createIndex("bot_accounts_platform_idx")
+        .on("bot_accounts")
+        .columns(["platform", "app_id"])
+        .unique()
+        .execute();
+
+      await db.schema
+        .createTable("bot_identities")
+        .addColumn("id", "text", (column) => column.primaryKey())
+        .addColumn("platform", "text", (column) => column.notNull())
+        .addColumn("platform_user_id", "text", (column) => column.notNull())
+        .addColumn("display_name", "text", (column) => column.notNull().defaultTo(""))
+        .addColumn("role", "text", (column) => column.notNull().defaultTo("member"))
+        .addColumn("bound", "integer", (column) => column.notNull().defaultTo(0))
+        .addColumn("local_user_id", "text")
+        .addColumn("created_at", "text", (column) => column.notNull())
+        .addColumn("last_seen_at", "text", (column) => column.notNull())
+        .addForeignKeyConstraint(
+          "bot_identities_local_user_fk",
+          ["local_user_id"],
+          "local_users",
+          ["id"],
+          (constraint) => constraint.onDelete("set null"),
+        )
+        .execute();
+      await db.schema
+        .createIndex("bot_identities_platform_user_idx")
+        .on("bot_identities")
+        .columns(["platform", "platform_user_id"])
+        .unique()
+        .execute();
+
+      await db.schema
+        .createTable("bot_chats")
+        .addColumn("id", "text", (column) => column.primaryKey())
+        .addColumn("platform", "text", (column) => column.notNull())
+        .addColumn("conversation_id", "text", (column) => column.notNull())
+        .addColumn("kind", "text", (column) => column.notNull())
+        .addColumn("title", "text", (column) => column.notNull().defaultTo(""))
+        .addColumn("allowed", "integer", (column) => column.notNull().defaultTo(0))
+        .addColumn("project_id", "text")
+        .addColumn("last_message_id", "text")
+        .addColumn("created_at", "text", (column) => column.notNull())
+        .addColumn("last_seen_at", "text", (column) => column.notNull())
+        .addForeignKeyConstraint(
+          "bot_chats_project_fk",
+          ["project_id"],
+          "projects",
+          ["id"],
+          (constraint) => constraint.onDelete("set null"),
+        )
+        .execute();
+      await db.schema
+        .createIndex("bot_chats_platform_conversation_idx")
+        .on("bot_chats")
+        .columns(["platform", "conversation_id"])
+        .unique()
+        .execute();
+
+      await db.schema
+        .createTable("bot_events")
+        .addColumn("dedup_key", "text", (column) => column.primaryKey())
+        .addColumn("account_id", "text", (column) => column.notNull())
+        .addColumn("platform", "text", (column) => column.notNull())
+        .addColumn("event_id", "text", (column) => column.notNull())
+        .addColumn("platform_user_id", "text", (column) => column.notNull())
+        .addColumn("conversation_id", "text", (column) => column.notNull())
+        .addColumn("text", "text", (column) => column.notNull())
+        .addColumn("received_at", "text", (column) => column.notNull())
+        .addColumn("raw_json", "text", (column) => column.notNull())
+        .addColumn("state", "text", (column) => column.notNull())
+        .addColumn("attempts", "integer", (column) => column.notNull().defaultTo(0))
+        .addColumn("last_error", "text")
+        .addColumn("next_attempt_at", "text", (column) => column.notNull())
+        .addColumn("created_at", "text", (column) => column.notNull())
+        .addColumn("updated_at", "text", (column) => column.notNull())
+        .addColumn("processed_at", "text")
+        .addForeignKeyConstraint(
+          "bot_events_account_fk",
+          ["account_id"],
+          "bot_accounts",
+          ["id"],
+          (constraint) => constraint.onDelete("cascade"),
+        )
+        .execute();
+      await db.schema
+        .createIndex("bot_events_state_idx")
+        .on("bot_events")
+        .columns(["state", "next_attempt_at"])
+        .execute();
+
+      await db.schema
+        .createTable("bot_outbound")
+        .addColumn("id", "text", (column) => column.primaryKey())
+        .addColumn("account_id", "text", (column) => column.notNull())
+        .addColumn("platform", "text", (column) => column.notNull())
+        .addColumn("conversation_id", "text", (column) => column.notNull())
+        .addColumn("text", "text", (column) => column.notNull())
+        .addColumn("kind", "text", (column) => column.notNull())
+        .addColumn("ref_id", "text")
+        .addColumn("dedupe_key", "text", (column) => column.notNull().unique())
+        .addColumn("reply_to_message_id", "text")
+        .addColumn("state", "text", (column) => column.notNull())
+        .addColumn("attempts", "integer", (column) => column.notNull().defaultTo(0))
+        .addColumn("next_attempt_at", "text", (column) => column.notNull())
+        .addColumn("last_error", "text")
+        .addColumn("created_at", "text", (column) => column.notNull())
+        .addColumn("sent_at", "text")
+        .addForeignKeyConstraint(
+          "bot_outbound_account_fk",
+          ["account_id"],
+          "bot_accounts",
+          ["id"],
+          (constraint) => constraint.onDelete("cascade"),
+        )
+        .execute();
+      await db.schema
+        .createIndex("bot_outbound_state_idx")
+        .on("bot_outbound")
+        .columns(["state", "next_attempt_at"])
+        .execute();
+
+      await db.schema
+        .createTable("bot_turns")
+        .addColumn("id", "text", (column) => column.primaryKey())
+        .addColumn("account_id", "text", (column) => column.notNull())
+        .addColumn("platform", "text", (column) => column.notNull())
+        .addColumn("platform_conversation_id", "text", (column) => column.notNull())
+        .addColumn("local_conversation_id", "text", (column) => column.notNull())
+        .addColumn("user_text", "text", (column) => column.notNull())
+        .addColumn("status", "text", (column) => column.notNull())
+        .addColumn("assistant_text", "text")
+        .addColumn("error_message", "text")
+        .addColumn("created_at", "text", (column) => column.notNull())
+        .addColumn("updated_at", "text", (column) => column.notNull())
+        .addColumn("completed_at", "text")
+        .addForeignKeyConstraint(
+          "bot_turns_account_fk",
+          ["account_id"],
+          "bot_accounts",
+          ["id"],
+          (constraint) => constraint.onDelete("cascade"),
+        )
+        .addForeignKeyConstraint(
+          "bot_turns_conversation_fk",
+          ["local_conversation_id"],
+          "conversations",
+          ["id"],
+          (constraint) => constraint.onDelete("cascade"),
+        )
+        .execute();
+      await db.schema
+        .createIndex("bot_turns_conversation_idx")
+        .on("bot_turns")
+        .columns(["local_conversation_id", "status", "created_at"])
+        .execute();
+
+      await db.schema
+        .createTable("bot_task_links")
+        .addColumn("task_id", "text", (column) => column.primaryKey())
+        .addColumn("turn_id", "text", (column) => column.notNull())
+        .addColumn("account_id", "text", (column) => column.notNull())
+        .addColumn("platform", "text", (column) => column.notNull())
+        .addColumn("platform_conversation_id", "text", (column) => column.notNull())
+        .addColumn("created_at", "text", (column) => column.notNull())
+        .addForeignKeyConstraint("bot_task_links_task_fk", ["task_id"], "tasks", ["id"], (c) =>
+          c.onDelete("cascade"),
+        )
+        .addForeignKeyConstraint("bot_task_links_turn_fk", ["turn_id"], "bot_turns", ["id"], (c) =>
+          c.onDelete("cascade"),
+        )
+        .addForeignKeyConstraint(
+          "bot_task_links_account_fk",
+          ["account_id"],
+          "bot_accounts",
+          ["id"],
+          (c) => c.onDelete("cascade"),
+        )
+        .execute();
+
+      await db.schema
+        .createTable("bot_approval_links")
+        .addColumn("approval_id", "text", (column) => column.primaryKey())
+        .addColumn("task_id", "text", (column) => column.notNull())
+        .addColumn("account_id", "text", (column) => column.notNull())
+        .addColumn("platform", "text", (column) => column.notNull())
+        .addColumn("platform_conversation_id", "text", (column) => column.notNull())
+        .addColumn("created_at", "text", (column) => column.notNull())
+        .addForeignKeyConstraint(
+          "bot_approval_links_approval_fk",
+          ["approval_id"],
+          "cua_approvals",
+          ["id"],
+          (c) => c.onDelete("cascade"),
+        )
+        .addForeignKeyConstraint("bot_approval_links_task_fk", ["task_id"], "tasks", ["id"], (c) =>
+          c.onDelete("cascade"),
+        )
+        .addForeignKeyConstraint(
+          "bot_approval_links_account_fk",
+          ["account_id"],
+          "bot_accounts",
+          ["id"],
+          (c) => c.onDelete("cascade"),
+        )
+        .execute();
+
+      await db.schema
+        .createTable("bot_access_codes")
+        .addColumn("id", "text", (column) => column.primaryKey())
+        .addColumn("code_hash", "text", (column) => column.notNull().unique())
+        .addColumn("role", "text", (column) => column.notNull())
+        .addColumn("expires_at", "text", (column) => column.notNull())
+        .addColumn("created_at", "text", (column) => column.notNull())
+        .addColumn("used_at", "text")
+        .addColumn("used_by", "text")
+        .execute();
+
+      await db.schema
+        .createTable("bot_confirmations")
+        .addColumn("id", "text", (column) => column.primaryKey())
+        .addColumn("platform", "text", (column) => column.notNull())
+        .addColumn("conversation_id", "text", (column) => column.notNull())
+        .addColumn("platform_user_id", "text", (column) => column.notNull())
+        .addColumn("action", "text", (column) => column.notNull())
+        .addColumn("ref_id", "text", (column) => column.notNull())
+        .addColumn("expires_at", "text", (column) => column.notNull())
+        .addColumn("created_at", "text", (column) => column.notNull())
+        .execute();
+      await db.schema
+        .createIndex("bot_confirmations_lookup_idx")
+        .on("bot_confirmations")
+        .columns(["platform", "conversation_id", "platform_user_id", "created_at"])
+        .execute();
+    },
+
+    async down(db: Kysely<DatabaseSchema>): Promise<void> {
+      for (const table of [
+        "bot_confirmations",
+        "bot_access_codes",
+        "bot_approval_links",
+        "bot_task_links",
+        "bot_turns",
+        "bot_outbound",
+        "bot_events",
+        "bot_chats",
+        "bot_identities",
+        "bot_accounts",
+      ]) {
+        await db.schema.dropTable(table).ifExists().execute();
+      }
+    },
+  },
 };
 
 export async function migrateToLatest(db: Kysely<DatabaseSchema>): Promise<string[]> {

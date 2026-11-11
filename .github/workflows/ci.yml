@@ -97,6 +97,20 @@ jobs:
         env:
           AGENT_IN_BOX_PHASE9_RESULT: ${{ runner.temp }}/phase9-smoke.json
 
+      - name: Run phase 10 Feishu and QQ bot smoke test
+        run: pnpm smoke:phase10
+        env:
+          AGENT_IN_BOX_PHASE10_RESULT: ${{ runner.temp }}/phase10-smoke.json
+
+      - name: Upload phase 10 smoke result
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase10-smoke-${{ runner.os }}
+          path: ${{ runner.temp }}/phase10-smoke.json
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload phase 9 smoke result
         if: success()
         uses: actions/upload-artifact@v4

@@ -18,6 +18,7 @@ import { api, ApiRequestError } from "./api";
 import { chooseDirectory, saveCloseBehavior } from "./desktop";
 import { VmManager, type ConsoleRequest } from "./VmManager";
 import { WorkManager } from "./WorkManager";
+import { BotManager } from "./BotManager";
 import {
   CONTROL_PLANE_STATE_LABELS,
   DATA_ROOT_SOURCE_LABELS,
@@ -375,6 +376,8 @@ export function Dashboard({
           setConsoleRequest((current) => ({ vmId, nonce: (current?.nonce ?? 0) + 1 }))
         }
       />
+
+      <BotManager bridge={bridge} />
 
       <VmManager
         host={host}

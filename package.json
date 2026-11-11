@@ -35,11 +35,13 @@
     "smoke:phase7": "pnpm build:packages && pnpm --filter @agent-in-box/control-plane build && pnpm --filter @agent-in-box/web build && tsx scripts/smoke-phase7.mts",
     "smoke:phase8": "pnpm build:packages && pnpm --filter @agent-in-box/control-plane build && pnpm --filter @agent-in-box/web build && tsx scripts/smoke-phase8.mts",
     "smoke:phase9": "pnpm build:packages && pnpm --filter @agent-in-box/control-plane build && pnpm --filter @agent-in-box/web build && tsx scripts/smoke-phase9.mts",
+    "smoke:phase10": "pnpm build:packages && pnpm --filter @agent-in-box/control-plane build && pnpm --filter @agent-in-box/web build && tsx scripts/smoke-phase10.mts",
     "smoke:desktop": "node scripts/smoke-desktop-package.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "@types/node": "26.6.6",
+    "@types/ws": "8.18.2",
     "eslint": "10.14.0",
     "eslint-plugin-react-hooks": "7.1.1",
     "globals": "17.14.0",
@@ -47,6 +49,7 @@
     "tsx": "4.23.15",
     "typescript": "5.9.3",
     "typescript-eslint": "8.72.2",
-    "vitest": "5.1.0"
+    "vitest": "5.1.0",
+    "ws": "8.22.2"
   }
 }

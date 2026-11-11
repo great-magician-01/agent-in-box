@@ -1,6 +1,6 @@
 # Agent-in-Box
 
-面向个人用户的本地 AI 虚拟机工作平台。当前仓库已完成 **开发计划阶段 1（工程骨架、协议和本地持久化）**、**阶段 2（Electron、本地服务与自定义存储）**、**阶段 3（镜像服务、VM 生命周期与管理 UI）**、**阶段 4（Guest Agent、noVNC 实时控制台与统一 Execution Lease）**、**阶段 5（项目、多 VM 绑定、持久任务队列与任务看板）**、**阶段 6（Pi Worker Runtime、Model Broker 与 Worker Engine Adapter）**、**阶段 7（完整 Computer Use 执行器、执行保护、Policy/Approval 与完成校验）**、**阶段 8（Router、Worker Registry 与归档）** 和 **阶段 9（多 VM 资源调度、共享环境与多端状态同步）**。包含无特权 Electron 壳、控制平面进程监管、首次启动向导、自定义数据目录、可续传镜像服务、受 ACL 保护的 Go VM Supervisor、QEMU/WHPX 生命周期、认证 Guest 管理通道、AI/人工互斥桌面输入、跨项目串行的 VM 任务内核、认证 Guest Worker RPC、短期模型令牌、流式 Broker、Worker 心跳/归档/恢复、Host 侧 Computer Use Broker、动作/截图 Trace、人工审批、独立完成证据校验、可重建 Active Roster、可搜索 Archive Registry、自动空闲归档、原生/摘要恢复、只持有结构化工具的本地 Router、宿主内存软预算与 VM 自动启动/空闲休眠、共享 VM 整机快照影响确认、独立项目目录备份/恢复以及看板/VM/项目页统一状态快照。真实 QEMU/WHPX、Linux Golden Image、真实 Pi/模型任务评测和浏览器/Electron 人工交互验收仍按各阶段记录单独执行。
+面向个人用户的本地 AI 虚拟机工作平台。当前仓库已完成 **开发计划阶段 1（工程骨架、协议和本地持久化）**、**阶段 2（Electron、本地服务与自定义存储）**、**阶段 3（镜像服务、VM 生命周期与管理 UI）**、**阶段 4（Guest Agent、noVNC 实时控制台与统一 Execution Lease）**、**阶段 5（项目、多 VM 绑定、持久任务队列与任务看板）**、**阶段 6（Pi Worker Runtime、Model Broker 与 Worker Engine Adapter）**、**阶段 7（完整 Computer Use 执行器、执行保护、Policy/Approval 与完成校验）**、**阶段 8（Router、Worker Registry 与归档）**、**阶段 9（多 VM 资源调度、共享环境与多端状态同步）** 和 **阶段 10（飞书和 QQ 本地机器人）**。包含无特权 Electron 壳、控制平面进程监管、首次启动向导、自定义数据目录、可续传镜像服务、受 ACL 保护的 Go VM Supervisor、QEMU/WHPX 生命周期、认证 Guest 管理通道、AI/人工互斥桌面输入、跨项目串行的 VM 任务内核、认证 Guest Worker RPC、短期模型令牌、流式 Broker、Worker 心跳/归档/恢复、Host 侧 Computer Use Broker、动作/截图 Trace、人工审批、独立完成证据校验、可重建 Active Roster、可搜索 Archive Registry、自动空闲归档、原生/摘要恢复、只持有结构化工具的本地 Router、宿主内存软预算与 VM 自动启动/空闲休眠、共享 VM 整机快照影响确认、独立项目目录备份/恢复、看板/VM/项目页统一状态快照，以及飞书/QQ 本机出站长连接、持久化事件去重、身份/群白名单、敏感操作二次确认和任务/审批通知。真实 QEMU/WHPX、Linux Golden Image、真实 Pi/模型任务评测、真实飞书/QQ 应用凭据和浏览器/Electron 人工交互验收仍按各阶段记录单独执行。
 
 完整方案见：
 
@@ -15,7 +15,20 @@
 - [阶段 7 验收记录](tests/phase7/summary.md)
 - [阶段 8 验收记录](tests/phase8/summary.md)
 - [阶段 9 验收记录](tests/phase9/summary.md)
+- [阶段 10 验收记录](tests/phase10/summary.md)
 - [Linux Guest Worker 安装资产](images/linux/README.md)
+
+## 阶段 10 已落地
+
+- **Bot Connector 框架**：复用阶段 0 的 `@agent-in-box/bot-connector` 长连接、心跳、重连和协议适配；新增可持久化的整事件 Ingress Store，事件 ID 与完整消息在同一 SQLite 事务中落库后才 ACK 平台。控制平面重启后继续消费未处理事件，重复推送和旧消息不会重复执行。
+- **身份与白名单**：平台用户通过一次性绑定码绑定到本地管理员，或由本机 Web 显式加入白名单；支持管理员/只读成员。单聊按绑定授权，群聊必须显式加入白名单；飞书群聊必须 @ 配置的机器人 Open ID，QQ 群聊只处理 @ 机器人的事件。未授权用户不能创建任务、取消任务或操作 VM。
+- **活跃执行电脑**：机器人账号绑定一台活跃执行电脑；非活跃设备不会启动连接，避免多实例随机消费事件。连接状态、最近事件、错误、入站/出站队列在 Web 机器人面板可见。
+- **飞书与 QQ**：飞书使用官方 `@larksuiteoapi/node-sdk` WebSocket + Open API；QQ 使用 Bot API v2 WebSocket Intents + REST。两者都支持文本任务、进度/结果通知、审批通知和群聊；首版不发送附件，QQ 被动回复窗口外发送失败会显示明确错误。
+- **机器人 → Router**：自然语言消息进入同一个主 Router 会话，由 Router 的持久工具创建任务、选择项目并分派 Worker，不建立独立任务事实源；`/status`、`/projects`、`/tasks`、`/task` 查询本机与持久任务。取消、重试、批准/拒绝和 Abort 等敏感操作需要管理员二次确认。
+- **通知回传**：任务创建、排队、运行、等待审批、完成、失败、取消以及审批请求/本地处理结果会回到来源机器人会话；Router 回合的文字回复按 Outbox 事件回传。
+- **验证边界**：`pnpm smoke:phase10` 使用真实控制平面、SQLite、真实 QQ/飞书协议服务替身和真实 Router Tool Broker，13 项检查通过；真实飞书/QQ 测试应用凭据、平台权限矩阵、真实网络重推和长时连接稳定性仍未验收。
+
+详见 [`tests/phase10/summary.md`](tests/phase10/summary.md)。
 
 ## 阶段 9 已落地
 
@@ -235,7 +248,7 @@ apps/
   desktop/           Electron 无特权桌面壳、Control Plane 监管、托盘与凭据存储
   web/               React + Vite 本地 Web UI（首次向导、存储和设置页面）
 services/
-  control-plane/     NestJS 本地控制平面（宿主检查、存储、任务、Worker Registry、Router 与持久化）
+  control-plane/     NestJS 本地控制平面（宿主检查、存储、任务、Worker Registry、Router、机器人连接器与持久化）
   vm-supervisor/     Go 宿主机 VM 管理服务（ACL、QEMU 生命周期与状态对账）
   guest-agent/       Go Guest Agent（认证管理、桌面输入/截图、心跳与更新暂存）
 scripts/             打包、开发启动与阶段 Smoke Test
@@ -245,7 +258,7 @@ packages/
   config/            数据目录和本地服务配置
   agent-runtime/     Worker Engine 抽象、Pi RPC、Guest Worker RPC 与自包含运行时入口
   computer-use/      Computer Use 动作协议与校验
-  bot-connector/     飞书/QQ 平台无关接口
+  bot-connector/     飞书/QQ 长连接、Ingress/去重、重连与协议适配
   ui/                状态文案与样式辅助
 internal/health/     共享 Go 健康检查实现
 images/linux/        Worker Runtime 安装脚本、systemd unit、cloud-init 示例
@@ -273,6 +286,7 @@ SQLite 数据库位于数据根目录下的 `agent-in-box.sqlite`，使用 WAL �
 - `model_providers`、`model_tokens`、`model_requests`、`conversation_messages`
 - `images`
 - `app_settings`、`local_users`、`storage_migrations`
+- `bot_accounts`、`bot_identities`、`bot_chats`、`bot_events`、`bot_outbound`、`bot_turns`、`bot_task_links`、`bot_approval_links`、`bot_access_codes`、`bot_confirmations`
 
 数据库备份通过 `AppDatabase.backup()` 使用 SQLite 在线备份能力，后续会接入本地备份与恢复流程。
 
@@ -281,12 +295,18 @@ SQLite 数据库位于数据根目录下的 `agent-in-box.sqlite`，使用 WAL �
 已在当前开发环境实际执行：
 
 - `pnpm install`：成功；pnpm 11 仅允许 `esbuild`、`electron`、`better-sqlite3` 构建脚本
-- `pnpm check`：lint、typecheck、235 个 Vitest 测试、Go test、全部构建均通过；1 个环境依赖测试显式跳过
+- `pnpm check`：lint、typecheck、259 个 Vitest 测试、Go test、全部构建均通过；1 个环境依赖测试显式跳过
 - 控制平面 `GET /api/v1/health`、`GET /api/v1/runtime` 返回正常
-- 控制平面启动时创建 SQLite 数据库并应用 `001_initial_schema`、`002_phase2_settings`、`003_phase3_images`、`004_phase5_projects_tasks`、`005_phase6_workers_models`、`006_phase7_computer_use`、`007_phase8_router_archive`
+- 控制平面启动时创建 SQLite 数据库并应用 `001_initial_schema`、`002_phase2_settings`、`003_phase3_images`、`004_phase5_projects_tasks`、`005_phase6_workers_models`、`006_phase7_computer_use`、`007_phase8_router_archive`、`008_phase9_resources_sharing`、`009_phase10_bots`
 - SQLite 表、WAL 模式和迁移记录在真实运行中验证通过
 - Web 开发服务器可访问，`/api` 代理到控制平面正常
 - VM Supervisor 与 Guest Agent 的 `/healthz`、`/readyz` 正常
+
+### 阶段 10 验证（2026-11-11）
+
+- `pnpm smoke:phase10`：真实控制平面/SQLite、真实 QQ Bot API v2 协议服务替身、官方飞书 SDK 对端替身、真实 Router Tool Broker 和伪造 Router Pi，13 项检查通过：迁移与机器人状态、活跃执行电脑绑定、QQ/飞书出站长连接、一次性绑定码、状态查询、未授权拒绝、群聊白名单、飞书 @ 校验、机器人消息进入 Router 并创建持久任务、任务通知回传、重复事件去重、取消任务二次确认、重启后持久去重。
+- 单元测试覆盖持久 Ingress/去重、身份与群白名单、命令授权、审批请求/处理通知、出站队列和连接监管。
+- `realFeishuApp=false`、`realQqBot=false`、`realNetworkRedelivery=false`、`realModel=false`、`browserElectronUi=false`；真实平台凭据、权限矩阵和长时连接稳定性仍待显式验收。详细证据见 [`tests/phase10/summary.md`](tests/phase10/summary.md)。
 
 ### 阶段 9 验证（2026-11-11）
 
@@ -434,10 +454,11 @@ SQLite 数据库位于数据根目录下的 `agent-in-box.sqlite`，使用 WAL �
 - 真实 QEMU/WHPX + X11 的动态分辨率/DPI、noVNC 浏览器/Electron 人工接管回归；合成 RFB Smoke 不替代此验收
 - Wayland 与 Windows Guest 的截图/输入路径
 - 真实 Router Pi 模型决策质量、长会话压缩和真实 Provider 工具调用回归；当前 Smoke 使用测试 Router Pi
-- 真实飞书/QQ 应用凭据验收；本地长连接框架和 mock 协议测试已完成
+- 真实飞书/QQ 应用凭据、实际权限矩阵、平台重推和长时连接稳定性验收；本地长连接框架、官方飞书 SDK 对端和 QQ 协议替身测试已完成
+- 阶段 10 机器人只发送纯文本，不支持图片/文件附件；QQ 被动回复窗口外的进度通知可能失败并显示明确错误
 - 真实 QEMU `qemu-img snapshot`、真实 Guest workspace tar.gz 归档/恢复和真实共享 VM 并发回归；阶段 9 Smoke 使用协议替身
 - 项目工作目录备份遇到符号链接或特殊文件会拒绝而不是静默跳过；多 VM 绑定的项目恢复不是跨 VM 原子操作
 - 资源调度只约束宿主内存软预算，不控制 CPU/磁盘 IO；手动启动允许突破预算
 - Worker 恢复环境增量来自已落库的项目活动/任务，不包含未落库的 Guest 桌面瞬时变化
 
-阶段 0～9 的代码主链路已完成。下一步按 [开发计划](docs/03-development-plan.md) 进入阶段 10：飞书和 QQ 本地机器人；同时继续跟踪真实 QEMU/WHPX + noVNC 回归、真实 Pi/模型 Computer Use 与 Router 评测、Windows NSIS 干净安装和长时稳定性门槛。
+阶段 0～10 的代码主链路已完成。下一步按 [开发计划](docs/03-development-plan.md) 进入阶段 11：Web、Electron 和安装体验完善；同时继续跟踪真实 QEMU/WHPX + noVNC 回归、真实 Pi/模型 Computer Use 与 Router 评测、真实飞书/QQ 凭据、Windows NSIS 干净安装和长时稳定性门槛。

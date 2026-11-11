@@ -25,6 +25,7 @@ import type {
 import {
   InboundPipeline,
   type DedupeStore,
+  type DurableIngressStore,
   type InboundEventDraft,
   type InboundPipelineOptions,
   type IngressMetrics,
@@ -118,6 +119,7 @@ export interface FeishuBotConnectorOptions {
   httpClient?: HttpClient;
   tokenProvider?: AccessTokenProvider;
   dedupeStore?: DedupeStore;
+  ingressStore?: DurableIngressStore;
   logger?: BotConnectorLogger;
   ingressCapacity?: number;
   /**
@@ -209,6 +211,7 @@ export class OfficialFeishuConnector implements BotConnector {
       logger: this.logger,
     };
     if (options.dedupeStore) pipelineOptions.dedupeStore = options.dedupeStore;
+    if (options.ingressStore) pipelineOptions.ingressStore = options.ingressStore;
     if (options.ingressCapacity !== undefined)
       pipelineOptions.ingressCapacity = options.ingressCapacity;
     if (options.autoDispatchIngress !== undefined) {

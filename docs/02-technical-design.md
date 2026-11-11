@@ -701,6 +701,16 @@ POST                  /api/v1/router/abort
 GET                   /api/v1/router/tools
 GET                   /api/v1/router/tool-calls
 GET/POST              /v1/tools[/:name]                  (Router Tool Broker, 短期令牌)
+GET                   /api/v1/bots
+POST                  /api/v1/bots/device
+POST                  /api/v1/bots/accounts
+PATCH/DELETE          /api/v1/bots/accounts/:id
+POST                  /api/v1/bots/accounts/:id/test|reconnect|disconnect|messages
+PUT/DELETE            /api/v1/bots/identities/:platform/:userId
+PUT                   /api/v1/bots/chats
+DELETE                /api/v1/bots/chats/:platform/:conversationId
+POST                  /api/v1/bots/access-codes
+POST                  /api/v1/bots/reconcile
 ```
 
 ## 13. 飞书和 QQ 本地连接
@@ -708,28 +718,39 @@ GET/POST              /v1/tools[/:name]                  (Router Tool Broker, �
 ### 13.1 Connector 结构
 
 ```text
-Platform WebSocket → Ingress → Dedup / Auth → Local Message Queue → Router
-Local Task Events → Outgoing Formatter → Platform REST API
+Platform WebSocket → Durable Ingress (dedupe + full message, one SQLite tx) → ACK
+                                     ↓
+                            Local Dispatcher → Auth / Commands → Router
+Router / Task Outbox → Notification Mapper → Durable Outbound Queue → Platform REST
 ```
 
 - 事件接收与任务执行解耦；
-- 事件先落库，再按平台要求及时确认；
-- 通过平台事件 ID 和内容幂等键去重；
-- 维护连接状态、心跳、重连和最后错误；
-- 机器人和用户白名单在本地数据库配置；
-- App Secret 位于 OS 凭据存储；
-- Connector 在后台服务中运行，不依赖 Electron 窗口存活。
+- 事件先落库，再按平台要求及时确认；`bot_events` 同时承担去重键和完整消息存储，`INSERT OR IGNORE` 与事务提交成功后才允许连接器 ACK；
+- 通过平台事件 ID 和 `platform:deviceId:eventId` 去重；同一事件在控制平面重启后仍保持已处理/待处理状态；
+- 维护连接状态、心跳、重连和最后错误；没有数据库事件的后台巡检只负责连接监管，不执行 AI 工作；
+- 机器人和用户白名单在本地数据库配置；平台身份默认拒绝，一次性绑定码或本机 Web 白名单才授予管理员/只读成员权限；
+- 敏感操作（取消、重试、批准、拒绝、Abort）要求管理员在限定窗口内二次确认；
+- App Secret 位于 OS 凭据存储（Electron 凭据桥）或显式开发凭据文件，不进入 VM、SQLite 配置或普通日志；
+- Connector 在后台服务中运行，不依赖 Electron 窗口存活；
+- 出站消息持久化排队，连接未就绪或平台限流时重试，失败保留明确错误。
 
 ### 13.2 平台差异
 
 - 飞书：使用官方长连接接收事件，按企业自建应用的权限和发布规则配置；
 - QQ：使用 Bot API v2 WebSocket 和 Intents，按机器人类型验证群聊、单聊和富媒体能力；
 - 只支持 Webhook 的特定未来接入形态不作为默认路径，可增加可选中继；
-- 同一机器人默认只允许一台活跃执行电脑，避免多实例随机消费事件。
+- 同一机器人默认只允许一台活跃执行电脑，避免多实例随机消费事件；每台控制平面实例有持久 `botDeviceId`，只有被绑定为活跃设备时才启动连接。
+- 飞书群聊必须 @ 机器人；配置机器人 Open ID 时严格匹配 mention 的 Open ID，否则忽略该群消息。QQ 群聊只处理 `GROUP_AT_MESSAGE_CREATE`，普通群消息不进入命令处理。
+- 单聊由已绑定身份授权；群聊必须显式加入本地白名单。未授权群消息静默忽略，未授权单聊返回绑定提示但不执行命令。
+- 首版两端只支持纯文本。QQ 出站使用被动回复 `msg_id`，超出平台回复窗口的进度通知可能失败并在出站队列保留明确错误；不宣称富媒体或主动推送能力。
 
 ### 13.3 离线与恢复
 
-本地离线时不承诺平台补投。重连后按事件 ID 去重，任务和 Worker 先对账再恢复。没有可选云端队列时，不能宣称离线任务可靠排队。
+本地离线时不承诺平台补投。重连后按事件 ID 去重，任务和 Worker 先对账再恢复。没有可选云端队列时，不能宣称离线任务可靠排队。控制平面重启后，`bot_events` 中未处理的 pending 事件继续消费；超过最大事件年龄（默认 30 分钟）的旧消息只记录不执行，避免离线期间积压的旧指令在恢复后被盲目执行。`bot_outbound` 中未发送的回复在连接恢复后重试。
+
+### 13.4 机器人到 Router
+
+机器人不是独立任务事实源。自然语言消息追加来源标记后进入同一个主 Router 会话；Router 使用既有 `list_projects`、`create_task`、`assign_task` 等结构化工具创建和分派持久任务。`bot_turns` 记录平台会话与本地 Router 回合的对应关系，`bot_task_links` 将本次回合创建的任务绑定回来源会话。任务状态、审批请求和 Router 回复通过 Outbox 映射为出站通知；通知服务只读取 Outbox，不绕过 TaskService 修改任务状态。
 
 ## 14. 安全设计
 

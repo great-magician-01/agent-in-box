@@ -1,4 +1,19 @@
 import type {
+  BotAccessCodeRequest,
+  BotAccessCodeView,
+  BotAccountCreateRequest,
+  BotAccountRecord,
+  BotAccountTestRequest,
+  BotAccountTestResult,
+  BotAccountUpdateRequest,
+  BotChatRecord,
+  BotChatUpsertRequest,
+  BotDeviceUpdateRequest,
+  BotIdentityRecord,
+  BotIdentityUpsertRequest,
+  BotOutboundTestRequest,
+  BotOverview,
+  BotPlatform,
   HealthResponse,
   HostInspectionReport,
   ImageCatalog,
@@ -494,6 +509,81 @@ export const api = {
   resources: () => apiFetch<ResourceReport>("/api/v1/resources"),
   reconcileResources: () =>
     apiFetch<ResourceReconcileResult>("/api/v1/resources/reconcile", { method: "POST" }),
+  bots: () => apiFetch<BotOverview>("/api/v1/bots"),
+  setBotDevice: (body: BotDeviceUpdateRequest) =>
+    apiFetch<BotOverview>("/api/v1/bots/device", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  createBotAccount: (body: BotAccountCreateRequest) =>
+    apiFetch<BotAccountRecord>("/api/v1/bots/accounts", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  updateBotAccount: (id: string, body: BotAccountUpdateRequest) =>
+    apiFetch<BotAccountRecord>(`/api/v1/bots/accounts/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+  deleteBotAccount: (id: string) =>
+    apiFetch<{ deleted: true; accountId: string }>(
+      `/api/v1/bots/accounts/${encodeURIComponent(id)}`,
+      {
+        method: "DELETE",
+      },
+    ),
+  testBotAccount: (id: string, body: BotAccountTestRequest = {}) =>
+    apiFetch<BotAccountTestResult>(`/api/v1/bots/accounts/${encodeURIComponent(id)}/test`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  reconnectBotAccount: (id: string) =>
+    apiFetch<BotAccountRecord>(`/api/v1/bots/accounts/${encodeURIComponent(id)}/reconnect`, {
+      method: "POST",
+    }),
+  disconnectBotAccount: (id: string) =>
+    apiFetch<BotAccountRecord>(`/api/v1/bots/accounts/${encodeURIComponent(id)}/disconnect`, {
+      method: "POST",
+    }),
+  sendBotTestMessage: (id: string, body: BotOutboundTestRequest) =>
+    apiFetch<{ queued: number }>(`/api/v1/bots/accounts/${encodeURIComponent(id)}/messages`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  upsertBotIdentity: (
+    platform: BotPlatform,
+    platformUserId: string,
+    body: BotIdentityUpsertRequest,
+  ) =>
+    apiFetch<BotIdentityRecord>(
+      `/api/v1/bots/identities/${encodeURIComponent(platform)}/${encodeURIComponent(platformUserId)}`,
+      { method: "PUT", body: JSON.stringify(body) },
+    ),
+  deleteBotIdentity: (platform: BotPlatform, platformUserId: string) =>
+    apiFetch<{ deleted: true }>(
+      `/api/v1/bots/identities/${encodeURIComponent(platform)}/${encodeURIComponent(platformUserId)}`,
+      { method: "DELETE" },
+    ),
+  upsertBotChat: (body: BotChatUpsertRequest) =>
+    apiFetch<BotChatRecord>("/api/v1/bots/chats", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  deleteBotChat: (platform: BotPlatform, conversationId: string) =>
+    apiFetch<{ deleted: true }>(
+      `/api/v1/bots/chats/${encodeURIComponent(platform)}/${encodeURIComponent(conversationId)}`,
+      { method: "DELETE" },
+    ),
+  createBotAccessCode: (body: BotAccessCodeRequest = {}) =>
+    apiFetch<BotAccessCodeView>("/api/v1/bots/access-codes", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  reconcileBots: () =>
+    apiFetch<{ processedIngress: number; sentOutbound: number; consumedNotifications: number }>(
+      "/api/v1/bots/reconcile",
+      { method: "POST" },
+    ),
   vms: () => apiFetch<VmListResponse>("/api/v1/vms"),
   deleteVm: (id: string) =>
     apiFetch<{ deleted: true; vmId: string }>(`/api/v1/vms/${encodeURIComponent(id)}`, {

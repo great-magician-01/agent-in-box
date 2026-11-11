@@ -28,6 +28,7 @@ async function listen(server: Server): Promise<string> {
 }
 
 async function close(server: Server): Promise<void> {
+  server.closeAllConnections();
   await new Promise<void>((resolve) => server.close(() => resolve()));
 }
 
@@ -187,16 +188,21 @@ describe("ImageService", () => {
 
   it("cancels an active transfer without exposing a final file", async () => {
     const data = bytes(2 * 1024 * 1024);
-    const server = createServer(async (_request, response) => {
+    // Stream chunks slowly but never end the response: the transfer can only
+    // end through cancellation, so the test cannot race a completing download,
+    // and each 250 ms chunk lets the downloader report progress past its 200 ms
+    // throttle even on a heavily loaded runner.
+    const server = createServer((_request, response) => {
       response.writeHead(200, { "content-length": data.length });
-      for (let offset = 0; offset < data.length; offset += 64 * 1024) {
-        if (response.destroyed) {
+      let offset = 0;
+      const timer = setInterval(() => {
+        if (response.destroyed || offset >= data.length) {
           return;
         }
         response.write(data.subarray(offset, offset + 64 * 1024));
-        await new Promise((resolve) => setTimeout(resolve, 5));
-      }
-      response.end();
+        offset += 64 * 1024;
+      }, 250);
+      response.once("close", () => clearInterval(timer));
     });
     servers.push(server);
     const url = await listen(server);

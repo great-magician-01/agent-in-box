@@ -59,21 +59,40 @@ if (existsSync(deployedModules)) {
 }
 
 // pnpm 11 may emit absolute symlinks on Windows. Once node_modules is renamed,
-// those links still point at the old directory. Rewrite only links into the
-// deployed tree. POSIX uses relative links; Windows uses non-elevated junctions.
+// those links still point at the old directory. Rewrite only links that no
+// longer resolve and whose target was the deployed node_modules tree: relative
+// links (and links whose target moved with the rename) keep working untouched.
+// Rewriting inner ".pnpm/<pkg>/node_modules/<pkg>" segments would break them.
+const oldModulesRoot = path.join(target, "node_modules");
+const newModulesRoot = path.join(target, "runtime_modules");
+
+function stripWindowsExtendedPrefix(rawTarget) {
+  if (process.platform !== "win32") return rawTarget;
+  // Reparse points may be reported in the NT namespace ("\??\") or with the
+  // Win32 extended-length prefix ("\\?\").
+  let namespaceTarget = rawTarget;
+  if (namespaceTarget.startsWith("\\??\\") || namespaceTarget.startsWith("\\\\?\\")) {
+    namespaceTarget = namespaceTarget.slice(4);
+  }
+  if (namespaceTarget.startsWith("UNC\\")) {
+    return `\\\\${namespaceTarget.slice(4)}`;
+  }
+  return namespaceTarget;
+}
+
 function repairDeployedSymlinks(directory) {
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     const entryPath = path.join(directory, entry.name);
     if (entry.isSymbolicLink()) {
-      const rawTarget = readlinkSync(entryPath);
+      const rawTarget = stripWindowsExtendedPrefix(readlinkSync(entryPath));
       const absoluteTarget = path.resolve(directory, rawTarget);
-      const marker = `${path.sep}node_modules${path.sep}`;
-      const markerIndex = absoluteTarget.indexOf(marker);
-      if (markerIndex < 0) continue;
-      const repairedTarget =
-        absoluteTarget.slice(0, markerIndex) +
-        `${path.sep}runtime_modules${path.sep}` +
-        absoluteTarget.slice(markerIndex + marker.length);
+      if (existsSync(absoluteTarget)) continue;
+      const prefix = `${oldModulesRoot}${path.sep}`;
+      const normalizedTarget =
+        process.platform === "win32" ? absoluteTarget.toLowerCase() : absoluteTarget;
+      const normalizedPrefix = process.platform === "win32" ? prefix.toLowerCase() : prefix;
+      if (!normalizedTarget.startsWith(normalizedPrefix)) continue;
+      const repairedTarget = newModulesRoot + absoluteTarget.slice(oldModulesRoot.length);
       rmSync(entryPath);
       if (process.platform === "win32") {
         symlinkSync(repairedTarget, entryPath, "junction");

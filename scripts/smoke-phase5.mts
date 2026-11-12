@@ -246,6 +246,23 @@ try {
     method: "POST",
     body: JSON.stringify({ name: "Project Beta" }),
   });
+  assert.equal(projectA.project.agentConfig.mcpEnabled, false);
+  assert.equal(projectB.project.agentConfig.mcpEnabled, false);
+  const mcpEnabled = await api<ProjectDetail>(`/api/v1/projects/${projectA.project.id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ agentConfig: { mcpEnabled: true } }),
+  });
+  assert.equal(mcpEnabled.project.agentConfig.mcpEnabled, true);
+  assert.equal(mcpEnabled.project.workspaceConfig.defaultGuestWorkspacePath, "/home/worker/alpha");
+  assert.equal(
+    (await api<ProjectDetail>(`/api/v1/projects/${projectB.project.id}`)).project.agentConfig
+      .mcpEnabled,
+    false,
+  );
+  await expectHttpStatus(`/api/v1/projects/${projectA.project.id}`, 400, {
+    method: "PATCH",
+    body: JSON.stringify({ agentConfig: { mcpEnabled: "yes" } }),
+  });
   await api(`/api/v1/projects/${projectA.project.id}/bindings`, {
     method: "POST",
     body: JSON.stringify({
@@ -289,7 +306,7 @@ try {
       .defaultGuestWorkspacePath,
     "/home/worker/alpha",
   );
-  passed("多项目共享同一 VM、单项目绑定多 VM、停止 VM 绑定及共享影响清单");
+  passed("多项目共享 VM、独立 MCP 开关、绑定与共享影响清单");
 
   const disposable = await api<ProjectDetail>("/api/v1/projects", {
     method: "POST",

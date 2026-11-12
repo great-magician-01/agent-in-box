@@ -29,6 +29,11 @@ try {
   ]) {
     await copyFile(path.join(runtimeRoot, "dist", module), path.join(dist, module));
   }
+  await mkdir(path.join(staging, "extensions"), { recursive: true });
+  await copyFile(
+    path.join(runtimeRoot, "extensions", "subagent-extension.js"),
+    path.join(staging, "extensions", "subagent-extension.js"),
+  );
   await writeFile(
     path.join(staging, "package.json"),
     `${JSON.stringify(

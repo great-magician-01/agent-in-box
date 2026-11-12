@@ -317,6 +317,7 @@ describe("WorkerRuntimeService", () => {
     expect(created.runtime.connected).toBe(true);
     expect(created.worker.providerId).toBe("mock");
     expect(created.worker.modelId).toBe("mock-cua");
+    expect(harness.connection.specs[0]?.mcpEnabled).toBe(false);
 
     const prompted = await harness.service.prompt(created.worker.id, {
       text: "Open the file manager",
@@ -540,6 +541,11 @@ describe("WorkerRuntimeService", () => {
     );
     harness.service.onModuleDestroy();
 
+    await harness.ctx.app.db
+      .updateTable("projects")
+      .set({ agent_config_json: JSON.stringify({ mcpEnabled: true }) })
+      .where("id", "=", harness.ctx.projectId)
+      .execute();
     const restarted = await createHarness({ connection: harness.connection, ctx: harness.ctx });
     active = restarted;
     const resumed = await restarted.service.resume(created.worker.id);
@@ -547,6 +553,7 @@ describe("WorkerRuntimeService", () => {
     expect(resumed.restoreMode).toBe("native");
     expect(resumed.context.screenshot?.sha256 ?? "").toHaveLength(64);
     expect(restarted.connection.resumeCalls).toEqual(["/guest/sessions/fake-session.jsonl"]);
+    expect(restarted.connection.specs.at(-1)?.mcpEnabled).toBe(true);
     await waitFor(
       async () => (await restarted.service.get(created.worker.id)).worker.status === "idle",
       "resumed worker idle",

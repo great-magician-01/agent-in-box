@@ -51,6 +51,7 @@ export class ProjectService {
     const name = normalizeName(input?.name);
     const description = normalizeDescription(input?.description);
     const workspaceConfig = normalizeWorkspace(input?.workspaceConfig);
+    const agentConfig = normalizeAgentConfig(input?.agentConfig);
     const now = nowIso();
     const id = randomUUID();
     await this.db.transaction().execute(async (trx) => {
@@ -62,6 +63,7 @@ export class ProjectService {
           description,
           default_vm_binding_id: null,
           workspace_config_json: JSON.stringify(workspaceConfig),
+          agent_config_json: JSON.stringify(agentConfig),
           created_at: now,
           updated_at: now,
           archived_at: null,
@@ -128,12 +130,17 @@ export class ProjectService {
         input.workspaceConfig === undefined
           ? toProjectRecord(current).workspaceConfig
           : normalizeWorkspace(input.workspaceConfig);
+      const agentConfig =
+        input.agentConfig === undefined
+          ? toProjectRecord(current).agentConfig
+          : normalizeAgentConfig(input.agentConfig);
       await trx
         .updateTable("projects")
         .set({
           name,
           description,
           workspace_config_json: JSON.stringify(workspace),
+          agent_config_json: JSON.stringify(agentConfig),
           updated_at: now,
         })
         .where("id", "=", projectId)
@@ -141,7 +148,7 @@ export class ProjectService {
       await this.record(
         projectId,
         "project.updated",
-        { name, description, workspaceConfig: workspace },
+        { name, description, workspaceConfig: workspace, agentConfig },
         "updated",
         now,
         trx,
@@ -626,6 +633,18 @@ function normalizeWorkspace(value: unknown): { defaultGuestWorkspacePath: string
     );
   }
   return { defaultGuestWorkspacePath: normalizeWorkspacePath(path) };
+}
+
+function normalizeAgentConfig(value: unknown): { mcpEnabled: boolean } {
+  if (value === undefined) return { mcpEnabled: false };
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new PersistenceError("validation_failed", "agentConfig 必须是对象");
+  }
+  const mcpEnabled = (value as { mcpEnabled?: unknown }).mcpEnabled;
+  if (typeof mcpEnabled !== "boolean") {
+    throw new PersistenceError("validation_failed", "agentConfig.mcpEnabled 必须是布尔值");
+  }
+  return { mcpEnabled };
 }
 
 function normalizeWorkspacePath(value: unknown): string {

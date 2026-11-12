@@ -132,6 +132,12 @@ describe("Worker RPC", () => {
     });
   });
 
+  it("rejects a non-boolean MCP setting", async () => {
+    await expect(
+      client.startSession({ ...spec(root), mcpEnabled: "yes" } as unknown as WorkerSessionSpec),
+    ).rejects.toMatchObject({ status: 400, code: "bad_request" });
+  });
+
   it("rejects invalid RPC authentication without starting a process", async () => {
     const invalid = new WorkerRpcClient({
       baseUrl,

@@ -30,6 +30,12 @@
 - [隐私与数据处理说明](docs/07-privacy.md)
 - [Linux Guest Worker 安装资产](images/linux/README.md)
 
+## Agent 扩展配置
+
+- **Subagent**：随 Worker Runtime 默认安装并加载，不需要按项目开启；Host Router 不加载该扩展。
+- **MCP**：默认关闭。可在“项目 → 项目设置 → Agent 扩展”中按项目开启；设置持久化在 `projects.agent_config_json`，不会影响其他项目或 Router。
+- **生效时机与边界**：MCP 设置在新建或恢复 Worker 会话时生效，不热改运行中的 Pi 进程。开启只启用 Pi 的 MCP 配置加载，不会自动安装 MCP Server 或注入凭据；Server 与凭据仍需在对应 Guest 的受控环境中单独配置。
+
 ## 阶段 13 已落地
 
 - **Windows Guest 主链路**：`VmSpec`/`VmInstanceRecord` 的 `osFamily` 贯穿控制平面、Supervisor 和 QEMU Provider；Windows 使用 IDE 磁盘、e1000 网卡、标准 VGA、xHCI + USB tablet，不依赖 stock Windows 缺少的 VirtIO 驱动。

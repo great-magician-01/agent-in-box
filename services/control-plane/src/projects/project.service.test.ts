@@ -42,12 +42,15 @@ describe("ProjectService", () => {
     });
     expect(created.project.name).toBe("Desktop automation");
     expect(created.project.workspaceConfig.defaultGuestWorkspacePath).toBe("/home/worker/demo");
+    expect(created.project.agentConfig).toEqual({ mcpEnabled: false });
     const updated = await projects.update(created.project.id, {
       description: "Updated",
       workspaceConfig: { defaultGuestWorkspacePath: "/home/worker/new" },
+      agentConfig: { mcpEnabled: true },
     });
     expect(updated.project.description).toBe("Updated");
     expect(updated.project.workspaceConfig.defaultGuestWorkspacePath).toBe("/home/worker/new");
+    expect(updated.project.agentConfig).toEqual({ mcpEnabled: true });
     await expect(
       projects.update(created.project.id, {
         workspaceConfig: { defaultGuestWorkspacePath: "/home/worker/../escape" },
@@ -58,9 +61,17 @@ describe("ProjectService", () => {
         projects.update(created.project.id, { workspaceConfig: workspaceConfig as never }),
       ).rejects.toThrow("workspaceConfig");
     }
+    for (const agentConfig of [null, "invalid", {}, { mcpEnabled: "yes" }]) {
+      await expect(
+        projects.update(created.project.id, { agentConfig: agentConfig as never }),
+      ).rejects.toThrow("agentConfig");
+    }
+    const other = await projects.create({ name: "MCP remains disabled" });
+    expect(other.project.agentConfig.mcpEnabled).toBe(false);
     expect((await projects.get(created.project.id)).project.workspaceConfig).toEqual(
       updated.project.workspaceConfig,
     );
+    expect((await projects.get(created.project.id)).project.agentConfig.mcpEnabled).toBe(true);
   });
 
   it("supports many-to-many stopped VM bindings and atomic primary changes", async () => {

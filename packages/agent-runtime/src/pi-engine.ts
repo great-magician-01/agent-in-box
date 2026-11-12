@@ -17,6 +17,10 @@ import { PiRpcProcess } from "./pi-rpc-process";
 export interface PiWorkerEngineOptions {
   sessionRoot: string;
   piBinary?: string;
+  /** Built-in Worker subagent support. Its path is never forwarded to children. */
+  subagentExtensionPath?: string;
+  /** Additional extensions, loaded before the legacy extensionPath. */
+  extensionPaths?: readonly string[];
   extensionPath?: string;
   env?: NodeJS.ProcessEnv;
   provider?: string;
@@ -127,11 +131,13 @@ export class PiWorkerEngine implements WorkerEngine {
       path.join(directory, "sessions"),
       "--name",
       workerId,
-      "--no-mcp",
       "--no-skills",
       "--no-context-files",
       "--no-prompt-templates",
     ];
+    const effectiveSpec = spec ?? resumed?.manifest.spec;
+    const mcpEnabled = effectiveSpec?.mcpEnabled ?? false;
+    if (!mcpEnabled) args.push("--no-mcp");
     if (resumed) {
       args.push("--session", resumed.launchFile);
     } else {
@@ -143,10 +149,24 @@ export class PiWorkerEngine implements WorkerEngine {
     if (spec?.systemPrompt) {
       args.push("--system-prompt", spec.systemPrompt);
     }
-    if (this.options.extensionPath) {
-      args.push("--extension", this.options.extensionPath);
+    const extensionPaths = [
+      ...new Set([
+        ...(this.options.extensionPaths ?? []),
+        ...(this.options.extensionPath ? [this.options.extensionPath] : []),
+      ]),
+    ];
+    for (const extensionPath of [
+      ...(this.options.subagentExtensionPath ? [this.options.subagentExtensionPath] : []),
+      ...extensionPaths,
+    ]) {
+      args.push("--extension", extensionPath);
     }
-    if (spec && !spec.capabilities.includes("shell") && !spec.capabilities.includes("filesystem")) {
+    const noBuiltinTools = Boolean(
+      effectiveSpec &&
+      !effectiveSpec.capabilities.includes("shell") &&
+      !effectiveSpec.capabilities.includes("filesystem"),
+    );
+    if (noBuiltinTools) {
       // Keep explicitly registered CUA tools, but do not expose Pi's built-in
       // shell/read/write/edit tools to a Computer-Use-only Worker.
       args.push("--no-builtin-tools");
@@ -161,6 +181,13 @@ export class PiWorkerEngine implements WorkerEngine {
         ...this.options.env,
         HOME: homeDirectory,
         USERPROFILE: homeDirectory,
+        ...(this.options.subagentExtensionPath
+          ? {
+              AGENT_IN_BOX_SUBAGENT_CHILD_ARGS: JSON.stringify(
+                subagentChildArgs(extensionPaths, mcpEnabled, noBuiltinTools),
+              ),
+            }
+          : {}),
         ...(spec?.computerUse
           ? {
               AGENT_IN_BOX_CUA_URL: spec.computerUse.baseUrl,
@@ -489,6 +516,24 @@ export class PiWorkerEngine implements WorkerEngine {
   }
 }
 
+function subagentChildArgs(
+  extensionPaths: readonly string[],
+  mcpEnabled: boolean,
+  noBuiltinTools: boolean,
+): string[] {
+  const args = ["--no-extensions", "--no-skills", "--no-context-files", "--no-prompt-templates"];
+  for (const extensionPath of extensionPaths) args.push("--extension", extensionPath);
+  if (mcpEnabled) {
+    // --no-extensions disables built-in discovery, so restore only the MCP
+    // facilities that the parent session explicitly enabled.
+    args.push("--extension", "builtin:codemode", "--extension", "builtin:mcp");
+  } else {
+    args.push("--no-mcp");
+  }
+  if (noBuiltinTools) args.push("--no-builtin-tools");
+  return args;
+}
+
 function mapPiEvent(event: Record<string, unknown>): WorkerEngineEvent | null {
   switch (event.type) {
     case "message_update": {
@@ -543,6 +588,7 @@ function sanitizeSpec(spec: WorkerSessionSpec): WorkerSessionSpec {
     ...(spec.sessionVersion !== undefined ? { sessionVersion: spec.sessionVersion } : {}),
     systemPrompt: spec.systemPrompt,
     capabilities: [...spec.capabilities],
+    mcpEnabled: spec.mcpEnabled === true,
     ...(spec.provider !== undefined ? { provider: spec.provider } : {}),
     ...(spec.model !== undefined ? { model: spec.model } : {}),
   };

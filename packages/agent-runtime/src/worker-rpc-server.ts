@@ -406,6 +406,9 @@ function validateSpec(value: unknown): WorkerSessionSpec {
   ) {
     throw new RpcHttpError(400, "bad_request", "capabilities are invalid", false);
   }
+  if (spec.mcpEnabled !== undefined && typeof spec.mcpEnabled !== "boolean") {
+    throw new RpcHttpError(400, "bad_request", "mcpEnabled must be a boolean", false);
+  }
   if (spec.systemPrompt !== undefined && typeof spec.systemPrompt !== "string") {
     throw new RpcHttpError(400, "bad_request", "systemPrompt must be a string", false);
   }

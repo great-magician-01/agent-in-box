@@ -113,6 +113,10 @@ Write-Host "Extracting Worker runtime..."
 if ($LASTEXITCODE -ne 0) { throw "Failed to extract the Worker runtime archive" }
 $workerMain = Join-Path $workerRoot "dist\worker-rpc-main.js"
 if (-not (Test-Path -LiteralPath $workerMain)) { throw "Worker runtime is missing dist\worker-rpc-main.js" }
+$subagentExtension = Join-Path $workerRoot "extensions\subagent-extension.js"
+if (-not (Test-Path -LiteralPath $subagentExtension -PathType Leaf)) {
+    throw "Worker runtime is missing the default extensions\subagent-extension.js"
+}
 
 Write-Host "Installing Pi $PiVersion from the explicit npm tarball..."
 & $npmCmd install --prefix $workerRoot --omit=dev --no-audit --no-fund --ignore-scripts $PiTarball

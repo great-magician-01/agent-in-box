@@ -1598,6 +1598,20 @@ const migrations: Record<string, MigrationDefinition> = {
       }
     },
   },
+  "012_project_agent_extensions": {
+    async up(db: Kysely<DatabaseSchema>): Promise<void> {
+      await db.schema
+        .alterTable("projects")
+        .addColumn("agent_config_json", "text", (column) =>
+          column.notNull().defaultTo('{"mcpEnabled":false}'),
+        )
+        .execute();
+    },
+
+    async down(db: Kysely<DatabaseSchema>): Promise<void> {
+      await db.schema.alterTable("projects").dropColumn("agent_config_json").execute();
+    },
+  },
 };
 
 /** Migration ids in the order the runner applies them. */
@@ -1628,11 +1642,7 @@ export async function appliedMigrationIds(db: Kysely<DatabaseSchema>): Promise<s
   if (table.rows.length === 0) {
     return [];
   }
-  const rows = await db
-    .selectFrom("schema_migrations")
-    .select("id")
-    .orderBy("id", "asc")
-    .execute();
+  const rows = await db.selectFrom("schema_migrations").select("id").orderBy("id", "asc").execute();
   return rows.map((row) => row.id);
 }
 

@@ -1628,11 +1628,7 @@ export async function appliedMigrationIds(db: Kysely<DatabaseSchema>): Promise<s
   if (table.rows.length === 0) {
     return [];
   }
-  const rows = await db
-    .selectFrom("schema_migrations")
-    .select("id")
-    .orderBy("id", "asc")
-    .execute();
+  const rows = await db.selectFrom("schema_migrations").select("id").orderBy("id", "asc").execute();
   return rows.map((row) => row.id);
 }
 

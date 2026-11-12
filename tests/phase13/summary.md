@@ -106,7 +106,7 @@
 `smoke:phase13` 在真实控制平面内验证：
 
 1. 自定义 Manifest 同时加载 Linux 与 Windows 镜像；
-2. 一个项目通过 HTTP 绑定 Linux 和 Windows VM，Windows 工作目录为 `C:\Users\aib-worker\workspace`；
+2. 一个项目通过 HTTP 绑定 Linux 和 Windows VM，Windows 工作目录为 `C:\Users\aib\AgentInBox\workspace`；
 3. 非法 Windows 父目录穿越与 NTFS 数据流在 HTTP 边界返回 400；
 4. 两个 VM 各有一个任务运行，另有两个任务排队：跨 VM 并行成立；
 5. 对同一 VM 再次 `claimNext` 返回 null：同 VM 串行成立；

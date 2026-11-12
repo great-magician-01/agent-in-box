@@ -37,7 +37,9 @@ export function redactText(raw: string): string {
       "$1[REDACTED]",
     )
     .replace(/(aib_session=)[^;\s]+/gi, "$1[REDACTED]");
-  return redacted.length > MAX_STRING_LENGTH ? `${redacted.slice(0, MAX_STRING_LENGTH)}…` : redacted;
+  return redacted.length > MAX_STRING_LENGTH
+    ? `${redacted.slice(0, MAX_STRING_LENGTH)}…`
+    : redacted;
 }
 
 export function redactSensitive(value: unknown, depth = 0): unknown {

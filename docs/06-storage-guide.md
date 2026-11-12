@@ -76,7 +76,7 @@
 - 整机快照影响所有绑定项目；恢复前会列出受影响项目、活动任务和 Lease，并要求确认。
 - 恢复整机快照要求 VM `stopped`、无活动任务和 Lease。
 - 项目备份只备份绑定项目的 Guest 工作目录（tar.gz + SHA-256），与整机快照独立。
-- Guest 工作目录支持 Linux POSIX 路径和 Windows 盘符绝对路径（如 `C:\Users\aib-worker\workspace`）；Windows 盘符根目录、UNC、NTFS 数据流和 `..` 会被拒绝。
+- Guest 工作目录支持 Linux POSIX 路径和 Windows 盘符绝对路径（参考镜像默认使用 `C:\Users\aib\AgentInBox\workspace`）；路径类型必须与 VM OS 匹配，Windows 盘符根目录、UNC、NTFS 数据流和 `..` 会被拒绝。
 - 恢复项目备份遇到共享目录、绑定变化、VM 停止或活动任务时会阻止；多 VM 绑定恢复不是跨 VM 原子操作。
 - 项目备份拒绝符号链接、特殊文件和路径逃逸。
 

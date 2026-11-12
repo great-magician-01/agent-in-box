@@ -96,7 +96,7 @@ export function normalizeQueuePriority(value: number): number {
 
 /** Guest paths are configuration only; they are never host filesystem paths. */
 export function isWindowsGuestPath(value: string): boolean {
-  return /^[A-Za-z]:[\\/]/.test(value);
+  return /^[A-Za-z]:[\\/]/.test(value.trim());
 }
 
 function hasParentSegment(value: string): boolean {
@@ -151,8 +151,18 @@ export function normalizeGuestWorkspacePath(value: string): string {
 
 function normalizeGuestPathForCompare(value: string): { normalized: string; windows: boolean } {
   const windows = isWindowsGuestPath(value);
-  let normalized = value.trim().replace(/\\/g, "/").replace(/\/+$/, "");
-  if (normalized === "" || /^[A-Za-z]:$/.test(normalized)) normalized = `${normalized}/`;
+  const separated = windows ? value.trim().replace(/\\/g, "/") : value.trim();
+  // Guest Agents clean paths with filepath.Clean before filesystem access. Apply
+  // the equivalent safe subset here so aliases cannot bypass shared-workspace
+  // conflict detection. Parent segments have already been rejected.
+  const parts = separated.split("/").filter((segment) => segment !== "" && segment !== ".");
+  let normalized: string;
+  if (windows) {
+    const drive = parts.shift() ?? "C:";
+    normalized = `${drive}/${parts.join("/")}`;
+  } else {
+    normalized = `/${parts.join("/")}`;
+  }
   return { normalized: windows ? normalized.toLowerCase() : normalized, windows };
 }
 

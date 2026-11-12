@@ -818,10 +818,52 @@ try {
     `task=${taskId} turn=${turn.status}`,
   );
 
-  // The router reply and the task-created notification are separate outbound
-  // rows delivered by the pump. Drain them before snapshotting so a reply that
-  // is still in flight is not mistaken for duplicate-event handling.
-  await waitFor(async () => (await bots()).pendingOutbound === 0, "bot outbound drain");
+  async function notificationsCaughtUp(): Promise<boolean> {
+    const inspection = AppDatabase.open({
+      filename: path.join(temporary, "agent-in-box.sqlite"),
+    });
+    try {
+      const cursorRow = await inspection.db
+        .selectFrom("app_settings")
+        .select("value_json")
+        .where("key", "=", "bot.notificationCursor")
+        .executeTakeFirst();
+      const latest = await inspection.db
+        .selectFrom("outbox")
+        .select("id")
+        .where("topic", "in", [
+          "task.created",
+          "task.status_changed",
+          "task.approval_requested",
+          "task.approval_resolved",
+          "router.message",
+          "router.status_changed",
+        ])
+        .orderBy("id", "desc")
+        .limit(1)
+        .executeTakeFirst();
+      if (!latest) return true;
+      if (!cursorRow) return false;
+      const cursor = JSON.parse(cursorRow.value_json) as unknown;
+      return typeof cursor === "number" && Number.isFinite(cursor) && cursor >= latest.id;
+    } finally {
+      await inspection.close();
+    }
+  }
+
+  // A completed bot turn is marked by the notification consumer itself. Wait
+  // for its cursor to cover every relevant outbox row, then check outbound after
+  // that synchronization point so late notification insertion cannot race the
+  // duplicate-event assertion.
+  await waitFor(async () => {
+    const before = await bots();
+    if (before.recentTurns.find((item) => item.id === turn.id)?.status !== "completed") {
+      return false;
+    }
+    if (!(await notificationsCaughtUp())) return false;
+    const after = await bots();
+    return after.pendingIngress === 0 && after.pendingOutbound === 0;
+  }, "bot notification cursor and outbound drain");
   const beforeDuplicate = qq.sends.length;
   qq.sendC2C("qq-user-1", "BOT-CREATE 请创建一个任务", "qq-nl-1");
   await delay(1200);

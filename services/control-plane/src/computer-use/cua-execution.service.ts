@@ -27,7 +27,7 @@ import type {
   TaskRecord,
   TaskTraceView,
 } from "@agent-in-box/protocol";
-import { guestPathEqualsOrWithin } from "@agent-in-box/domain";
+import { guestPathEqualsOrWithin, isSafeAbsoluteGuestPath } from "@agent-in-box/domain";
 import { PersistenceError } from "../persistence/errors";
 import type { DatabaseSchema } from "../persistence/schema";
 import { nowIso } from "../persistence/time";
@@ -202,13 +202,7 @@ export class CuaExecutionService {
       try {
         observed = await this.guest.observe(binding.vmId);
       } catch (error) {
-        if (isHumanRequiredGuestError(error)) {
-          await this.blockTask(
-            binding.task,
-            "guest_session_locked",
-            "Guest 的锁屏或安全桌面需要人工接管；已停止自动操作，不跳过系统安全机制",
-          );
-        }
+        await this.blockForHumanRequired(binding.task, error);
         throw error;
       }
       const screenshot = await this.storeScreenshot(
@@ -400,7 +394,13 @@ export class CuaExecutionService {
       for (const item of input.evidence) {
         if (item.type === "screenshot") {
           const record = await this.screenshotRecord(binding.task.id, item.screenshotId);
-          const fresh = await this.guest.observe(binding.vmId);
+          let fresh: Awaited<ReturnType<GuestService["observe"]>>;
+          try {
+            fresh = await this.guest.observe(binding.vmId);
+          } catch (error) {
+            await this.blockForHumanRequired(binding.task, error);
+            throw error;
+          }
           const completionShot = await this.storeScreenshot(
             binding,
             "completion",
@@ -756,13 +756,8 @@ export class CuaExecutionService {
           "human_control_active",
           "人工已接管该 VM，Computer Use 动作被拒绝",
         );
-      } else if (isHumanRequiredGuestError(error)) {
-        await this.blockTask(
-          binding.task,
-          "guest_session_locked",
-          "Guest 的锁屏或安全桌面需要人工接管；已停止自动操作，不跳过系统安全机制",
-        );
       }
+      await this.blockForHumanRequired(binding.task, error);
       throw error;
     }
     const executedAt = this.now();
@@ -873,6 +868,7 @@ export class CuaExecutionService {
         observed.desktop.scaleFactor ?? null,
       );
     } catch (error) {
+      await this.blockForHumanRequired(binding.task, error);
       this.logger.warn(
         `Post-action screenshot failed: ${error instanceof Error ? error.message : error}`,
       );
@@ -1019,6 +1015,15 @@ export class CuaExecutionService {
       .where("task_id", "=", task.id)
       .execute();
     return step;
+  }
+
+  private async blockForHumanRequired(task: TaskRecord, error: unknown): Promise<void> {
+    if (!isHumanRequiredGuestError(error)) return;
+    await this.blockTask(
+      task,
+      "guest_session_locked",
+      "Guest 的锁屏或安全桌面需要人工接管；已停止自动操作，不跳过系统安全机制",
+    );
   }
 
   private async blockTask(task: TaskRecord, code: string, message: string): Promise<void> {
@@ -1268,8 +1273,8 @@ function validateCompletion(input: CuaCompleteRequest, policy: CuaPolicy): strin
       continue;
     }
     if (item.type === "file") {
-      if (typeof item.path !== "string" || !item.path.startsWith("/"))
-        return "文件证据必须使用绝对 Guest 路径";
+      if (!isSafeAbsoluteGuestPath(item.path))
+        return "文件证据必须使用安全的绝对 POSIX 或 Windows Guest 路径";
       if (item.sha256 !== undefined && !/^[a-fA-F0-9]{64}$/.test(item.sha256))
         return "文件证据 SHA-256 无效";
       if (

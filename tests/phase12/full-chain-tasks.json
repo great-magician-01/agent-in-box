@@ -71,11 +71,7 @@
       ],
       "completion": {
         "mode": "machine",
-        "checks": [
-          "Router 工具调用已审计",
-          "未创建重复任务",
-          "Worker 会话引用保持不变"
-        ]
+        "checks": ["Router 工具调用已审计", "未创建重复任务", "Worker 会话引用保持不变"]
       },
       "evidence": ["router-tool-calls", "worker-registry", "task-trace"]
     },
@@ -139,11 +135,7 @@
       ],
       "completion": {
         "mode": "machine",
-        "checks": [
-          "群聊白名单生效",
-          "被动回复窗口外错误可见",
-          "事件去重跨重启有效"
-        ]
+        "checks": ["群聊白名单生效", "被动回复窗口外错误可见", "事件去重跨重启有效"]
       },
       "evidence": ["qq-event-ids", "bot-outbound", "task-trace"]
     },

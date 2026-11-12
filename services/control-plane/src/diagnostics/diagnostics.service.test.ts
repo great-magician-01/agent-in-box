@@ -53,7 +53,10 @@ afterEach(async () => {
 
 describe("DiagnosticsService", () => {
   it("exports counts, migrations and checks without credentials", async () => {
-    fs.writeFileSync(path.join(configDirectory, "web-access-key"), "aib_test_access_key_1234567890\n");
+    fs.writeFileSync(
+      path.join(configDirectory, "web-access-key"),
+      "aib_test_access_key_1234567890\n",
+    );
 
     const report = await service.report();
     expect(report.warning).toContain("敏感");
@@ -88,7 +91,7 @@ describe("DiagnosticsService", () => {
         "control-plane failed with Bearer abcdefghijklmnop and sk-live-abcdefghijklmnopqrstuvwxyz",
         `access key aib_${"A".repeat(24)}`,
         'apiKey="sk-ant-abcdefghijklmnop"',
-        'cookie aib_session=session-secret-value',
+        "cookie aib_session=session-secret-value",
         '{"appSecret":"feishu-secret-value","token":"qq-token-value","message":"visible text"}',
       ].join("\n"),
     );

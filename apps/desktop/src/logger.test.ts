@@ -63,7 +63,9 @@ describe("desktop logger", () => {
   it("redacts secrets embedded in captured control-plane log lines", () => {
     const directory = temporaryDirectory();
     const logger = new JsonLineLogger({ directory, scope: "control-plane" });
-    logger.warn("upstream failed with Bearer abcdefghijklmnop and key sk-live-abcdefghijklmnopqrstuvwxyz");
+    logger.warn(
+      "upstream failed with Bearer abcdefghijklmnop and key sk-live-abcdefghijklmnopqrstuvwxyz",
+    );
     logger.info("plain message", { note: "token=plain-secret-value" });
 
     const serialized = readFileSync(path.join(directory, "desktop.log"), "utf8");

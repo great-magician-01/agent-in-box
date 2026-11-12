@@ -20,12 +20,12 @@ afterEach(async () => {
   await ctx.close();
 });
 
-async function createStoppedVm(name: string) {
+async function createStoppedVm(name: string, osFamily: "linux" | "windows" = "linux") {
   const image = await ctx.app.db.selectFrom("images").select("id").executeTakeFirstOrThrow();
   return catalog.createVm({
     name,
     imageId: image.id,
-    osFamily: "linux",
+    osFamily,
     cpuCount: 2,
     memoryBytes: 2 * 1024 ** 3,
     diskBytes: 20 * 1024 ** 3,
@@ -103,6 +103,44 @@ describe("ProjectService", () => {
     expect(afterUnbind.bindings[0]?.binding.isPrimary).toBe(true);
     expect(afterUnbind.project.defaultVmBindingId).toBe(afterUnbind.bindings[0]?.binding.id);
     expect(await catalog.getVm(vmB.id)).toBeDefined();
+  });
+
+  it("rejects workspace paths that do not match the target VM OS", async () => {
+    const project = await projects.create({ name: "Mixed OS path validation" });
+    const windowsVm = await createStoppedVm("Stopped Windows VM", "windows");
+    await expect(
+      projects.bind(project.project.id, {
+        vmId: ctx.vmId,
+        guestWorkspacePath: "C:\\Users\\aib\\AgentInBox\\workspace",
+      }),
+    ).rejects.toMatchObject({ code: "validation_failed" });
+    await expect(
+      projects.bind(project.project.id, {
+        vmId: windowsVm.id,
+        guestWorkspacePath: "/home/worker/workspace",
+      }),
+    ).rejects.toMatchObject({ code: "validation_failed" });
+
+    const bound = await projects.bind(project.project.id, {
+      vmId: windowsVm.id,
+      guestWorkspacePath: "C:\\Users\\aib\\AgentInBox\\workspace",
+    });
+    const windowsBinding = bound.bindings.find((item) => item.vm.id === windowsVm.id)!;
+    await expect(
+      projects.updateBinding(project.project.id, windowsBinding.binding.id, {
+        guestWorkspacePath: "/home/worker/workspace",
+      }),
+    ).rejects.toMatchObject({ code: "validation_failed" });
+    expect(
+      (await projects.get(project.project.id)).bindings.find(
+        (item) => item.binding.id === windowsBinding.binding.id,
+      )?.binding.guestWorkspacePath,
+    ).toBe("C:\\Users\\aib\\AgentInBox\\workspace");
+
+    await projects.bind(project.project.id, {
+      vmId: ctx.vmId,
+      guestWorkspacePath: "/home/worker/linux-workspace",
+    });
   });
 
   it("deletes project metadata without deleting a shared VM", async () => {

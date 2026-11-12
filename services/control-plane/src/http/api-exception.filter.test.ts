@@ -29,7 +29,9 @@ describe("ApiExceptionFilter", () => {
     vi.spyOn(Logger.prototype, "error").mockImplementation(() => undefined);
     const { json, host } = mockHost();
     new ApiExceptionFilter().catch(
-      new Error('upstream failed with Bearer abcdefghijklmnop and key sk-live-abcdefghijklmnopqrstuvwxyz'),
+      new Error(
+        "upstream failed with Bearer abcdefghijklmnop and key sk-live-abcdefghijklmnopqrstuvwxyz",
+      ),
       host,
     );
     const body = json.mock.calls[0]?.[0] as {

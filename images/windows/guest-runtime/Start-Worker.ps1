@@ -1,12 +1,13 @@
 # Starts the Guest Worker RPC server as the interactive guest user. The Worker
 # itself has no Windows desktop permissions; Computer Use goes through the host
 # broker and the Guest Agent. Tokens are read from protected per-VM files.
+[CmdletBinding()]
+param([string]$DataRoot = "C:\ProgramData\AgentInBox")
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$dataRoot = "C:\ProgramData\AgentInBox"
-$configPath = Join-Path $dataRoot "config.json"
-$logRoot = Join-Path $dataRoot "logs"
+$configPath = Join-Path $DataRoot "config.json"
+$logRoot = Join-Path $DataRoot "logs"
 New-Item -ItemType Directory -Force -Path $logRoot | Out-Null
 $log = Join-Path $logRoot "worker.log"
 

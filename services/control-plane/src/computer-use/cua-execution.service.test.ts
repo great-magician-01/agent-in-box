@@ -505,6 +505,26 @@ describe("CuaExecutionService", () => {
     expect(events).toEqual(expect.arrayContaining(["worker.completion_verified"]));
   });
 
+  it("accepts Windows drive-absolute file evidence", async () => {
+    const h = harness!;
+    const completed = await h.cua.complete(h.token, {
+      summary: "Windows 报告已保存",
+      evidence: [
+        {
+          type: "file",
+          path: "C:\\Users\\aib\\AgentInBox\\workspace\\report.txt",
+          sha256: "a".repeat(64),
+          sizeBytes: 12,
+        },
+      ],
+    });
+    expect(completed.completed).toBe(true);
+    expect(h.guest.verifyCalls[0]?.checks[0]).toMatchObject({
+      type: "file",
+      path: "C:\\Users\\aib\\AgentInBox\\workspace\\report.txt",
+    });
+  });
+
   it("blocks the task after three failed completion evidence attempts", async () => {
     const h = harness!;
     h.guest.verifyOk = false;
@@ -558,6 +578,42 @@ describe("CuaExecutionService", () => {
       guestCode: "session_locked",
     });
     await expect(h.cua.observe(h.token)).rejects.toMatchObject({ code: "conflict" });
+    expect(await h.tasks.get(h.taskId)).toMatchObject({
+      status: "blocked",
+      errorCode: "guest_session_locked",
+    });
+  });
+
+  it("blocks the task when completion evidence observes a secure desktop", async () => {
+    const h = harness!;
+    const observation = await h.cua.observe(h.token);
+    h.guest.observeError = new PersistenceError("conflict", "Windows secure desktop is active", {
+      guestCode: "secure_desktop",
+    });
+    await expect(
+      h.cua.complete(h.token, {
+        summary: "尝试提交完成截图",
+        evidence: [{ type: "screenshot", screenshotId: observation.screenshotId }],
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    expect(await h.tasks.get(h.taskId)).toMatchObject({
+      status: "blocked",
+      errorCode: "guest_session_locked",
+    });
+  });
+
+  it("blocks the task when the post-action screenshot finds a secure desktop", async () => {
+    const h = harness!;
+    const observation = await h.cua.observe(h.token);
+    h.guest.observeError = new PersistenceError("conflict", "Windows secure desktop is active", {
+      guestCode: "secure_desktop",
+    });
+    await expect(
+      h.cua.act(h.token, {
+        screenshotId: observation.screenshotId,
+        action: { type: "click", point: { x: 20, y: 20 } },
+      }),
+    ).rejects.toMatchObject({ code: "unavailable" });
     expect(await h.tasks.get(h.taskId)).toMatchObject({
       status: "blocked",
       errorCode: "guest_session_locked",

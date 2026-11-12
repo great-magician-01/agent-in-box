@@ -122,11 +122,12 @@ export class LeaseService {
     now?: Date,
   ): Promise<VmLeaseRecord> {
     const validDuration = validTtl(ttlMs);
-    return this.withVmLock(vmId, async () => {
-      // The request can wait behind an in-flight input. Evaluate the live clock
-      // only after acquiring the lock, not when the HTTP heartbeat arrived.
+    // Renewal must not wait for the input lock: an input RPC may legitimately
+    // run for the full 30-second lease TTL. The short database transaction
+    // serializes renewal with acquire/release without blocking desktop input.
+    return this.db.transaction().execute(async (trx) => {
       const effectiveNow = now ?? new Date();
-      const lease = await this.leases.getById(leaseId);
+      const lease = await this.leases.getById(leaseId, trx);
       if (!lease || lease.vmId !== vmId) {
         throw new NotFoundError(`Lease not found: ${leaseId}`);
       }
@@ -138,7 +139,7 @@ export class LeaseService {
         requestedExpiry > new Date(lease.expiresAt).getTime()
           ? new Date(requestedExpiry).toISOString()
           : lease.expiresAt;
-      await this.leases.updateExpiry(leaseId, expiresAt);
+      await this.leases.updateExpiry(leaseId, expiresAt, trx);
       return { ...lease, expiresAt };
     });
   }

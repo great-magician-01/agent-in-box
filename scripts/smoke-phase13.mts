@@ -522,7 +522,7 @@ try {
     body: JSON.stringify({
       name: "Phase 13 mixed OS project",
       description: "Linux/Windows mixed scheduling",
-      workspaceConfig: { defaultGuestWorkspacePath: "C:\\Users\\aib-worker\\workspace" },
+      workspaceConfig: { defaultGuestWorkspacePath: "C:\\Users\\aib\\AgentInBox\\workspace" },
     }),
   });
   assert.equal(project.status, 201);
@@ -540,7 +540,7 @@ try {
     method: "POST",
     body: JSON.stringify({
       vmId: windowsVmId,
-      guestWorkspacePath: "C:\\Users\\aib-worker\\workspace",
+      guestWorkspacePath: "C:\\Users\\aib\\AgentInBox\\workspace",
       isPrimary: false,
     }),
   });
@@ -552,7 +552,7 @@ try {
   ]);
   assert.ok(
     windowsBinding.body.bindings.some(
-      (binding) => binding.binding.guestWorkspacePath === "C:\\Users\\aib-worker\\workspace",
+      (binding) => binding.binding.guestWorkspacePath === "C:\\Users\\aib\\AgentInBox\\workspace",
     ),
   );
   passed("HTTP 项目创建与双 OS 绑定接受 Windows 绝对工作目录");

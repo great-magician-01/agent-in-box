@@ -183,7 +183,7 @@ foreach ($entry in @(
     @{ Name = "AgentInBox-Worker"; Script = "Start-Worker.ps1" }
 )) {
     $action = New-ScheduledTaskAction -Execute "powershell.exe" `
-        -Argument "-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$(Join-Path $scriptsRoot $entry.Script)`""
+        -Argument "-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$(Join-Path $scriptsRoot $entry.Script)`" -DataRoot `"$DataRoot`""
     $trigger = New-ScheduledTaskTrigger -AtLogOn -User $User
     $taskPrincipal = New-ScheduledTaskPrincipal -UserId $User -LogonType Interactive -RunLevel Limited
     Register-ScheduledTask -TaskName $entry.Name -Action $action -Trigger $trigger `

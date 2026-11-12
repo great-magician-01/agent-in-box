@@ -64,7 +64,11 @@
       "level": "P0",
       "title": "Windows 截图、鼠标、滚动、拖拽与中文输入",
       "entrypoints": ["electron", "web"],
-      "preconditions": ["Windows Golden Image 已启动并登录", "Guest Agent token 已注入", "noVNC 可用"],
+      "preconditions": [
+        "Windows Golden Image 已启动并登录",
+        "Guest Agent token 已注入",
+        "noVNC 可用"
+      ],
       "steps": [
         "观察 Windows 桌面并记录分辨率/DPI",
         "打开记事本或浏览器输入中英文文本",
@@ -133,7 +137,10 @@
       "level": "P0",
       "title": "Windows Guest Worker、Pi RPC 与 Model Broker",
       "entrypoints": ["electron", "web"],
-      "preconditions": ["Windows Guest 已安装固定 Node/Pi/Worker Runtime", "Worker RPC token 已注入"],
+      "preconditions": [
+        "Windows Guest 已安装固定 Node/Pi/Worker Runtime",
+        "Worker RPC token 已注入"
+      ],
       "steps": [
         "创建 Windows Worker 并完成握手",
         "执行含流式文本、图片和工具调用的回合",
@@ -203,7 +210,11 @@
       "level": "P0",
       "title": "干净 Windows Host 安装、创建项目并执行双 Guest 任务",
       "entrypoints": ["electron", "web"],
-      "preconditions": ["干净 Windows 11 主机", "无开发工具与 pnpm store", "合法 Windows/Linux 镜像"],
+      "preconditions": [
+        "干净 Windows 11 主机",
+        "无开发工具与 pnpm store",
+        "合法 Windows/Linux 镜像"
+      ],
       "steps": [
         "安装最终构建",
         "完成首次启动向导与存储选择",

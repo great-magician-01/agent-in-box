@@ -12,7 +12,7 @@ import { api } from "./api";
 import { formatDate, VM_POWER_STATE_LABELS } from "./format";
 
 const DEFAULT_LINUX_WORKSPACE = "/home/worker/workspace";
-const DEFAULT_WINDOWS_WORKSPACE = "C:\\Users\\aib-worker\\workspace";
+const DEFAULT_WINDOWS_WORKSPACE = "C:\\Users\\aib\\AgentInBox\\workspace";
 
 function defaultGuestWorkspace(osFamily: VmInstanceRecord["osFamily"]): string {
   return osFamily === "windows" ? DEFAULT_WINDOWS_WORKSPACE : DEFAULT_LINUX_WORKSPACE;

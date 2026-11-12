@@ -15,7 +15,7 @@ import {
   type ProjectUpdateRequest,
   type ProjectView,
 } from "@agent-in-box/protocol";
-import { normalizeGuestWorkspacePath } from "@agent-in-box/domain";
+import { isWindowsGuestPath, normalizeGuestWorkspacePath } from "@agent-in-box/domain";
 import type { DatabaseService } from "../persistence/database.service";
 import type { DatabaseExecutor } from "../persistence/executor";
 import { NotFoundError, PersistenceError } from "../persistence/errors";
@@ -252,11 +252,11 @@ export class ProjectService {
     const vmId = input.vmId.trim();
     const vm = await this.db
       .selectFrom("vm_instances")
-      .select("id")
+      .select(["id", "os_family"])
       .where("id", "=", vmId)
       .executeTakeFirst();
     if (!vm) throw new NotFoundError(`VM 不存在：${vmId}`);
-    const guestWorkspacePath = normalizeWorkspacePath(input.guestWorkspacePath);
+    const guestWorkspacePath = normalizeWorkspacePathForVm(input.guestWorkspacePath, vm.os_family);
     const now = nowIso();
     await this.db.transaction().execute(async (trx) => {
       const existing = await trx
@@ -325,6 +325,16 @@ export class ProjectService {
         .where("project_id", "=", projectId)
         .executeTakeFirst();
       if (!binding) throw new NotFoundError(`项目 VM 绑定不存在：${bindingId}`);
+      let guestWorkspacePath: string | undefined;
+      if (input.guestWorkspacePath !== undefined) {
+        const vm = await trx
+          .selectFrom("vm_instances")
+          .select("os_family")
+          .where("id", "=", binding.vm_id)
+          .executeTakeFirst();
+        if (!vm) throw new NotFoundError(`VM 不存在：${binding.vm_id}`);
+        guestWorkspacePath = normalizeWorkspacePathForVm(input.guestWorkspacePath, vm.os_family);
+      }
       if (input.isPrimary === false && binding.is_primary === 1) {
         throw new PersistenceError("conflict", "请先将另一个绑定设为主 VM");
       }
@@ -338,10 +348,7 @@ export class ProjectService {
       await trx
         .updateTable("project_vm_bindings")
         .set({
-          guest_workspace_path:
-            input.guestWorkspacePath === undefined
-              ? binding.guest_workspace_path
-              : normalizeWorkspacePath(input.guestWorkspacePath),
+          guest_workspace_path: guestWorkspacePath ?? binding.guest_workspace_path,
           ...(input.isPrimary === true ? { is_primary: 1 } : {}),
         })
         .where("id", "=", bindingId)
@@ -637,4 +644,16 @@ function normalizeWorkspacePath(value: unknown): string {
       error instanceof Error ? error.message : "Guest 工作目录无效",
     );
   }
+}
+
+function normalizeWorkspacePathForVm(value: unknown, osFamily: string): string {
+  const normalized = normalizeWorkspacePath(value);
+  const windowsPath = isWindowsGuestPath(normalized);
+  if ((osFamily === "windows" && !windowsPath) || (osFamily === "linux" && windowsPath)) {
+    throw new PersistenceError(
+      "validation_failed",
+      "Guest 工作目录必须与 VM OS 匹配：Windows 使用盘符绝对路径，Linux 使用 POSIX 绝对路径",
+    );
+  }
+  return normalized;
 }

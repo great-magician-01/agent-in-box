@@ -73,7 +73,9 @@ export class ApiExceptionFilter implements ExceptionFilter {
 
     this.logger.error(
       "Unhandled control-plane error",
-      redactText(exception instanceof Error ? (exception.stack ?? exception.message) : String(exception)),
+      redactText(
+        exception instanceof Error ? (exception.stack ?? exception.message) : String(exception),
+      ),
     );
     const error: ApiError = {
       code: "internal_error",

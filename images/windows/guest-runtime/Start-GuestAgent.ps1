@@ -1,12 +1,13 @@
 # Starts the authenticated Guest Agent in the interactive guest session.
 # The task intentionally runs as the logged-in user: Windows GDI capture and
 # SendInput only operate on that user's desktop. It does not run as SYSTEM.
+[CmdletBinding()]
+param([string]$DataRoot = "C:\ProgramData\AgentInBox")
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$dataRoot = "C:\ProgramData\AgentInBox"
-$configPath = Join-Path $dataRoot "config.json"
-$logRoot = Join-Path $dataRoot "logs"
+$configPath = Join-Path $DataRoot "config.json"
+$logRoot = Join-Path $DataRoot "logs"
 New-Item -ItemType Directory -Force -Path $logRoot | Out-Null
 $log = Join-Path $logRoot "guest-agent.log"
 
@@ -29,11 +30,14 @@ while ($true) {
             continue
         }
         Rotate-Log
+        $workspaceRoot = $config.workspaceRoot
+        $verifyRoots = @($env:USERPROFILE, $config.dataRoot, $workspaceRoot) -join ";"
+        $workspaceRoots = @($env:USERPROFILE, $workspaceRoot) -join ";"
         $arguments = @(
             "-addr", "0.0.0.0:7611",
             "-token-file", $token,
-            "-verify-roots", "$env:USERPROFILE;$($config.dataRoot)",
-            "-workspace-roots", "$env:USERPROFILE",
+            "-verify-roots", $verifyRoots,
+            "-workspace-roots", $workspaceRoots,
             "-update-dir", $config.updateRoot
         )
         & $config.guestAgentExe @arguments *>> $log

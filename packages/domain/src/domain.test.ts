@@ -125,5 +125,9 @@ describe("lease and priority helpers", () => {
     ).toBe(true);
     expect(guestPathsEqual("/home/worker/workspace/", "/home/worker/workspace")).toBe(true);
     expect(guestPathsEqual("/home/worker/Workspace", "/home/worker/workspace")).toBe(false);
+    expect(guestPathsEqual("/home/worker/./project", "/home/worker//project/")).toBe(true);
+    expect(guestPathsEqual("C:\\Users\\aib\\.\\workspace", " c:/users/AIB//workspace ")).toBe(true);
+    expect(guestPathsEqual("/home\\worker\\proof.txt", "/home/worker/proof.txt")).toBe(false);
+    expect(guestPathEqualsOrWithin(" C:\\Users\\aib\\proof.txt ", " C:\\Users\\aib ")).toBe(true);
   });
 });

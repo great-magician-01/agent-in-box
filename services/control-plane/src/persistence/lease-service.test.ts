@@ -137,19 +137,36 @@ describe("LeaseService", () => {
     expect(renewed.expiresAt).toBe(lease.expiresAt);
   });
 
-  it("uses the post-lock clock so a queued heartbeat cannot revive an expired lease", async () => {
+  it("renews a lease while a long input holds the VM input lock", async () => {
     const lease = await service.acquire({
       vmId: ctx.vmId,
       owner: "worker",
       taskId: "task-a",
-      ttlMs: 1_000,
+      ttlMs: 30_000,
+    });
+    let finishInput!: () => void;
+    let markInputStarted!: () => void;
+    const inputStarted = new Promise<void>((resolve) => {
+      markInputStarted = resolve;
     });
     const input = service.executeWithLease(ctx.vmId, lease.id, "worker", async () => {
-      await new Promise((resolve) => setTimeout(resolve, 1_100));
+      markInputStarted();
+      await new Promise<void>((resolve) => {
+        finishInput = resolve;
+      });
     });
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    await expect(service.renewForVm(ctx.vmId, lease.id)).rejects.toBeInstanceOf(LeaseConflictError);
-    await input;
+    await inputStarted;
+    try {
+      const renewed = await Promise.race([
+        service.renewForVm(ctx.vmId, lease.id, 30_000),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 250)),
+      ]);
+      expect(renewed).not.toBeNull();
+      expect(Date.parse(renewed!.expiresAt)).toBeGreaterThan(Date.parse(lease.expiresAt));
+    } finally {
+      finishInput();
+      await input;
+    }
   });
 
   it("serializes input operations that use the same active worker lease", async () => {

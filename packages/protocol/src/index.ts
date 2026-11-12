@@ -113,12 +113,18 @@ export interface ProjectWorkspaceConfig {
   defaultGuestWorkspacePath: string;
 }
 
+export interface ProjectAgentConfig {
+  /** Subagents are always installed; MCP discovery is explicitly opt-in per project. */
+  mcpEnabled: boolean;
+}
+
 export interface ProjectRecord {
   id: Id;
   name: string;
   description: string;
   defaultVmBindingId: Id | null;
   workspaceConfig: ProjectWorkspaceConfig;
+  agentConfig: ProjectAgentConfig;
   createdAt: IsoTimestamp;
   updatedAt: IsoTimestamp;
   archivedAt: IsoTimestamp | null;
@@ -1447,12 +1453,14 @@ export interface ProjectCreateRequest {
   name: string;
   description?: string;
   workspaceConfig?: ProjectWorkspaceConfig;
+  agentConfig?: ProjectAgentConfig;
 }
 
 export interface ProjectUpdateRequest {
   name?: string;
   description?: string;
   workspaceConfig?: ProjectWorkspaceConfig;
+  agentConfig?: ProjectAgentConfig;
 }
 
 export interface ProjectBindingRequest {

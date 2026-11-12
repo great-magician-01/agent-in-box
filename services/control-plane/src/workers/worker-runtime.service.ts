@@ -44,6 +44,7 @@ import type {
 } from "@agent-in-box/protocol";
 import { isTaskStatus } from "@agent-in-box/protocol";
 import { PersistenceError } from "../persistence/errors";
+import { toProjectRecord } from "../persistence/mappers";
 import { DatabaseService } from "../persistence/database.service";
 import { OutboxRepository } from "../persistence/repositories/outbox-repository";
 import { WorkerArchiveRepository } from "../persistence/repositories/worker-archive-repository";
@@ -237,11 +238,12 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
   async create(input: WorkerCreateRequest): Promise<WorkerView> {
     const project = await this.db
       .selectFrom("projects")
-      .select(["id", "archived_at"])
+      .selectAll()
       .where("id", "=", input?.projectId)
       .executeTakeFirst();
     if (!project) throw new PersistenceError("not_found", `项目不存在：${input?.projectId}`);
     if (project.archived_at) throw new PersistenceError("conflict", "已归档项目不能创建 Worker");
+    const mcpEnabled = toProjectRecord(project).agentConfig.mcpEnabled;
     const binding = await this.db
       .selectFrom("project_vm_bindings")
       .select(["guest_workspace_path"])
@@ -341,6 +343,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
           ? summarySystemPrompt(systemPromptForOs(this.systemPrompt, vm.osFamily), archive.summary)
           : systemPromptForOs(this.systemPrompt, vm.osFamily),
         capabilities: ["computer_use"],
+        mcpEnabled,
         provider: model.provider.id,
         model: model.model.id,
         modelBroker: {
@@ -622,7 +625,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     } else {
       throw new PersistenceError("conflict", "Worker 没有可恢复的会话引用或摘要");
     }
-    const [binding, vm, model] = await Promise.all([
+    const [binding, vm, model, project] = await Promise.all([
       this.db
         .selectFrom("project_vm_bindings")
         .select(["guest_workspace_path"])
@@ -631,6 +634,11 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
         .executeTakeFirst(),
       this.requireVm(worker.vmId),
       this.providers.resolve(worker.providerId ?? undefined, worker.modelId ?? undefined),
+      this.db
+        .selectFrom("projects")
+        .selectAll()
+        .where("id", "=", worker.projectId)
+        .executeTakeFirstOrThrow(),
     ]);
     if (!binding) throw new PersistenceError("conflict", "目标 VM 已解绑，不能恢复 Worker");
     if (vm.powerState !== "running") throw new PersistenceError("conflict", "目标 VM 未运行");
@@ -678,6 +686,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
         restoreMode === "summary" && summaryText
           ? summarySystemPrompt(this.systemPrompt, summaryText)
           : undefined,
+        toProjectRecord(project).agentConfig.mcpEnabled,
       );
       let handle: WorkerSessionHandle;
       if (restoreMode === "native" && nativeRef) {
@@ -1307,6 +1316,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     providerApi: "openai-completions" | "anthropic-messages" = "openai-completions",
     reasoning = false,
     systemPrompt?: string,
+    mcpEnabled = false,
   ): WorkerSessionSpec {
     return {
       workerId: worker.id,
@@ -1318,6 +1328,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
       sessionVersion: PI_SESSION_FORMAT_VERSION,
       systemPrompt: systemPrompt ?? this.systemPrompt,
       capabilities: ["computer_use"],
+      mcpEnabled,
       provider: providerId,
       model: modelId,
       modelBroker: {

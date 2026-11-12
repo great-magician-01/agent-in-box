@@ -504,6 +504,7 @@ install_worker() {
   local worker_copy="$1"
   local worker_stage="${STAGE_DIR}/worker"
   local main_file="${worker_stage}/dist/worker-rpc-main.js"
+  local subagent_extension="${worker_stage}/extensions/subagent-extension.js"
   local worker_release
 
   note "extracting agent-runtime worker bundle"
@@ -515,6 +516,11 @@ install_worker() {
     || die 4 "worker bundle must contain a regular dist/worker-rpc-main.js at its archive root"
   if ! "${NODE_LINK}/bin/node" --check "${main_file}"; then
     die 4 "worker bundle entry dist/worker-rpc-main.js is not valid CommonJS"
+  fi
+  [[ -f "${subagent_extension}" && ! -L "${subagent_extension}" ]] \
+    || die 4 "worker bundle must contain the default extensions/subagent-extension.js"
+  if ! "${NODE_LINK}/bin/node" --check "${subagent_extension}"; then
+    die 4 "default subagent extension is not valid JavaScript"
   fi
 
   chown -R root:root "${worker_stage}"

@@ -195,5 +195,7 @@ systemd-analyze verify images/linux/worker-runtime/agent-in-box-worker.service
 
 - 本目录只提供安装/运行资产，不实现 Worker RPC 协议、Session Format 版本检查、Model Broker 或 Host 侧 token 签发。这些由阶段 6 的 `packages/agent-runtime`、控制平面和 provisioning 流程实现。
 - Pi 的依赖来自 npm registry；真正可离线复现的 Golden Image 必须在受控构建阶段完成安装并把产物/校验和固化到部署 manifest。
+- Worker bundle 默认包含并加载 `subagent` 扩展（`scout`、`planner`、`reviewer`、`worker`），子 Pi 进程继承当前模型、工作区、工具限制与项目 MCP 开关，但不会递归加载 subagent 或自动发现项目扩展。已有镜像/VM 需要更新 Worker Runtime 并新建或恢复会话后使用该能力。
+- MCP 由 Host 的项目设置按项目开启，默认仍为 `--no-mcp`。开启后 Pi 可读取该 Worker 隔离 HOME 的 `.pi/agent/mcp.json`；工作目录 `.pi/mcp.json` 仍受 Pi 项目信任机制约束，Agent-in-Box 不会自动提升信任或注入 Server 凭据。
 - CUA extension 是 GUI Worker 的必需件（安装参数仍可选，便于无桌面的普通 Worker）；`--cua-extension` 只复制单个自包含文件，extension 其余依赖必须由 Pi 安装或 extension 自身提供。阶段 7 的 [`worker-runtime/cua-extension.js`](worker-runtime/cua-extension.js) 只调用 Host Computer Use Broker（`AGENT_IN_BOX_CUA_URL/TOKEN`，由 Host session spec 注入），**不读取 Guest Agent token**。Guest Agent token 与 RPC token、Model Broker token、CUA Broker token 均不同；不要把任一 token 写进镜像。
 - 阶段 7 的 Computer Use 依赖宿主控制平面的 CUA Broker（默认回环 `6720`）和 Guest 侧安装该 extension。未安装 extension 时 Pi 只有通用工具，不能执行 GUI 动作；CUA Broker 仍会拒绝无 Lease/无观察/过期截图的请求。

@@ -43,6 +43,7 @@ export function ProjectManager({
   const [editName, setEditName] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editWorkspace, setEditWorkspace] = useState("");
+  const [editMcpEnabled, setEditMcpEnabled] = useState(false);
   const [bindVmId, setBindVmId] = useState("");
   const [bindPath, setBindPath] = useState(DEFAULT_LINUX_WORKSPACE);
   const [bindPrimary, setBindPrimary] = useState(false);
@@ -59,6 +60,7 @@ export function ProjectManager({
     setEditName(detail.project.name);
     setEditDescription(detail.project.description);
     setEditWorkspace(detail.project.workspaceConfig.defaultGuestWorkspacePath);
+    setEditMcpEnabled(detail.project.agentConfig.mcpEnabled);
   }, [detail]);
 
   useEffect(() => {
@@ -287,6 +289,7 @@ export function ProjectManager({
                     name: editName,
                     description: editDescription,
                     workspaceConfig: { defaultGuestWorkspacePath: editWorkspace },
+                    agentConfig: { mcpEnabled: editMcpEnabled },
                   }),
                 );
               }}
@@ -320,6 +323,22 @@ export function ProjectManager({
                   onChange={(event) => setEditDescription(event.target.value)}
                 />
               </label>
+              <div className="field">
+                <span>Agent 扩展</span>
+                <label className="toggle compact-toggle">
+                  <input
+                    type="checkbox"
+                    checked={editMcpEnabled}
+                    disabled={archived || busy}
+                    onChange={(event) => setEditMcpEnabled(event.target.checked)}
+                  />
+                  <span>为此项目启用 MCP</span>
+                </label>
+                <span className="form-hint">
+                  Subagent 默认启用，无需配置。MCP 默认关闭；开启后由该项目 Worker 的 Pi 会话加载
+                  Guest 中的 MCP 配置。更改在新建或恢复 Worker 会话后生效，点击“保存项目”应用。
+                </span>
+              </div>
               <div className="action-row">
                 {!archived && (
                   <button type="submit" className="secondary" disabled={busy}>

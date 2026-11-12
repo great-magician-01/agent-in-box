@@ -122,9 +122,20 @@ export function toProjectRecord(row: Selectable<ProjectsTable>): ProjectRecord {
       defaultGuestWorkspacePath:
         typeof workspace === "string" && workspace ? workspace : "/home/worker/workspace",
     },
+    agentConfig: { mcpEnabled: projectAgentConfig(row.agent_config_json).mcpEnabled },
     createdAt: row.created_at,
     updatedAt: row.updated_at || row.created_at,
     archivedAt: row.archived_at,
+  };
+}
+
+function projectAgentConfig(value: string): { mcpEnabled: boolean } {
+  const parsed = parseJson(value);
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { mcpEnabled: false };
+  }
+  return {
+    mcpEnabled: (parsed as { mcpEnabled?: unknown }).mcpEnabled === true,
   };
 }
 

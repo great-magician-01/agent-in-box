@@ -20,6 +20,7 @@ if (process.env.FAKE_PI_ENV_LOG) {
     JSON.stringify({
       cuaUrl: process.env.AGENT_IN_BOX_CUA_URL || "",
       cuaToken: process.env.AGENT_IN_BOX_CUA_TOKEN || "",
+      subagentChildArgs: process.env.AGENT_IN_BOX_SUBAGENT_CHILD_ARGS || "",
     }),
   );
 }

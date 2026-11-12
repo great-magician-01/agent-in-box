@@ -1,12 +1,12 @@
 {
   "phase": 5,
-  "startedAt": "2026-11-11T15:53:13.114Z",
-  "completedAt": "2026-11-11T15:53:22.267Z",
-  "platform": "win32",
+  "startedAt": "2026-11-12T11:57:51.976Z",
+  "completedAt": "2026-11-12T11:57:54.102Z",
+  "platform": "linux",
   "architecture": "x64",
   "checks": [
     "真实控制平面启动并应用阶段 5 SQLite 迁移",
-    "多项目共享同一 VM、单项目绑定多 VM、停止 VM 绑定及共享影响清单",
+    "多项目共享 VM、独立 MCP 开关、绑定与共享影响清单",
     "删除项目不会删除共享 VM",
     "幂等创建、依赖、等待 VM、跨项目优先级队列和版本化 WebSocket 事件",
     "服务端 Worker 按优先级认领后，同 VM 第二个认领请求被拒绝",

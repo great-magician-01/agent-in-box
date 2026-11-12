@@ -49,6 +49,22 @@ describe("database migrations", () => {
     );
   });
 
+  it("keeps MCP disabled when upgrading existing projects", async () => {
+    ctx.app.sqlite
+      .prepare("delete from schema_migrations where id = '012_project_agent_extensions'")
+      .run();
+    ctx.app.sqlite.prepare("alter table projects drop column agent_config_json").run();
+
+    const applied = await ctx.app.migrate();
+    expect(applied).toContain("012_project_agent_extensions");
+    const project = await ctx.app.db
+      .selectFrom("projects")
+      .select("agent_config_json")
+      .where("id", "=", ctx.projectId)
+      .executeTakeFirstOrThrow();
+    expect(JSON.parse(project.agent_config_json)).toEqual({ mcpEnabled: false });
+  });
+
   it("is idempotent", async () => {
     const applied = await ctx.app.migrate();
     expect(applied).toEqual([]);

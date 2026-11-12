@@ -39,6 +39,8 @@ export interface WorkerSessionSpec {
   sessionVersion?: string;
   systemPrompt: string;
   capabilities: readonly WorkerCapability[];
+  /** MCP is disabled unless the owning project explicitly enables it. */
+  mcpEnabled?: boolean;
   provider?: string;
   model?: string;
   modelBroker?: WorkerModelBrokerSpec;

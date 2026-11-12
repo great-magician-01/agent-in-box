@@ -44,6 +44,7 @@ export interface ProjectsTable {
   description: string;
   default_vm_binding_id: string | null;
   workspace_config_json: string;
+  agent_config_json: string;
   created_at: string;
   updated_at: string;
   archived_at: string | null;

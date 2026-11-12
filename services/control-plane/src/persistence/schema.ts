@@ -21,6 +21,7 @@ export interface ImagesTable {
   updated_at: string;
   seed_local_path: string | null;
   manifest_json: string;
+  provisioning_profile: string | null;
 }
 
 export interface VmInstancesTable {
@@ -36,6 +37,9 @@ export interface VmInstancesTable {
   guest_health: string;
   created_at: string;
   last_started_at: string | null;
+  provisioning_state: string;
+  provisioning_message: string | null;
+  provisioning_started_at: string | null;
 }
 
 export interface ProjectsTable {

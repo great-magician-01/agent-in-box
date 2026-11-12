@@ -1,0 +1,83 @@
+{
+  "phase": 12,
+  "startedAt": "2026-11-12T14:11:32.078Z",
+  "finishedAt": "2026-11-12T14:11:34.401Z",
+  "checks": [
+    {
+      "name": "控制平面启动并保持回环监听",
+      "passed": true
+    },
+    {
+      "name": "Host/Origin/Sec-Fetch-Site 边界与未认证 API 拒绝生效",
+      "passed": true
+    },
+    {
+      "name": "静态 Web 安全头生效且没有宽松 CORS",
+      "passed": true,
+      "detail": "OPTIONS 404"
+    },
+    {
+      "name": "Cookie 会话写操作强制 CSRF，Bearer/Cookie 认证可用",
+      "passed": true
+    },
+    {
+      "name": "诊断报告要求认证，包含迁移/计数/日志并在导出前脱敏凭据",
+      "passed": true
+    },
+    {
+      "name": "Router 工具面不包含宿主命令、Shell 或 VM 输入能力",
+      "passed": true,
+      "detail": "17 tools"
+    },
+    {
+      "name": "控制平面在运行任务状态下被 SIGKILL，Fixture 与待应用迁移已持久化",
+      "passed": true
+    },
+    {
+      "name": "迁移前数据库备份先通过完整性校验并写入 SHA-256，再应用迁移",
+      "passed": true,
+      "detail": "pre-migration-2026-11-12T14-11-33-569Z-011_phase12_hardening-to-011_phase12_hardening.sqlite"
+    },
+    {
+      "name": "控制平面崩溃后运行任务安全失败、Worker 对账、Lease 释放且不盲目重放",
+      "passed": true
+    },
+    {
+      "name": "大任务历史看板与 Router 消息查询保持可用",
+      "passed": true,
+      "detail": "2001 tasks / 21 ms; router 4 ms"
+    },
+    {
+      "name": "停止控制平面后用迁移前备份重建主数据库，模拟备份恢复流程",
+      "passed": true
+    },
+    {
+      "name": "备份可恢复：项目、任务历史和迁移记录在恢复后重新可用",
+      "passed": true,
+      "detail": "2001 tasks"
+    }
+  ],
+  "metrics": {
+    "boardTaskCount": 2001,
+    "boardMs": 21,
+    "routerMessages": 100,
+    "routerMessagesMs": 4,
+    "restoredTaskCount": 2001,
+    "preMigrationBackup": "pre-migration-2026-11-12T14-11-33-569Z-011_phase12_hardening-to-011_phase12_hardening.sqlite"
+  },
+  "boundaries": {
+    "realQemuWxpx": false,
+    "realLinuxGuest": false,
+    "realPiProcess": false,
+    "realRouterPi": false,
+    "realModel": false,
+    "realFeishuApp": false,
+    "realQqBot": false,
+    "realBrowserUi": false,
+    "realElectronUi": false,
+    "windowsNsisInstall": false,
+    "realAutoUpdateFeed": false,
+    "longSoak": false
+  },
+  "note": "真实控制平面、SQLite、迁移备份/恢复、崩溃对账、静态 Web 构建和 2000+ 任务历史；未执行真实 QEMU/WHPX Linux VM、真实 Pi/模型、真实机器人、真实更新源、Windows 安装包或长时稳定性验收。"
+}

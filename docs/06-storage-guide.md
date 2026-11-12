@@ -16,7 +16,9 @@
   archives/        Worker 归档引用（JSONL 等）
   inbox/           文件投递上传内容
   backups/         数据库迁移前备份（pre-migration-*.sqlite）
+  tools/qemu/      应用托管的 QEMU 工具链（按版本目录）
   agent-in-box.sqlite
+  provisioning.key 仅宿主可读的 cloud-init provisioning HMAC 密钥（0600）
 ```
 
 配置文件位置：
@@ -42,6 +44,7 @@
 - 迁移成功需要重启本地服务。旧目录**不会自动删除**，确认新目录可用后由用户自行清理。
 - 迁移后检查 qcow2 backing file 路径；当前会校验镜像并提示旧路径引用，不会自动重写。
 - 迁移是单次 HTTP 请求并持有存储锁，不提供流式进度事件。
+- **本轮范围说明**：`tools/qemu/` 与 `provisioning.key` 是新增的运行时数据；本次明确不修改存储迁移实现，因此它们没有被加入迁移类别。需要迁移现有数据根时仍按原迁移行为执行，并在迁移后重新安装/选择 QEMU。
 
 ## 4. 数据库备份与恢复
 

@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { ImageModule } from "../images/image.module";
 import { PersistenceModule } from "../persistence/persistence.module";
 import { ResourceModule } from "../resources/resources.module";
+import { ProvisioningService } from "../provisioning/provisioning.service";
 import { ConsoleService } from "./console.service";
 import { ExecutionController } from "./execution.controller";
 import { GuestClient } from "./guest.client";
@@ -15,10 +16,18 @@ import { VmService } from "./vm.service";
 @Module({
   imports: [PersistenceModule, ImageModule, SupervisorModule, ResourceModule],
   controllers: [VmController, ExecutionController, GuestController],
-  providers: [VmService, SnapshotService, ConsoleService, GuestClient, GuestService],
+  providers: [
+    VmService,
+    SnapshotService,
+    ConsoleService,
+    GuestClient,
+    GuestService,
+    ProvisioningService,
+  ],
   exports: [
     SupervisorModule,
     VmService,
+    ProvisioningService,
     SnapshotService,
     ConsoleService,
     GuestService,

@@ -867,7 +867,17 @@ Windows Guest 的延迟验证只改变开发顺序，不改变其属于本期最
 5. **调度**：项目可同时绑定 Linux/Windows VM；任务看板和 Router 摘要包含 `osFamily`；同 VM 串行、跨 VM 并行由统一 TaskService/Lease 保证。
 6. **未冻结项**：真实 Windows ISO 自动安装、WHPX Windows Guest 稳定性、截图/输入/UAC/DPI 实测、Windows Pi/模型任务成功率、每 VM token 自动注入介质、NSIS 干净安装和长时 soak。这些未完成前不得宣称 Windows VM 已通过本期最终验收。
 
-### 18.4 2026-11-10 Linux 先行阶段冻结结果
+### 18.4 2026-11-12 产品化补强实现
+
+在不修改数据根迁移实现的前提下，新增以下边界：
+
+1. **模型选择**：`app_settings.modelSelection` 保存 Worker/Router 的 Provider/Model 选择；`ModelProviderService.resolve(providerId, model, scope)` 按显式参数 → settings → 第一个启用 Provider 的顺序解析。Router 环境变量仍拥有最高优先级，存在时设置页只读。`PUT /api/v1/router/config` 只在 Router 空闲时销毁旧 Pi 会话、清空 `session_ref` 并持久化选择；下一次发送使用新模型和最近对话摘要启动新会话。
+2. **只读观察**：`POST /api/v1/vms/:id/console/sessions` 支持 `viewOnly`。view-only 不获取 Execution Lease；VNC 代理只转发协商、SetPixelFormat/SetEncodings/FramebufferUpdateRequest，丢弃 KeyEvent、PointerEvent、ClientCutText 和 QEMU 扩展键。交互控制台仍要求 human Lease。QEMU VNC 固定 `share=force-shared` 以支持观察者与操作者并存。
+3. **桌面托管**：Electron 打包并监管 `vm-supervisor`；QEMU 通过 `runtime-assets.json` 下载、SHA-256 校验、tar 路径穿越检查和原子安装到 `<data-root>/tools/qemu/<version>`。QEMU 不随 NSIS 捆绑；未安装时 VM 功能明确不可用。
+4. **官方镜像初始化**：默认 Ubuntu 镜像固定为 `noble/20261017` 版本化 URL、大小 621284352 和既有 SHA-256。控制平面在 `<data-root>` 持久化 `provisioning.key`，以 HMAC(vmId) 生成 per-VM bootstrap URL；QEMU 在 Linux Guest 上通过 `-smbios type=1,serial=ds=nocloud-net;s=<url>` 让 cloud-init 拉取 user-data。user-data 安装 XFCE/LightDM，并下载、校验 Guest Agent、Worker Runtime、Node 和 Pi 资产；Guest 安装完成后回调 `/ready`，之后资产与 token 路由返回 410。
+5. **测试边界**：`pnpm smoke:phase14` 使用真实控制平面/SQLite/Provisioning HTTP 验证模型配置、只读请求前置和 user-data 生命周期；view-only RFB 输入丢弃由 `console.service.test.ts` 覆盖。真实 WHPX/cloud-init/Electron UI 仍需 Windows 环境验收。
+
+### 18.5 2026-11-10 Linux 先行阶段冻结结果
 
 基于 `tests/phase0/summary.md` 中的真实验证记录，以下选型进入产品化基线：
 

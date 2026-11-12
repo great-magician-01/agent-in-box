@@ -388,6 +388,10 @@ export function OnboardingWizard({
                     警告项不会阻止安装，但会影响可用资源。当前检查通过后即可继续。
                   </p>
                 )}
+                <p className="muted small">
+                  完成向导并选择数据目录后，请在“设置 → 虚拟机运行组件”安装托管 QEMU 或选择已有 QEMU
+                  目录；安装前 VM 功能不可用。
+                </p>
               </>
             )}
           </div>

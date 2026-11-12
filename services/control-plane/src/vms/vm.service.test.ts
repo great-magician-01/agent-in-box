@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -11,6 +11,7 @@ import { CatalogRepository } from "../persistence/repositories/catalog-repositor
 import { nowIso } from "../persistence/time";
 import type { SupervisorClient, SupervisorCreateSpec } from "./supervisor.client";
 import { VmService } from "./vm.service";
+import type { ProvisioningService } from "../provisioning/provisioning.service";
 
 function runtime(id: string, powerState: VmPowerState = "stopped"): SupervisorVmState {
   return {
@@ -183,6 +184,67 @@ describe("VmService", () => {
     expect(createSpec?.baseImagePath).toBe(path.join(directory, "base.qcow2"));
     expect(first.vm.storageRoot).toBe(path.join(directory, "vms", first.vm.id));
     expect(second.vm.storageRoot).not.toBe(first.vm.storageRoot);
+  });
+
+  it("creates per-VM tokens and provisioning URL for a cloud-init Linux image", async () => {
+    await app.db
+      .updateTable("images")
+      .set({
+        provisioning_profile: "linux-desktop-worker",
+        manifest_json: JSON.stringify({ provisioning: "linux-desktop-worker" }),
+      })
+      .where("id", "=", "linux-v1")
+      .execute();
+    const markStarting = vi.fn(async () => undefined);
+    const provisioning = {
+      availableFor: (profile: string) => profile === "linux-desktop-worker",
+      unavailableMessage: () => "unavailable",
+      contextFor: (vmId: string) => ({
+        url: `http://10.0.2.2:6722/v1/${vmId}/token/`,
+        profile: "linux-desktop-worker",
+      }),
+      markStarting,
+    } as unknown as ProvisioningService;
+    const database = {
+      layout: storageLayout(directory),
+      dataRoot: directory,
+    } as DatabaseService;
+    const images = new ImageService(database, app.db, { autoResume: false });
+    const provisioned = new VmService(
+      database,
+      app.db,
+      images,
+      supervisor,
+      {
+        guestFetchImpl: async () => new Response('{"status":"ok"}', { status: 200 }),
+        guestTimeoutMs: 50,
+      },
+      undefined,
+      undefined,
+      provisioning,
+    );
+    const created = await provisioned.create({
+      name: "Provisioned Linux",
+      imageId: "linux-v1",
+      cpuCount: 4,
+      memoryGb: 8,
+      diskGb: 40,
+      provisioning: "auto",
+    });
+    expect(createSpec?.provisioningUrl).toMatch(/^http:\/\/10\.0\.2\.2:6722\/v1\/.+\/token\/$/);
+    expect(created.vm.provisioning.state).toBe("waiting");
+    const guestToken = await readFile(
+      path.join(directory, "vms", created.vm.id, "guest-agent.token"),
+      "utf8",
+    );
+    const workerToken = await readFile(
+      path.join(directory, "vms", created.vm.id, "worker-rpc.token"),
+      "utf8",
+    );
+    expect(guestToken.length).toBeGreaterThan(20);
+    expect(workerToken.length).toBeGreaterThan(20);
+    expect(guestToken).not.toBe(workerToken);
+    expect(markStarting).toHaveBeenCalledWith(created.vm.id);
   });
 
   it("creates a Windows VM with the Windows provider profile", async () => {

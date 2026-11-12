@@ -8,6 +8,7 @@ import type {
   DesktopPreferences,
   DesktopPreferencesPatch,
   DesktopUpdateStatus,
+  VmRuntimeStatus,
 } from "@agent-in-box/protocol";
 
 // Sandboxed preload scripts only get a limited require polyfill, so channel
@@ -19,6 +20,10 @@ const IPC_CHANNELS = {
   restartControlPlane: "agent-in-box:restart-control-plane",
   startControlPlane: "agent-in-box:start-control-plane",
   stopControlPlane: "agent-in-box:stop-control-plane",
+  vmStatus: "agent-in-box:vm-status",
+  vmInstallQemu: "agent-in-box:vm-install-qemu",
+  vmSetQemuPath: "agent-in-box:vm-set-qemu-path",
+  vmRestartSupervisor: "agent-in-box:vm-restart-supervisor",
   quit: "agent-in-box:quit",
   openLogs: "agent-in-box:open-logs",
   chooseDirectory: "agent-in-box:choose-directory",
@@ -69,6 +74,14 @@ const bridge: DesktopBridge = {
     },
     quit: () => ipcRenderer.invoke(IPC_CHANNELS.quit) as Promise<void>,
     openLogs: () => ipcRenderer.invoke(IPC_CHANNELS.openLogs) as Promise<void>,
+  },
+  vm: {
+    status: () => ipcRenderer.invoke(IPC_CHANNELS.vmStatus) as Promise<VmRuntimeStatus>,
+    installQemu: () => ipcRenderer.invoke(IPC_CHANNELS.vmInstallQemu) as Promise<VmRuntimeStatus>,
+    setQemuPath: (value: string | null) =>
+      ipcRenderer.invoke(IPC_CHANNELS.vmSetQemuPath, value) as Promise<VmRuntimeStatus>,
+    restartSupervisor: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.vmRestartSupervisor) as Promise<VmRuntimeStatus>,
   },
   dialog: {
     chooseDirectory: (input) =>

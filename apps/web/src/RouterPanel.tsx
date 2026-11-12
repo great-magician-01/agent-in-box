@@ -1,6 +1,7 @@
 /* eslint-disable react-hooks/set-state-in-effect -- server snapshots refresh from event revisions */
 import { useCallback, useEffect, useState } from "react";
 import type {
+  ModelConfigurationView,
   RouterMessageRecord,
   RouterToolCallRecord,
   RouterToolDefinition,
@@ -22,19 +23,32 @@ export function RouterPanel({ revision, onChanged }: RouterPanelProps): React.JS
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [modelConfig, setModelConfig] = useState<ModelConfigurationView | null>(null);
+  const [switchProvider, setSwitchProvider] = useState("");
+  const [switchModel, setSwitchModel] = useState("");
 
   const load = useCallback(async (): Promise<void> => {
     try {
-      const [nextView, nextMessages, nextTools, nextCalls] = await Promise.all([
+      const [nextView, nextMessages, nextTools, nextCalls, nextModels] = await Promise.all([
         api.router(),
         api.routerMessages(100),
         api.routerTools(),
         api.routerToolCalls(50),
+        api.modelConfiguration().catch(() => null),
       ]);
       setView(nextView);
       setMessages(nextMessages);
       setTools(nextTools);
       setToolCalls(nextCalls);
+      setModelConfig(nextModels);
+      setSwitchProvider(
+        (current) =>
+          current || nextView.selectedProviderId || nextModels?.selection.router?.providerId || "",
+      );
+      setSwitchModel(
+        (current) =>
+          current || nextView.selectedModelId || nextModels?.selection.router?.model || "",
+      );
     } catch (cause) {
       setError(errorMessage(cause));
     }
@@ -75,7 +89,31 @@ export function RouterPanel({ revision, onChanged }: RouterPanelProps): React.JS
     }
   }
 
+  async function applyModel(): Promise<void> {
+    if (!switchProvider || !switchModel) return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const next = await api.routerConfigure({
+        providerId: switchProvider,
+        model: switchModel,
+      });
+      setView(next);
+      setNotice(`已切换 Router 模型为 ${switchProvider} / ${switchModel}；下一次发送使用新会话`);
+      await load();
+      onChanged();
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const running = view?.status === "running";
+  const enabledProviders = (modelConfig?.providers ?? []).filter((provider) => provider.enabled);
+  const modelsFor = (providerId: string) =>
+    enabledProviders.find((provider) => provider.id === providerId)?.models ?? [];
 
   return (
     <section className="panel router-panel" aria-labelledby="router-panel-title">
@@ -95,9 +133,60 @@ export function RouterPanel({ revision, onChanged }: RouterPanelProps): React.JS
       {view && (
         <div className="router-meta">
           <span>
-            Provider {view.providerId ?? "未配置"} · Model {view.modelId ?? "未配置"} ·{" "}
+            当前会话 Provider {view.providerId ?? "未配置"} · Model {view.modelId ?? "未配置"} ·{" "}
             {view.messageCount} 条消息
           </span>
+          <span className="muted small">
+            下次启动：{view.selectedProviderId ?? "未配置"} / {view.selectedModelId ?? "未配置"} ·{" "}
+            {view.selectionSource === "env"
+              ? "环境变量锁定"
+              : view.selectionSource === "settings"
+                ? "设置选择"
+                : "默认 Provider"}
+          </span>
+          {!view.selectionLockedByEnv && (
+            <div className="worker-switch-model">
+              <label className="field">
+                <span>Router Provider</span>
+                <select
+                  value={switchProvider}
+                  onChange={(event) => {
+                    setSwitchProvider(event.target.value);
+                    setSwitchModel(modelsFor(event.target.value)[0]?.id ?? "");
+                  }}
+                  disabled={busy || running}
+                >
+                  {enabledProviders.map((provider) => (
+                    <option key={provider.id} value={provider.id}>
+                      {provider.id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>Router 模型</span>
+                <select
+                  value={switchModel}
+                  onChange={(event) => setSwitchModel(event.target.value)}
+                  disabled={busy || running}
+                >
+                  {modelsFor(switchProvider).map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                className="secondary"
+                disabled={busy || running || !switchProvider || !switchModel}
+                onClick={() => void applyModel()}
+              >
+                应用并重启会话
+              </button>
+            </div>
+          )}
           <span className="muted small">{tools.length} 个结构化工具</span>
         </div>
       )}

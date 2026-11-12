@@ -17,6 +17,7 @@ function run(args) {
 }
 
 run(["build:packages"]);
+run(["package:vm-supervisor"]);
 run(["--filter", "@agent-in-box/web", "build"]);
 run(["--filter", "@agent-in-box/control-plane", "build"]);
 run(["--filter", "@agent-in-box/desktop", "build"]);

@@ -20,6 +20,14 @@ extraResources:
     to: web
     filter:
       - "**/*"
+  - from: ../../release/vm-supervisor
+    to: vm-supervisor
+    filter:
+      - "**/*"
+  - from: ../../release/guest-runtime
+    to: guest-runtime
+    filter:
+      - "**/*"
 
 asar: true
 compression: normal

@@ -30,6 +30,7 @@ import type {
   WorkerRestorePoint,
   WorkerCreateRequest,
   WorkerLifecyclePolicy,
+  WorkerModelSwitchRequest,
   WorkerPromptRequest,
   WorkerRecord,
   WorkerRestoreMode,
@@ -263,7 +264,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
         ? { ...input, conversationId: archive.conversationId }
         : input;
     const conversationId = await this.resolveConversation(conversationInput);
-    if (!archive) {
+    if (!archive && input.forceNew !== true) {
       const existing = await this.workers.findReusable(input.projectId, input.vmId, conversationId);
       if (existing) {
         if (!this.active.has(existing.id)) {
@@ -582,6 +583,46 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     // to return the same archive state a subsequent GET would report.
     const final = (await this.workers.getWorker(workerId)) ?? updated ?? worker;
     return this.view(final);
+  }
+
+  async switchModel(workerId: string, input: WorkerModelSwitchRequest): Promise<WorkerView> {
+    const worker = await this.requireWorker(workerId);
+    if (worker.status !== "idle") {
+      throw new PersistenceError("conflict", "只有空闲 Worker 可以切换模型");
+    }
+    const active = this.active.get(workerId);
+    if (!active) throw new PersistenceError("conflict", "Worker 会话未连接");
+    if (
+      typeof input?.providerId !== "string" ||
+      !input.providerId.trim() ||
+      typeof input.model !== "string" ||
+      !input.model.trim()
+    ) {
+      throw new PersistenceError("validation_failed", "切换模型必须指定 Provider 和模型");
+    }
+    // Validate the target before archiving so an invalid selection cannot stop
+    // the current Worker.
+    const model = await this.providers.resolve(
+      input.providerId.trim(),
+      input.model.trim(),
+      "worker",
+    );
+    await this.archive(workerId, { source: "manual", reason: "model_switch" });
+    try {
+      return await this.create({
+        projectId: worker.projectId,
+        vmId: worker.vmId,
+        conversationId: worker.conversationId,
+        providerId: model.provider.id,
+        model: model.model.id,
+        forceNew: true,
+      });
+    } catch (error) {
+      throw new PersistenceError(
+        "unavailable",
+        `旧 Worker 已归档，但新模型会话启动失败：${errorMessage(error)}`,
+      );
+    }
   }
 
   async resume(workerId: string, request: WorkerResumeRequest = {}): Promise<WorkerResumeResult> {

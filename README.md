@@ -23,6 +23,7 @@
 - [阶段 13 验收记录](tests/phase13/summary.md)
 - [阶段 13 真实 Windows 宿主 + Linux Guest 验收记录（2026-11-12）](tests/phase13/real-verification-2026-11-12.md)
 - [阶段 13 Linux/Windows 混合验收任务集](tests/phase13/mixed-tasks.json)
+- [阶段 14 模型多配置、只读观察与一键 Linux VM](tests/phase14/summary.md)
 - [Windows Guest 镜像与运行时资产](images/windows/README.md)
 - [用户指南](docs/04-user-guide.md)
 - [飞书与 QQ 机器人配置指南](docs/05-bot-guide.md)
@@ -35,6 +36,18 @@
 - **Subagent**：随 Worker Runtime 默认安装并加载，不需要按项目开启；Host Router 不加载该扩展。
 - **MCP**：默认关闭。可在“项目 → 项目设置 → Agent 扩展”中按项目开启；设置持久化在 `projects.agent_config_json`，不会影响其他项目或 Router。
 - **生效时机与边界**：MCP 设置在新建或恢复 Worker 会话时生效，不热改运行中的 Pi 进程。开启只启用 Pi 的 MCP 配置加载，不会自动安装 MCP Server 或注入凭据；Server 与凭据仍需在对应 Guest 的受控环境中单独配置。
+
+## 产品化补强（2026-11-12）
+
+本轮在不修改数据根/存储迁移实现的前提下，补齐了以下产品能力：
+
+- **模型多配置**：设置页可维护多套 Provider/Base URL/模型白名单，分别选择 Worker 默认模型和 Router 模型；Router 可在空闲时应用新模型并重建会话，Worker 可归档旧会话后切换模型。长期 API Key 仍只保存在 Electron `safeStorage`，Preload 只暴露白名单方法。
+- **Codex 式工作区**：左侧项目/Worker 会话/设置栏，中间主会话或 Worker 会话；右侧观察栏默认隐藏，可查看 Worker 文本会话或 **只读** VM 实时画面。只读观察不获取 Execution Lease，也不转发键盘、鼠标和剪贴板输入；人工接管仍需显式确认。
+- **Windows 桌面托管**：Electron 托管 Go VM Supervisor；QEMU 可按 `runtime-assets.json` 从固定来源下载、校验 SHA-256、安全解压到 `<data-root>/tools/qemu/`。设置页和总览页显示运行组件状态，支持自定义 QEMU 路径。
+- **一键 Linux 工作 VM**：默认镜像改为版本化 Ubuntu 24.04 Cloud Image；创建时通过 QEMU SMBIOS NoCloud-net 引导 cloud-init，在 Guest 内安装 XFCE、Guest Agent、Node/Pi 与 Worker。VM 页提供下载、创建、启动、初始化和就绪状态的单按钮流程。
+- **新增发布与验收资产**：`pnpm package:vm-supervisor`、`pnpm package:guest-runtime`、`scripts/package-qemu-windows.ps1`、`.github/workflows/release-assets.yml` 和 `pnpm smoke:phase14`。
+
+**边界**：当前 WSL 开发环境已完成 TypeScript/Go 测试、构建和阶段 Smoke，但不能替代 Windows 11 + WHPX 的真实 QEMU、cloud-init、Electron 人工 UI 和 NSIS 安装验收。QEMU 托管下载在发布资产尚未发布时会明确报错，开发环境可用 `AGENT_IN_BOX_RUNTIME_MANIFEST` 指向本地或自建 Manifest。
 
 ## 阶段 13 已落地
 
@@ -263,6 +276,15 @@ pnpm smoke:phase12
 # 生成 Guest Worker Runtime 自包含 tar.gz 与 SHA-256
 pnpm package:worker-runtime
 
+# 构建 Windows/Linux VM Supervisor 二进制与 SHA-256
+pnpm package:vm-supervisor
+
+# 打包 Linux Guest Runtime（Guest Agent、Worker、Node、Pi、cloud-init 安装资产）
+pnpm package:guest-runtime
+
+# 模型配置、只读观察、cloud-init provisioning 的集成 Smoke
+pnpm smoke:phase14
+
 # 为 release/ 下的安装包/压缩包生成 SHA256SUMS 与 build-manifest.json（不代替签名）
 pnpm release:checksums
 
@@ -307,6 +329,8 @@ go run ./services/guest-agent/cmd/guest-agent
 ```
 
 两者默认只监听回环地址，并提供 `/healthz` 和 `/readyz`。Guest Agent 的认证管理接口还需 `-token-file <guest-token-file>`；宿主控制平面读取 `<vm-storage-root>/guest-agent.token`，或通过 `AGENT_IN_BOX_GUEST_TOKEN_FILE` 使用开发/旧镜像的共享令牌文件。两处令牌必须一致，令牌文件支持轮换，删除后旧凭据立即失效。
+
+Cloud-init provisioning 默认监听 `127.0.0.1:6722`，Guest 通过 QEMU user networking 的 `10.0.2.2:6722` 获取一次性 bootstrap 数据；Guest Runtime 资产目录由 `AGENT_IN_BOX_GUEST_RUNTIME_DIR` 指定，桌面应用会自动传入打包资源路径。QEMU 托管下载的运行时资产 Manifest 可用 `AGENT_IN_BOX_RUNTIME_MANIFEST` 覆盖。
 
 阶段 6 的 Guest Worker RPC 监听 `0.0.0.0:7612`，由 QEMU 仅转发到宿主机回环端口；宿主读取 `<vm-storage-root>/worker-rpc.token`（开发环境可用 `AGENT_IN_BOX_WORKER_TOKEN_FILE`）。该令牌与 Guest Agent token、模型 Broker 短期令牌相互独立。模型 Broker 默认监听 `127.0.0.1:6719`，Guest 通过 QEMU user networking 的 `10.0.2.2:6719` 访问；长期 Provider Key 由 Electron `safeStorage` 解密，经 `credential-bridge.json`（0600）和进程内 Bearer 桥交给控制平面。Worker Runtime 安装与固定版本见 [`images/linux/README.md`](images/linux/README.md)。
 
@@ -372,6 +396,12 @@ SQLite 数据库位于数据根目录下的 `agent-in-box.sqlite`，使用 WAL �
 - SQLite 表、WAL 模式和迁移记录在真实运行中验证通过
 - Web 开发服务器可访问，`/api` 代理到控制平面正常
 - VM Supervisor 与 Guest Agent 的 `/healthz`、`/readyz` 正常
+
+### 阶段 14 验证（2026-11-12）
+
+- `pnpm check`、阶段 2～13 Smoke 与新增 `pnpm smoke:phase14` 通过；`pnpm package:vm-supervisor` 生成 Windows/Linux Supervisor 二进制，`pnpm package:guest-runtime` 生成 Linux Guest Agent、Worker、Node、Pi 与 cloud-init 资产。
+- `smoke:phase14` 使用真实控制平面、SQLite 和 Provisioning HTTP 验证：Provider/Worker/Router 选择持久化、Router 空闲切换模型、user-data 不泄漏 Guest Token、ready 后撤销 bootstrap 数据。
+- 真实 WHPX/QEMU、Ubuntu cloud-init 首次启动、Electron UI 与 NSIS 安装仍需 Windows 环境验收。详见 [`tests/phase14/summary.md`](tests/phase14/summary.md)。
 
 ### 阶段 12 验证（2026-11-11）
 

@@ -14,10 +14,14 @@ export function VmConsole({ session, vmName, onClose, onReconnect }: VmConsolePr
   const screenRef = useRef<HTMLDivElement>(null);
   const rfbRef = useRef<RFB | null>(null);
   const releasedRef = useRef(false);
+  const viewOnly = session.viewOnly;
+  const lease = session.lease;
   const [state, setState] = useState<"connecting" | "connected" | "disconnected" | "error">(
     "connecting",
   );
-  const [message, setMessage] = useState("正在建立受保护的本机控制台连接…");
+  const [message, setMessage] = useState(
+    viewOnly ? "正在连接只读观察画面…" : "正在建立受保护的本机控制台连接…",
+  );
   const [desktopName, setDesktopName] = useState("");
 
   useEffect(() => {
@@ -32,16 +36,21 @@ export function VmConsole({ session, vmName, onClose, onReconnect }: VmConsolePr
       const rfb = new RFB(screenRef.current, url.toString(), { shared: true });
       rfbRef.current = rfb;
       rfb.scaleViewport = true;
-      rfb.viewOnly = false;
+      rfb.viewOnly = viewOnly;
       rfb.resizeSession = false;
-      rfb.showDotCursor = true;
-      rfb.focusOnClick = true;
+      rfb.showDotCursor = !viewOnly;
+      rfb.focusOnClick = !viewOnly;
       rfb.addEventListener("connect", () => {
         if (disposed) return;
         setState("connected");
-        setMessage("已连接。鼠标、键盘和剪贴板输入均受当前人工 Lease 保护。");
+        setMessage(
+          viewOnly
+            ? "只读观察中。此连接不获取 Execution Lease，也不会向虚拟机发送输入。"
+            : "已连接。鼠标、键盘和剪贴板输入均受当前人工 Lease 保护。",
+        );
+        if (viewOnly || !lease) return;
         heartbeat = window.setInterval(() => {
-          void api.heartbeatVmLease(session.vmId, session.lease.id).catch((error: unknown) => {
+          void api.heartbeatVmLease(session.vmId, lease.id).catch((error: unknown) => {
             if (releasedRef.current || disposed) return;
             setState("error");
             setMessage(`人工 Lease 已失效，输入已停止：${consoleError(error)}`);
@@ -52,16 +61,20 @@ export function VmConsole({ session, vmName, onClose, onReconnect }: VmConsolePr
       rfb.addEventListener("desktopname", (event) => setDesktopName(event.detail.name));
       rfb.addEventListener("disconnect", (event) => {
         if (heartbeat !== undefined) window.clearInterval(heartbeat);
-        if (!releasedRef.current) {
+        if (!viewOnly && lease && !releasedRef.current) {
           releasedRef.current = true;
-          void api.releaseVmLease(session.vmId, session.lease.id).catch(() => undefined);
+          void api.releaseVmLease(session.vmId, lease.id).catch(() => undefined);
         }
         if (disposed) return;
         setState(event.detail.clean ? "disconnected" : "error");
         setMessage(
-          event.detail.clean
-            ? "控制台已断开。请重新连接以获取新的 Lease 和一次性票据。"
-            : "控制台异常断开或 Lease 已失效。旧连接不能继续输入，请重新连接。",
+          viewOnly
+            ? event.detail.clean
+              ? "观察画面已断开。"
+              : "观察画面异常断开，请重新连接。"
+            : event.detail.clean
+              ? "控制台已断开。请重新连接以获取新的 Lease 和一次性票据。"
+              : "控制台异常断开或 Lease 已失效。旧连接不能继续输入，请重新连接。",
         );
       });
     }, 0);
@@ -73,23 +86,25 @@ export function VmConsole({ session, vmName, onClose, onReconnect }: VmConsolePr
       if (rfbRef.current) {
         rfbRef.current.disconnect();
         rfbRef.current = null;
-        if (!releasedRef.current) {
+        if (!viewOnly && lease && !releasedRef.current) {
           releasedRef.current = true;
-          void api.releaseVmLease(session.vmId, session.lease.id).catch(() => undefined);
+          void api.releaseVmLease(session.vmId, lease.id).catch(() => undefined);
         }
       }
     };
-  }, [session]);
+  }, [session, viewOnly, lease]);
 
   async function close(): Promise<void> {
     if (!releasedRef.current) {
       releasedRef.current = true;
       rfbRef.current?.disconnect();
       rfbRef.current = null;
-      try {
-        await api.releaseVmLease(session.vmId, session.lease.id);
-      } catch {
-        // A lost Lease is already safe; its short TTL is the final cleanup.
+      if (!viewOnly && lease) {
+        try {
+          await api.releaseVmLease(session.vmId, lease.id);
+        } catch {
+          // A lost Lease is already safe; its short TTL is the final cleanup.
+        }
       }
     }
     onClose();
@@ -102,7 +117,9 @@ export function VmConsole({ session, vmName, onClose, onReconnect }: VmConsolePr
           <strong>{desktopName || `${vmName} · noVNC`}</strong>
           <span className={`console-state ${state}`} role="status">
             {state === "connected"
-              ? "人工控制中"
+              ? viewOnly
+                ? "只读观察中"
+                : "人工控制中"
               : state === "connecting"
                 ? "连接中"
                 : state === "error"
@@ -111,21 +128,23 @@ export function VmConsole({ session, vmName, onClose, onReconnect }: VmConsolePr
           </span>
         </div>
         <div className="action-row">
-          <button
-            type="button"
-            className="secondary"
-            onClick={() => rfbRef.current?.sendCtrlAltDel()}
-            disabled={state !== "connected"}
-          >
-            Ctrl+Alt+Del
-          </button>
+          {!viewOnly && (
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => rfbRef.current?.sendCtrlAltDel()}
+              disabled={state !== "connected"}
+            >
+              Ctrl+Alt+Del
+            </button>
+          )}
           {state !== "connected" && state !== "connecting" && (
             <button type="button" className="secondary" onClick={onReconnect}>
               重新连接
             </button>
           )}
           <button type="button" className="secondary" onClick={() => void close()}>
-            关闭并释放 Lease
+            {viewOnly ? "关闭观察" : "关闭并释放 Lease"}
           </button>
         </div>
       </div>

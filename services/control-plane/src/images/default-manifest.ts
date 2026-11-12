@@ -11,16 +11,17 @@ export const DEFAULT_IMAGE_MANIFEST: ImageManifest = {
   allowedHosts: ["mirrors.tuna.tsinghua.edu.cn"],
   images: [
     {
-      id: "ubuntu-24.04-2026-11-10-amd64",
-      name: "Ubuntu 24.04 LTS Cloud（阶段 0 基线）",
+      id: "ubuntu-24.04-20261017-amd64",
+      name: "Ubuntu 24.04 LTS Cloud（官方镜像自动初始化）",
       osFamily: "linux",
       osVersion: "24.04",
       architecture: "amd64",
-      version: "2026-11-10",
-      url: "https://mirrors.tuna.tsinghua.edu.cn/ubuntu-cloud-images/noble/current/noble-server-cloudimg-amd64.img",
-      fileName: "ubuntu-24.04-2026-11-10-amd64.qcow2",
-      sizeBytes: 0,
+      version: "20261017",
+      url: "https://mirrors.tuna.tsinghua.edu.cn/ubuntu-cloud-images/noble/20261017/noble-server-cloudimg-amd64.img",
+      fileName: "ubuntu-24.04-20261017-amd64.qcow2",
+      sizeBytes: 621284352,
       sha256: "04e8f2461a16a44e78a370284471f29616cdd9baf1893df25807b71f985b6c94",
+      provisioning: "linux-desktop-worker",
     },
   ],
 };

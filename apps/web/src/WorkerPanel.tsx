@@ -2,9 +2,9 @@
 import { useCallback, useEffect, useState } from "react";
 import type {
   ConversationMessageRecord,
+  ModelConfigurationView,
   ModelProviderView,
   ProjectDetail,
-  WorkerModelApi,
   WorkerView,
 } from "@agent-in-box/protocol";
 import { api } from "./api";
@@ -35,22 +35,27 @@ export function WorkerPanel({
   const [error, setError] = useState<string | null>(null);
   const [resumeNotice, setResumeNotice] = useState<string | null>(null);
   const [providers, setProviders] = useState<ModelProviderView[]>([]);
-  const [providerBusy, setProviderBusy] = useState(false);
-  const [providerSaved, setProviderSaved] = useState<string | null>(null);
-  const [providerId, setProviderId] = useState("anthropic");
-  const [baseUrl, setBaseUrl] = useState("https://api.anthropic.com/v1");
-  const [apiType, setApiType] = useState<WorkerModelApi>("anthropic-messages");
-  const [credentialProviderId, setCredentialProviderId] = useState("anthropic");
-  const [modelId, setModelId] = useState("claude-opus-5-5");
+  const [modelConfiguration, setModelConfiguration] = useState<ModelConfigurationView | null>(null);
+  const [workerProvider, setWorkerProvider] = useState("");
+  const [workerModel, setWorkerModel] = useState("");
+  const [switchProvider, setSwitchProvider] = useState("");
+  const [switchModel, setSwitchModel] = useState("");
+  const [switchNotice, setSwitchNotice] = useState<string | null>(null);
 
   const projectId = project.project.id;
 
   useEffect(() => {
     let active = true;
     void api
-      .modelProviders()
-      .then((items) => {
-        if (active) setProviders(items);
+      .modelConfiguration()
+      .then((configuration) => {
+        if (!active) return;
+        setModelConfiguration(configuration);
+        setProviders(configuration.providers);
+        const fallback = configuration.providers.find((provider) => provider.enabled);
+        const selection = configuration.selection.worker;
+        setWorkerProvider((current) => current || selection?.providerId || fallback?.id || "");
+        setWorkerModel((current) => current || selection?.model || fallback?.models[0]?.id || "");
       })
       .catch((cause: unknown) => {
         if (active) setError(errorMessage(cause));
@@ -120,6 +125,34 @@ export function WorkerPanel({
   const selected = workers.find((item) => item.worker.id === selectedWorkerId) ?? null;
   const running = selected?.worker.status === "running";
   const connected = selected?.runtime.connected === true;
+  const enabledProviders = providers.filter((provider) => provider.enabled);
+  const modelsFor = (providerId: string) =>
+    enabledProviders.find((provider) => provider.id === providerId)?.models ?? [];
+
+  useEffect(() => {
+    if (!selected) return;
+    const provider =
+      selected.worker.providerId ??
+      modelConfiguration?.selection.worker?.providerId ??
+      enabledProviders[0]?.id ??
+      "";
+    setSwitchProvider(provider);
+    setSwitchModel(
+      selected.worker.modelId ??
+        modelConfiguration?.selection.worker?.model ??
+        modelsFor(provider)[0]?.id ??
+        "",
+    );
+    // Only reset the switch draft when the selected Worker or its persisted
+    // model changes, not on every provider-list revision.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    selected?.worker.id,
+    selected?.worker.providerId,
+    selected?.worker.modelId,
+    modelConfiguration?.selection.worker?.providerId,
+    modelConfiguration?.selection.worker?.model,
+  ]);
   const canPrompt = connected && selected?.worker.status === "idle";
   const canResume =
     selected !== null && !connected && ["archived", "failed"].includes(selected.worker.status);
@@ -140,32 +173,36 @@ export function WorkerPanel({
     [onChanged],
   );
 
-  async function saveProvider(): Promise<void> {
-    setProviderBusy(true);
-    setError(null);
-    setProviderSaved(null);
-    try {
-      const saved = await api.upsertModelProvider(providerId.trim(), {
-        baseUrl: baseUrl.trim(),
-        api: apiType,
-        credentialProviderId: credentialProviderId.trim(),
-        models: [{ id: modelId.trim() }],
-        enabled: true,
+  async function createWorker(): Promise<void> {
+    await run(async () => {
+      const created = await api.createWorker({
+        projectId,
+        vmId: selectedVmId,
+        ...(workerProvider ? { providerId: workerProvider } : {}),
+        ...(workerModel ? { model: workerModel } : {}),
       });
-      setProviders((current) => [...current.filter((item) => item.id !== saved.id), saved]);
-      setProviderSaved(`Provider ${saved.id} 已保存，Worker 将使用 ${saved.models[0]?.id ?? ""}`);
+      setSelectedWorkerId(created.worker.id);
+    });
+  }
+
+  async function switchSelectedModel(): Promise<void> {
+    if (!selected || !switchProvider || !switchModel) return;
+    setBusy(true);
+    setError(null);
+    setSwitchNotice(null);
+    try {
+      const created = await api.workerSwitchModel(selected.worker.id, {
+        providerId: switchProvider,
+        model: switchModel,
+      });
+      setSelectedWorkerId(created.worker.id);
+      setSwitchNotice(`已切换到 ${switchProvider} / ${switchModel}，并创建新的 Worker 会话`);
+      onChanged();
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
-      setProviderBusy(false);
+      setBusy(false);
     }
-  }
-
-  async function createWorker(): Promise<void> {
-    await run(async () => {
-      const created = await api.createWorker({ projectId, vmId: selectedVmId });
-      setSelectedWorkerId(created.worker.id);
-    });
   }
 
   async function resumeWorker(
@@ -217,77 +254,13 @@ export function WorkerPanel({
       </p>
       {error && <div className="notice">{error}</div>}
       {resumeNotice && <div className="validation-box ok">{resumeNotice}</div>}
-      <details className="provider-config">
-        <summary>
-          模型 Provider 配置（{providers.length === 0 ? "尚未配置" : `${providers.length} 个已配置`}
-          ）
-        </summary>
-        <p className="muted small">
-          Provider 配置不包含密钥。长期密钥请在桌面应用的首次向导/安全设置中以相同的 Provider
-          标识保存到 OS 安全存储；Guest 只会收到短期 Broker 令牌。
-        </p>
-        {providers.length > 0 && (
-          <ul className="provider-list">
-            {providers.map((provider) => (
-              <li key={provider.id}>
-                <strong>{provider.id}</strong>
-                <span>
-                  {provider.api} · {provider.models.map((model) => model.id).join(", ")}
-                </span>
-                <span className="muted small">
-                  凭据：{provider.credentialProviderId} · {provider.enabled ? "启用" : "停用"}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-        {providerSaved && <div className="validation-box ok">{providerSaved}</div>}
-        <div className="provider-form">
-          <label className="field">
-            <span>Provider ID</span>
-            <input value={providerId} onChange={(event) => setProviderId(event.target.value)} />
-          </label>
-          <label className="field">
-            <span>Base URL</span>
-            <input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} />
-          </label>
-          <label className="field">
-            <span>API</span>
-            <select
-              value={apiType}
-              onChange={(event) => setApiType(event.target.value as WorkerModelApi)}
-            >
-              <option value="openai-completions">openai-completions</option>
-              <option value="anthropic-messages">anthropic-messages</option>
-            </select>
-          </label>
-          <label className="field">
-            <span>凭据 Provider ID</span>
-            <input
-              value={credentialProviderId}
-              onChange={(event) => setCredentialProviderId(event.target.value)}
-            />
-          </label>
-          <label className="field">
-            <span>模型 ID</span>
-            <input value={modelId} onChange={(event) => setModelId(event.target.value)} />
-          </label>
-          <button
-            type="button"
-            className="secondary"
-            disabled={
-              providerBusy ||
-              !providerId.trim() ||
-              !baseUrl.trim() ||
-              !credentialProviderId.trim() ||
-              !modelId.trim()
-            }
-            onClick={() => void saveProvider()}
-          >
-            {providerBusy ? "保存中…" : "保存 Provider"}
-          </button>
-        </div>
-      </details>
+      <p className="muted small">
+        {providers.length === 0
+          ? "尚未配置模型 Provider。"
+          : `已配置 ${providers.length} 套模型 Provider。`}{" "}
+        <a href="#settings">前往“模型与 API 配置”管理或切换</a>
+      </p>
+      {switchNotice && <div className="validation-box ok">{switchNotice}</div>}
 
       <div className="action-row worker-create-row">
         <label className="field">
@@ -301,6 +274,39 @@ export function WorkerPanel({
               <option key={binding.vm.id} value={binding.vm.id}>
                 {binding.vm.name} · {binding.vm.powerState}
                 {binding.vm.powerState !== "running" ? "（需先启动）" : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Worker Provider</span>
+          <select
+            value={workerProvider}
+            onChange={(event) => {
+              setWorkerProvider(event.target.value);
+              setWorkerModel(modelsFor(event.target.value)[0]?.id ?? "");
+            }}
+            disabled={busy}
+          >
+            <option value="">默认</option>
+            {enabledProviders.map((provider) => (
+              <option key={provider.id} value={provider.id}>
+                {provider.id}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Worker 模型</span>
+          <select
+            value={workerModel}
+            onChange={(event) => setWorkerModel(event.target.value)}
+            disabled={busy}
+          >
+            <option value="">默认</option>
+            {modelsFor(workerProvider).map((model) => (
+              <option key={model.id} value={model.id}>
+                {model.id}
               </option>
             ))}
           </select>
@@ -345,11 +351,57 @@ export function WorkerPanel({
                   Session {selected.worker.sessionVersion ?? "?"}
                 </span>
                 <span className="muted small">
+                  模型：{selected.worker.providerId ?? "默认"} / {selected.worker.modelId ?? "默认"}
+                </span>
+                <span className="muted small">
                   归档：{selected.worker.agentSessionRef ? "已保存引用" : "无"}
                   {selected.runtime.restoreMode
                     ? ` · 恢复方式：${selected.runtime.restoreMode === "native" ? "原生" : "摘要"}`
                     : ""}
                 </span>
+                <div className="worker-switch-model">
+                  <label className="field">
+                    <span>切换 Provider</span>
+                    <select
+                      value={switchProvider}
+                      onChange={(event) => {
+                        setSwitchProvider(event.target.value);
+                        setSwitchModel(modelsFor(event.target.value)[0]?.id ?? "");
+                      }}
+                      disabled={busy || selected.worker.status !== "idle"}
+                    >
+                      {enabledProviders.map((provider) => (
+                        <option key={provider.id} value={provider.id}>
+                          {provider.id}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>切换模型</span>
+                    <select
+                      value={switchModel}
+                      onChange={(event) => setSwitchModel(event.target.value)}
+                      disabled={busy || selected.worker.status !== "idle"}
+                    >
+                      {modelsFor(switchProvider).map((model) => (
+                        <option key={model.id} value={model.id}>
+                          {model.id}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={
+                      busy || selected.worker.status !== "idle" || !switchProvider || !switchModel
+                    }
+                    onClick={() => void switchSelectedModel()}
+                  >
+                    切换模型（归档并新建会话）
+                  </button>
+                </div>
               </div>
             )}
             <div className="worker-messages" aria-live="polite">

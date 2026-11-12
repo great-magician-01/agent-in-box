@@ -17,8 +17,9 @@ const LOOPBACK_ADDRESSES = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 
 interface ConsoleTicket {
   vmId: string;
-  leaseId: string;
+  leaseId: string | null;
   consoleUrl: string;
+  viewOnly: boolean;
   expiresAt: number;
 }
 
@@ -36,30 +37,37 @@ export class ConsoleService implements OnModuleDestroy {
     private readonly leases: LeaseService,
   ) {}
 
-  async openSession(vmId: string): Promise<VmConsoleSession> {
+  async openSession(vmId: string, options: { viewOnly?: boolean } = {}): Promise<VmConsoleSession> {
     // Check the actual Supervisor state before preemption, so a failed console
     // connection cannot unnecessarily revoke a running AI Lease.
     const console = await this.vms.console(vmId);
     assertConsoleProtocol(console.consoleUrl);
-    const lease = await this.leases.acquire({
-      vmId,
-      owner: "human",
-      taskId: null,
-      ttlMs: CONSOLE_LEASE_TTL_MS,
-    });
+    const viewOnly = options.viewOnly === true;
+    // Passive observation must never acquire a human lease: opening the
+    // observer sidebar must not preempt an AI Worker or break its CUA lease.
+    const lease = viewOnly
+      ? null
+      : await this.leases.acquire({
+          vmId,
+          owner: "human",
+          taskId: null,
+          ttlMs: CONSOLE_LEASE_TTL_MS,
+        });
     const ticket = randomBytes(32).toString("base64url");
     const ticketExpiresAt = Date.now() + CONSOLE_TICKET_TTL_MS;
     this.pruneTickets();
     this.tickets.set(ticket, {
       vmId,
-      leaseId: lease.id,
+      leaseId: lease?.id ?? null,
       consoleUrl: console.consoleUrl,
+      viewOnly,
       expiresAt: ticketExpiresAt,
     });
     return {
       vmId,
       webSocketUrl: `/api/v1/vms/${encodeURIComponent(vmId)}/console/ws?ticket=${encodeURIComponent(ticket)}`,
       lease,
+      viewOnly,
       ticketExpiresAt: new Date(ticketExpiresAt).toISOString(),
     };
   }
@@ -121,14 +129,17 @@ export class ConsoleService implements OnModuleDestroy {
       rejectUpgrade(socket, 403, "Invalid or expired console ticket");
       return;
     }
-    const control = await this.leases.control(vmId);
-    if (
-      control.state !== "human" ||
-      control.lease?.id !== ticket.leaseId ||
-      control.lease.owner !== "human"
-    ) {
-      rejectUpgrade(socket, 403, "Human execution lease is not active");
-      return;
+    if (!ticket.viewOnly) {
+      const control = await this.leases.control(vmId);
+      if (
+        control.state !== "human" ||
+        !ticket.leaseId ||
+        control.lease?.id !== ticket.leaseId ||
+        control.lease.owner !== "human"
+      ) {
+        rejectUpgrade(socket, 403, "Human execution lease is not active");
+        return;
+      }
     }
 
     this.websocketServer.handleUpgrade(request, socket, head, (websocket) => {
@@ -163,6 +174,14 @@ export class ConsoleService implements OnModuleDestroy {
     const forwardFrames = async (chunk: Buffer): Promise<void> => {
       for (const frame of framer.feed(chunk)) {
         if (frame.requiresLease) {
+          // View-only sessions never forward keyboard/pointer/clipboard input.
+          // Non-input framing (pixel format, encodings, update requests) still
+          // reaches the VNC server so the observer receives a live picture.
+          if (ticket.viewOnly) continue;
+          if (!ticket.leaseId) {
+            close(1008, "Execution Lease lost or invalid RFB input");
+            return;
+          }
           await this.leases.executeWithLease(ticket.vmId, ticket.leaseId, "human", async () => {
             upstream.write(frame.data);
           });

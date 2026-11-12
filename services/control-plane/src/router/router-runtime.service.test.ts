@@ -13,6 +13,7 @@ import { WorkerArchiveRepository } from "../persistence/repositories/worker-arch
 import { WorkerRepository } from "../persistence/repositories/worker-repository";
 import { TaskService } from "../persistence/services/task-service";
 import { createTestContext, type TestContext } from "../persistence/testing/fixtures";
+import { SettingsService } from "../settings/settings.service";
 import { ModelBrokerService } from "../models/model-broker.service";
 import { ModelProviderService } from "../models/model-provider.service";
 import { ModelTokenService } from "../models/model-token.service";
@@ -130,7 +131,8 @@ async function createHarness(
     registry,
     {} as unknown as WorkerRuntimeService,
   );
-  const providers = new ModelProviderService(ctx.app.db);
+  const settings = new SettingsService(ctx.app.db);
+  const providers = new ModelProviderService(ctx.app.db, settings);
   if (options.withProvider !== false) {
     await providers.upsert("mock", {
       baseUrl: "https://models.example.test/v1",
@@ -161,6 +163,7 @@ async function createHarness(
       toolTokenTtlMs: 60_000,
       ...(options.turnTimeoutMs !== undefined ? { turnTimeoutMs: options.turnTimeoutMs } : {}),
     },
+    settings,
   );
   await service.onModuleInit();
   harnesses.push({ ctx, service });
@@ -208,6 +211,68 @@ describe("RouterRuntimeService", () => {
       .select(["tool_token_hash"])
       .executeTakeFirst();
     expect(extension?.tool_token_hash).toHaveLength(64);
+  });
+
+  it("switches the Router model only when idle and starts a fresh session", async () => {
+    const harness = await createHarness();
+    const settings = new SettingsService(harness.ctx.app.db);
+    const providers = new ModelProviderService(harness.ctx.app.db, settings);
+    await providers.upsert("other", {
+      baseUrl: "https://other.example.test/v1",
+      api: "anthropic-messages",
+      credentialProviderId: "other",
+      models: [{ id: "other-model", reasoning: true }],
+      enabled: true,
+    });
+
+    await harness.service.send("First turn");
+    await waitFor(
+      async () => (await harness.service.view()).status === "idle",
+      "router idle before switch",
+    );
+    const firstView = await harness.service.view();
+    expect(firstView.selectionSource).toBe("default");
+    expect(firstView.selectedProviderId).toBe("mock");
+
+    const switched = await harness.service.configure({
+      providerId: "other",
+      model: "other-model",
+    });
+    expect(switched.providerId).toBeNull();
+    expect(switched.selectedProviderId).toBe("other");
+    expect(switched.selectedModelId).toBe("other-model");
+    expect(switched.selectionSource).toBe("settings");
+    expect(harness.engine.disposeCalls).toBe(1);
+    const row = await harness.ctx.app.db
+      .selectFrom("router_sessions")
+      .select(["session_ref", "provider_id", "model_id"])
+      .executeTakeFirst();
+    expect(row).toMatchObject({ session_ref: null, provider_id: null, model_id: null });
+
+    await harness.service.send("Second turn");
+    await waitFor(
+      async () => (await harness.service.view()).status === "idle",
+      "router idle after switch",
+    );
+    expect(harness.engine.startCalls).toBe(2);
+    expect(harness.engine.specs[1]?.provider).toBe("other");
+    expect(harness.engine.specs[1]?.model).toBe("other-model");
+    expect(harness.engine.specs[1]?.modelBroker?.api).toBe("anthropic-messages");
+    const saved = await settings.modelSelection();
+    expect(saved.router).toEqual({ providerId: "other", model: "other-model" });
+  });
+
+  it("rejects a Router model switch while a turn is running", async () => {
+    const harness = await createHarness();
+    await harness.service.send("[hold] Long turn");
+    await waitFor(
+      async () => (await harness.service.view()).status === "running",
+      "router running",
+    );
+    await expect(
+      harness.service.configure({ providerId: "mock", model: "router-model" }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await harness.service.abort();
   });
 
   it("rejects a concurrent turn and aborts cleanly", async () => {

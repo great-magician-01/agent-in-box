@@ -127,6 +127,14 @@ jobs:
         env:
           AGENT_IN_BOX_PHASE13_RESULT: ${{ runner.temp }}/phase13-smoke.json
 
+      - name: Package Linux guest runtime assets
+        run: pnpm package:guest-runtime
+
+      - name: Run phase 14 model profiles, observer and provisioning smoke test
+        run: pnpm smoke:phase14
+        env:
+          AGENT_IN_BOX_PHASE14_RESULT: ${{ runner.temp }}/phase14-smoke.json
+
       - name: Validate Windows Guest PowerShell and unattend assets
         if: runner.os == 'Windows'
         shell: pwsh
@@ -149,6 +157,15 @@ jobs:
         with:
           name: phase13-smoke-${{ runner.os }}
           path: ${{ runner.temp }}/phase13-smoke.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload phase 14 smoke result
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase14-smoke-${{ runner.os }}
+          path: ${{ runner.temp }}/phase14-smoke.json
           if-no-files-found: error
           retention-days: 7
 

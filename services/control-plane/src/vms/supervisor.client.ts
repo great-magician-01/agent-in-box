@@ -20,6 +20,7 @@ export interface SupervisorCreateSpec {
   osFamily: "linux" | "windows";
   baseImagePath: string;
   seedImagePath: string;
+  provisioningUrl?: string;
   cpuCount: number;
   memoryMb: number;
   diskSizeGb: number;

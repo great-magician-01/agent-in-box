@@ -1,4 +1,4 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
 import type { Kysely } from "kysely";
 import type {
   ModelDefinition,
@@ -10,6 +10,7 @@ import { NotFoundError, PersistenceError } from "../persistence/errors";
 import type { DatabaseSchema } from "../persistence/schema";
 import { nowIso } from "../persistence/time";
 import { KYSELY } from "../persistence/tokens";
+import { SettingsService } from "../settings/settings.service";
 
 export interface ResolvedModel {
   provider: ModelProviderView;
@@ -18,7 +19,10 @@ export interface ResolvedModel {
 
 @Injectable()
 export class ModelProviderService {
-  constructor(@Inject(KYSELY) private readonly db: Kysely<DatabaseSchema>) {}
+  constructor(
+    @Inject(KYSELY) private readonly db: Kysely<DatabaseSchema>,
+    @Optional() private readonly settings?: SettingsService,
+  ) {}
 
   async list(): Promise<ModelProviderView[]> {
     const rows = await this.db
@@ -73,27 +77,55 @@ export class ModelProviderService {
     return this.get(providerId);
   }
 
-  async resolve(providerId?: string, modelId?: string): Promise<ResolvedModel> {
+  async resolve(
+    providerId?: string,
+    modelId?: string,
+    scope: "worker" | "router" = "worker",
+  ): Promise<ResolvedModel> {
     const providers = (await this.list()).filter((provider) => provider.enabled);
-    const provider = providerId
+    let provider = providerId
       ? providers.find((candidate) => candidate.id === providerId)
-      : providers[0];
-    if (!provider) {
-      throw new PersistenceError(
-        "validation_failed",
-        providerId ? `模型 Provider 不可用：${providerId}` : "尚未配置可用的模型 Provider",
-      );
+      : undefined;
+    let selectedModel = modelId;
+    if (!provider && !providerId) {
+      const selection = (await this.settings?.modelSelection())?.[scope] ?? null;
+      if (selection) {
+        provider = providers.find((candidate) => candidate.id === selection.providerId);
+        if (!provider) {
+          throw new PersistenceError(
+            "validation_failed",
+            `已选择的模型 Provider 不可用或已停用：${selection.providerId}`,
+          );
+        }
+        selectedModel = modelId ?? selection.model;
+      }
     }
-    const model = modelId
-      ? provider.models.find((candidate) => candidate.id === modelId)
+    if (!provider) {
+      if (providerId) {
+        throw new PersistenceError("validation_failed", `模型 Provider 不可用：${providerId}`);
+      }
+      provider = providers[0];
+    }
+    if (!provider) {
+      throw new PersistenceError("validation_failed", "尚未配置可用的模型 Provider");
+    }
+    const model = selectedModel
+      ? provider.models.find((candidate) => candidate.id === selectedModel)
       : provider.models[0];
     if (!model) {
       throw new PersistenceError(
         "validation_failed",
-        `模型 ${modelId ?? ""} 不在 Provider ${provider.id} 的白名单中`,
+        `模型 ${selectedModel ?? ""} 不在 Provider ${provider.id} 的白名单中`,
       );
     }
     return { provider, model };
+  }
+
+  async validateSelection(selection: {
+    providerId: string;
+    model: string;
+  }): Promise<ResolvedModel> {
+    return this.resolve(selection.providerId, selection.model, "worker");
   }
 }
 

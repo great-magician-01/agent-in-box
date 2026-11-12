@@ -20,6 +20,8 @@ import {
   type WorkerSessionSpec,
 } from "@agent-in-box/agent-runtime";
 import type {
+  ModelSelectionSource,
+  RouterConfigUpdate,
   RouterMessageRecord,
   RouterSendResult,
   RouterStatus,
@@ -36,6 +38,7 @@ import { DatabaseService } from "../persistence/database.service";
 import { ModelBrokerService } from "../models/model-broker.service";
 import { ModelProviderService } from "../models/model-provider.service";
 import { ModelTokenService } from "../models/model-token.service";
+import { SettingsService } from "../settings/settings.service";
 import { RouterToolBrokerService } from "./router-tool-broker.service";
 import { RouterToolService } from "./router-tool.service";
 import { routerExtensionSource } from "./router-extension";
@@ -114,6 +117,7 @@ export class RouterRuntimeService implements OnModuleInit, OnModuleDestroy {
     private readonly tools: RouterToolService,
     private readonly outbox: OutboxRepository,
     @Optional() @Inject(ROUTER_RUNTIME_OPTIONS) options: RouterRuntimeOptions = {},
+    @Optional() private readonly settings?: SettingsService,
   ) {
     this.dataRoot = options.dataRoot ?? database.layout.root;
     this.piBinary = options.piBinary ?? process.env.AGENT_IN_BOX_ROUTER_PI_BINARY?.trim() ?? "pi";
@@ -196,17 +200,51 @@ export class RouterRuntimeService implements OnModuleInit, OnModuleDestroy {
       .select((builder) => builder.fn.countAll<number>().as("count"))
       .where("conversation_id", "=", conversationId)
       .executeTakeFirst();
+    const selection = await this.selectionInfo();
     return {
       conversationId,
       status: this.turnInFlight ? "running" : normalizeStatus(row.status),
       providerId: row.provider_id,
       modelId: row.model_id,
+      selectedProviderId: selection.providerId,
+      selectedModelId: selection.modelId,
+      selectionSource: selection.source,
+      selectionLockedByEnv: selection.locked,
       engineVersion: row.engine_version,
       sessionVersion: row.session_version,
       lastError: row.last_error,
       lastActiveAt: row.last_active_at,
       tools: this.tools.definitions(),
       messageCount: Number(messageCount?.count ?? 0),
+    };
+  }
+
+  private async selectionInfo(): Promise<{
+    providerId: string | null;
+    modelId: string | null;
+    source: ModelSelectionSource;
+    locked: boolean;
+  }> {
+    const envProvider = this.env.AGENT_IN_BOX_ROUTER_PROVIDER?.trim() || null;
+    const envModel = this.env.AGENT_IN_BOX_ROUTER_MODEL?.trim() || null;
+    if (envProvider || envModel) {
+      return { providerId: envProvider, modelId: envModel, source: "env", locked: true };
+    }
+    const saved = (await this.settings?.modelSelection())?.router ?? null;
+    if (saved) {
+      return {
+        providerId: saved.providerId,
+        modelId: saved.model,
+        source: "settings",
+        locked: false,
+      };
+    }
+    const first = (await this.providers.list()).find((provider) => provider.enabled);
+    return {
+      providerId: first?.id ?? null,
+      modelId: first?.models[0]?.id ?? null,
+      source: "default",
+      locked: false,
     };
   }
 
@@ -319,6 +357,70 @@ export class RouterRuntimeService implements OnModuleInit, OnModuleDestroy {
     return this.view();
   }
 
+  async configure(input: RouterConfigUpdate): Promise<RouterView> {
+    const envProvider = this.env.AGENT_IN_BOX_ROUTER_PROVIDER?.trim();
+    const envModel = this.env.AGENT_IN_BOX_ROUTER_MODEL?.trim();
+    if (envProvider || envModel) {
+      throw new PersistenceError(
+        "conflict",
+        "Router 模型由 AGENT_IN_BOX_ROUTER_PROVIDER/MODEL 环境变量锁定，不能在界面切换",
+      );
+    }
+    if (
+      typeof input?.providerId !== "string" ||
+      !input.providerId.trim() ||
+      typeof input.model !== "string" ||
+      !input.model.trim()
+    ) {
+      throw new PersistenceError("validation_failed", "必须选择 Provider 和模型");
+    }
+    if (!this.settings) {
+      throw new PersistenceError("unavailable", "模型设置服务不可用");
+    }
+    const selection = {
+      providerId: input.providerId.trim(),
+      model: input.model.trim(),
+    };
+    await this.providers.resolve(selection.providerId, selection.model, "router");
+    const conversationId = await this.ensureConversation();
+    const row = await this.requireSessionRow(conversationId);
+    if (this.turnInFlight || row.status === "running" || this.sessionPromise) {
+      throw new PersistenceError("conflict", "Router 正在处理回合，请稍候或中止后再切换模型");
+    }
+
+    await this.settings.updateModelSelection({ router: selection });
+    const active = this.active;
+    this.active = null;
+    if (active) {
+      if (active.turnTimer) clearTimeout(active.turnTimer);
+      await active.engine.dispose?.().catch(() => undefined);
+      await this.tokens
+        .revokeRouter(active.modelTokenId, "router_model_switched")
+        .catch(() => undefined);
+    }
+    await this.db
+      .updateTable("router_sessions")
+      .set({
+        status: "idle",
+        session_ref: null,
+        provider_id: null,
+        model_id: null,
+        tool_token_hash: null,
+        tool_token_expires_at: null,
+        last_error: null,
+        last_active_at: nowIso(),
+        updated_at: nowIso(),
+      })
+      .where("conversation_id", "=", conversationId)
+      .execute();
+    await this.outbox.append(
+      "router.status_changed",
+      { conversationId, status: "idle", error: null },
+      nowIso(),
+    );
+    return this.view();
+  }
+
   private async ensureSession(conversationId: string): Promise<ActiveRouter> {
     if (this.active) return this.active;
     if (this.sessionPromise) return this.sessionPromise;
@@ -333,6 +435,7 @@ export class RouterRuntimeService implements OnModuleInit, OnModuleDestroy {
     const model = await this.providers.resolve(
       this.env.AGENT_IN_BOX_ROUTER_PROVIDER?.trim() || undefined,
       this.env.AGENT_IN_BOX_ROUTER_MODEL?.trim() || undefined,
+      "router",
     );
     const toolToken = randomBytes(32).toString("base64url");
     const toolTokenExpiresAt = this.now().getTime() + this.toolTokenTtlMs;

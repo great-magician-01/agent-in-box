@@ -125,7 +125,7 @@ describe("TaskService", () => {
     const board = await service.board({ projectId: ctx.projectId, statuses: ["waiting_vm"] });
     expect(board.tasks).toHaveLength(3);
     expect(board.projects[0]?.workspaceConfig.defaultGuestWorkspacePath).toBe(
-      "/home/worker/workspace",
+      "/home/aib-worker/workspace",
     );
   });
 

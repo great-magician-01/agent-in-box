@@ -85,6 +85,7 @@ export class CatalogRepository {
       errorMessage: null,
       updatedAt: now,
       seedLocalPath: null,
+      provisioningProfile: null,
     };
 
     await this.db
@@ -109,6 +110,7 @@ export class CatalogRepository {
         error_message: null,
         updated_at: now,
         seed_local_path: null,
+        provisioning_profile: null,
         manifest_json: "",
       })
       .execute();
@@ -132,7 +134,7 @@ export class CatalogRepository {
       name: input.name,
       description: input.description ?? "",
       defaultVmBindingId: null,
-      workspaceConfig: { defaultGuestWorkspacePath: "/home/worker/workspace" },
+      workspaceConfig: { defaultGuestWorkspacePath: "/home/aib-worker/workspace" },
       agentConfig: { mcpEnabled: false },
       createdAt: now,
       updatedAt: now,
@@ -190,6 +192,7 @@ export class CatalogRepository {
       guestHealth: "unknown",
       createdAt: nowIso(),
       lastStartedAt: null,
+      provisioning: { state: "none", message: null, startedAt: null },
     };
 
     await this.db
@@ -207,6 +210,9 @@ export class CatalogRepository {
         guest_health: record.guestHealth,
         created_at: record.createdAt,
         last_started_at: null,
+        provisioning_state: "none",
+        provisioning_message: null,
+        provisioning_started_at: null,
       })
       .execute();
 

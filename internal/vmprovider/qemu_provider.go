@@ -316,6 +316,15 @@ func buildQemuArgsWithResolver(metadata *vmMetadata, accelerator string, cpuMode
 		"-smp", strconv.Itoa(spec.CPUCount),
 		"-m", strconv.Itoa(spec.MemoryMB),
 	}
+	if osFamily == OsLinux && spec.ProvisioningURL != "" {
+		if strings.ContainsAny(spec.ProvisioningURL, ",\r\n") {
+			return nil, fmt.Errorf("%w: provisioning URL contains unsupported characters", ErrInvalidSpec)
+		}
+		// cloud-init's NoCloud datasource reads ds=nocloud-net;s=<url> from the
+		// DMI system serial. This keeps per-VM bootstrap secrets out of disk
+		// images and avoids generating a seed ISO on the host.
+		args = append(args, "-smbios", "type=1,serial=ds=nocloud-net;s="+spec.ProvisioningURL)
+	}
 	if osFamily == OsWindows {
 		// A stock Windows image has no virtio-block driver. IDE/AHCI works on
 		// q35 out of the box and keeps the golden image free of third-party
@@ -365,7 +374,7 @@ func buildQemuArgsWithResolver(metadata *vmMetadata, accelerator string, cpuMode
 	}
 	args = append(args,
 		"-display", "none",
-		"-vnc", fmt.Sprintf("127.0.0.1:%d", spec.VNCDisplay),
+		"-vnc", fmt.Sprintf("127.0.0.1:%d,share=force-shared", spec.VNCDisplay),
 		"-serial", "file:"+consolePath,
 		"-qmp", fmt.Sprintf("tcp:127.0.0.1:%d,server,nowait", spec.QMPPort),
 		"-pidfile", pidPath,

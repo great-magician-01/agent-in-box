@@ -1,0 +1,21 @@
+[Unit]
+Description=Agent-in-Box Guest Agent
+After=network-online.target lightdm.service
+Wants=network-online.target lightdm.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/aib/.Xauthority
+ExecStart=/usr/local/bin/agent-in-box-guest-agent -addr 0.0.0.0:7611 -token-file /etc/agent-in-box/guest-agent.token
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/etc/agent-in-box /var/lib/agent-in-box
+
+[Install]
+WantedBy=multi-user.target

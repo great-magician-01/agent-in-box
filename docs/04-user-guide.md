@@ -10,6 +10,7 @@
 3. 设置 Host Reserve、VM 自动启动策略、本机管理员名称和敏感操作审批。
 4. 模型 Provider 凭据保存在宿主 OS 安全存储（Electron `safeStorage`），不会写入 VM。
 5. 安装完成后可选择桌面、开始菜单或托盘启动。关闭窗口默认继续在托盘运行，可在设置中改为退出。
+6. Electron 会托管 VM Supervisor；QEMU 不随安装包捆绑。首次使用 VM 前，在“设置 → 虚拟机运行组件”下载托管 QEMU，或选择已有 QEMU 的 `bin` 目录。状态会显示 Supervisor、QEMU 路径和托管版本。
 
 首次启动后，控制平面在配置目录生成 0600 的 `web-access-key`。浏览器打开本机地址时需要粘贴该密钥；Electron 由 Main 自动登录，Renderer 不接触密钥。
 
@@ -25,9 +26,10 @@
 
 ## 3. 下载镜像与创建 Linux/Windows VM
 
-1. 打开“虚拟机”，在镜像列表选择 Linux 或 Windows 镜像并下载。默认 Manifest 只包含 Linux 基线；Windows Golden Image 需要通过 `AGENT_IN_BOX_IMAGE_MANIFEST` 指向内部 Manifest。
-2. 下载显示进度、速度和错误；中断后重新开始会从已下载部分续传，校验不通过的文件不会启用。
-3. 创建 VM 时选择 CPU、内存、磁盘和存储位置。Windows Guest 至少需要 4 GiB 内存和 32 GiB 磁盘；宿主资源不足时会提示；`when_needed` 策略会在有任务时自动启动或恢复 VM。
+1. 打开“虚拟机”，使用“一键创建 Linux 工作 VM”即可下载并校验版本化 Ubuntu 24.04 Cloud Image、创建 4 vCPU / 8 GiB / 40 GiB VM、启动并通过 cloud-init 安装 XFCE、Guest Agent、Node/Pi 与 Worker。首次初始化通常需要 5～20 分钟，页面会显示当前阶段。
+2. 也可以手动下载镜像、创建 VM 后再启动。下载显示进度、速度和错误；中断后重新开始会从已下载部分续传，校验不通过的文件不会启用。
+3. 默认 Manifest 只包含 Linux 基线；Windows Golden Image 需要通过 `AGENT_IN_BOX_IMAGE_MANIFEST` 指向内部 Manifest。Windows Guest 至少需要 4 GiB 内存和 32 GiB 磁盘。
+4. Linux 项目默认 Guest 工作目录为 `/home/aib-worker/workspace`，与 Worker runtime 的安装目录一致；如使用自定义镜像，请在项目绑定中改为实际路径。
 4. VM 电源状态与 Guest 健康状态分开显示。`running` 不等于 Guest Agent 一定健康。
 5. 停止 VM 使用 ACPI 优雅关机；强制停止可能丢失 Guest 内未保存数据。
 6. Windows 镜像必须来自合法 ISO、评估镜像或内部 Golden Image；构建和 token 注入步骤见 [Windows Guest 资产](../images/windows/README.md)。
@@ -41,18 +43,21 @@
 5. 完成必须由 Guest 文件/进程证据或重新截图验证；模型自述“完成”不会自动把任务置为完成。
 6. 取消、重试、批准/拒绝和人工接管都要求明确操作；人工控制台输入会抢占 AI Lease，旧 AI 动作会被拒绝。
 
-## 5. 主会话（Router）
+## 5. 主会话（Router）与模型配置
 
 - 主会话是宿主侧 Pi Router，可查询项目/任务/Worker/看板/归档，并通过结构化工具创建和分派任务。
 - Router 不拥有 Shell、宿主文件系统、VM 输入或 Supervisor 工具。
 - Router 可以复用现有 Worker、新建 Worker、归档空闲 Worker，并在需要时恢复会话；恢复时会注入最新截图和离开期间的环境变化。
 - 归档不会删除任务或 Router 历史消息；恢复后仍需重新观察桌面。
+- “设置 → 模型与 API 配置”可以保存多套 Provider（配置名、Base URL、API 类型、模型白名单、凭据引用），并分别选择新 Worker 默认模型和 Router 模型。Router 空闲时可“应用并重启会话”，下一次发送使用新模型；已有 Worker 需要“切换模型（归档并新建会话）”。运行中的 Router 不能切换。
+- 长期 API Key 只通过桌面应用保存到系统安全存储；设置页只显示凭据是否已保存，不读取或回显密钥。
 
-## 6. 实时控制台
+## 6. 实时控制台与观察栏
 
-- VM 页面的 noVNC 控制台使用回环一次性票据；票据失效后不能继续输入。
-- AI 或人工同一时间只能有一个 Execution Lease。人工接管后，AI 需要重新获得 Lease 才能继续。
-- 控制台输入会经过 Lease 校验，不能绕过 Worker/任务边界直接操作。
+- 应用采用三栏工作区：左侧项目与 Worker 会话，中间 Router/Worker 会话，右侧观察栏默认隐藏。点击顶栏“观察栏”或左侧“观察”可打开。
+- 观察栏的“VM 画面”是 **只读观察**：不获取 Execution Lease，也不会向 Guest 转发键盘、鼠标或剪贴板；可以一边观察 Agent 操作，一边保持 AI Lease。
+- 只有点击“人工接管”并确认后，才打开交互控制台并获取 human Lease；AI 需要重新获得 Lease 才能继续。
+- VM 页面的交互 noVNC 控制台使用回环一次性票据；票据失效后不能继续输入。
 - Windows Guest 出现锁屏或 UAC 安全桌面时，AI 截图/输入会被拒绝并返回 `session_locked`/`secure_desktop`，任务进入 `blocked`。请在控制台人工解锁或处理 UAC，然后让 Worker 重新观察；`Ctrl+Alt+Del` 只能人工操作。
 
 ## 7. 通知、Web 与桌面

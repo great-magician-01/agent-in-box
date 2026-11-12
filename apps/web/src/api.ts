@@ -78,9 +78,12 @@ import type {
   VmInstanceView,
   VmListResponse,
   ConversationMessageRecord,
+  ModelConfigurationUpdate,
+  ModelConfigurationView,
   ModelProviderUpsert,
   ModelProviderView,
   ActiveRosterView,
+  RouterConfigUpdate,
   RouterMessageRecord,
   RouterSendResult,
   RouterToolCallRecord,
@@ -90,6 +93,7 @@ import type {
   WorkerArchiveRecord,
   WorkerArchiveSearchResult,
   WorkerCreateRequest,
+  WorkerModelSwitchRequest,
   WorkerPromptRequest,
   WorkerRelationView,
   WorkerResumeRequest,
@@ -454,6 +458,12 @@ export const api = {
       body: JSON.stringify({ title }),
     }),
   modelProviders: () => apiFetch<ModelProviderView[]>("/api/v1/models/providers"),
+  modelConfiguration: () => apiFetch<ModelConfigurationView>("/api/v1/models/configuration"),
+  updateModelConfiguration: (body: ModelConfigurationUpdate) =>
+    apiFetch<ModelConfigurationView>("/api/v1/models/configuration", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
   upsertModelProvider: (id: string, body: ModelProviderUpsert) =>
     apiFetch<ModelProviderView>(`/api/v1/models/providers/${encodeURIComponent(id)}`, {
       method: "PUT",
@@ -497,6 +507,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  workerSwitchModel: (id: string, body: WorkerModelSwitchRequest) =>
+    apiFetch<WorkerView>(`/api/v1/workers/${encodeURIComponent(id)}/switch-model`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   workerBlockers: (id: string) =>
     apiFetch<WorkerArchiveBlockers>(`/api/v1/workers/${encodeURIComponent(id)}/blockers`),
   workerArchives: (id: string) =>
@@ -536,6 +551,11 @@ export const api = {
       body: JSON.stringify({ text }),
     }),
   routerAbort: () => apiFetch<RouterView>("/api/v1/router/abort", { method: "POST" }),
+  routerConfigure: (body: RouterConfigUpdate) =>
+    apiFetch<RouterView>("/api/v1/router/config", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
   routerTools: () => apiFetch<RouterToolDefinition[]>("/api/v1/router/tools"),
   routerToolCalls: (limit = 50) =>
     apiFetch<RouterToolCallRecord[]>(`/api/v1/router/tool-calls?limit=${limit}`),
@@ -731,6 +751,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  vm: (id: string) => apiFetch<VmInstanceView>(`/api/v1/vms/${encodeURIComponent(id)}`),
   startVm: (id: string) =>
     apiFetch<VmInstanceView>(`/api/v1/vms/${encodeURIComponent(id)}/start`, {
       method: "POST",
@@ -751,10 +772,10 @@ export const api = {
   vmConsole: (id: string) => apiFetch<VmConsole>(`/api/v1/vms/${encodeURIComponent(id)}/console`),
   vmControl: (id: string) =>
     apiFetch<VmControlView>(`/api/v1/vms/${encodeURIComponent(id)}/control`),
-  openVmConsole: (id: string) =>
+  openVmConsole: (id: string, options: { viewOnly?: boolean } = {}) =>
     apiFetch<VmConsoleSession>(`/api/v1/vms/${encodeURIComponent(id)}/console/sessions`, {
       method: "POST",
-      body: JSON.stringify({}),
+      body: JSON.stringify(options),
     }),
   acquireWorkerLease: (id: string, body: WorkerLeaseRequest) =>
     apiFetch<ExecutionLeaseView>(`/api/v1/vms/${encodeURIComponent(id)}/lease/worker`, {

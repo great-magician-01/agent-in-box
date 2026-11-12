@@ -12,6 +12,7 @@ import type {
   TaskRecord,
   VmInstanceRecord,
   VmPowerState,
+  VmProvisioningState,
   WorkerArchiveRecord,
   WorkerRecord,
 } from "@agent-in-box/protocol";
@@ -39,6 +40,12 @@ function asOsFamily(value: string): OsFamily {
 
 function asGuestHealth(value: string): GuestHealthState {
   return value as GuestHealthState;
+}
+
+function asProvisioningState(value: string): VmProvisioningState {
+  return value === "waiting" || value === "installing" || value === "ready" || value === "failed"
+    ? value
+    : "none";
 }
 
 function asVmPowerState(value: string): VmPowerState {
@@ -87,6 +94,7 @@ export function toImageRecord(row: Selectable<ImagesTable>): ImageRecord {
     errorMessage: row.error_message,
     updatedAt: row.updated_at || row.created_at,
     seedLocalPath: row.seed_local_path,
+    provisioningProfile: row.provisioning_profile,
   };
 }
 
@@ -104,6 +112,11 @@ export function toVmInstanceRecord(row: Selectable<VmInstancesTable>): VmInstanc
     guestHealth: asGuestHealth(row.guest_health),
     createdAt: row.created_at,
     lastStartedAt: row.last_started_at,
+    provisioning: {
+      state: asProvisioningState(row.provisioning_state),
+      message: row.provisioning_message,
+      startedAt: row.provisioning_started_at,
+    },
   };
 }
 
@@ -120,7 +133,7 @@ export function toProjectRecord(row: Selectable<ProjectsTable>): ProjectRecord {
     defaultVmBindingId: row.default_vm_binding_id,
     workspaceConfig: {
       defaultGuestWorkspacePath:
-        typeof workspace === "string" && workspace ? workspace : "/home/worker/workspace",
+        typeof workspace === "string" && workspace ? workspace : "/home/aib-worker/workspace",
     },
     agentConfig: { mcpEnabled: projectAgentConfig(row.agent_config_json).mcpEnabled },
     createdAt: row.created_at,

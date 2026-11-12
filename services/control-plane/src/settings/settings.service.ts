@@ -2,6 +2,8 @@ import { Inject, Injectable } from "@nestjs/common";
 import type { Kysely } from "kysely";
 import type {
   LocalUserRecord,
+  ModelSelection,
+  ModelSelectionConfig,
   OnboardingState,
   ResourcePolicy,
   SecuritySettings,
@@ -32,6 +34,7 @@ export const SETTINGS_KEYS = {
   workerLifecycle: "workerLifecycle",
   preferredModelProvider: "preferredModelProvider",
   credentialsConfigured: "credentialsConfigured",
+  modelSelection: "modelSelection",
 } as const;
 
 export interface OnboardingSettings {
@@ -78,6 +81,44 @@ export function normalizeModelProvider(raw: unknown): string | null {
     throw new PersistenceError("validation_failed", "模型 Provider 标识格式无效");
   }
   return raw;
+}
+
+export function normalizeModelSelection(raw: unknown): ModelSelection | null {
+  if (raw === undefined || raw === null || raw === "") {
+    return null;
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new PersistenceError("validation_failed", "模型选择必须是对象");
+  }
+  const input = raw as Record<string, unknown>;
+  const providerId = normalizeModelProvider(input.providerId);
+  if (!providerId) {
+    throw new PersistenceError("validation_failed", "模型选择缺少 Provider");
+  }
+  const model = input.model;
+  if (
+    typeof model !== "string" ||
+    model.trim().length < 1 ||
+    model.trim().length > 200 ||
+    model.trim() !== model
+  ) {
+    throw new PersistenceError("validation_failed", "模型 ID 无效");
+  }
+  return { providerId, model: model.trim() };
+}
+
+export function normalizeModelSelectionConfig(raw: unknown): ModelSelectionConfig {
+  if (raw === undefined || raw === null) {
+    return { worker: null, router: null };
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new PersistenceError("validation_failed", "模型选择配置必须是对象");
+  }
+  const input = raw as Record<string, unknown>;
+  return {
+    worker: normalizeModelSelection(input.worker),
+    router: normalizeModelSelection(input.router),
+  };
 }
 
 export function normalizeResourcePolicy(raw: unknown, totalMemoryBytes: number): ResourcePolicy {
@@ -264,6 +305,23 @@ export class SettingsService {
       (await this.getJson<WorkerLifecyclePolicy>(SETTINGS_KEYS.workerLifecycle)) ??
       DEFAULT_WORKER_LIFECYCLE_POLICY
     );
+  }
+
+  async modelSelection(): Promise<ModelSelectionConfig> {
+    return normalizeModelSelectionConfig(await this.getJson<unknown>(SETTINGS_KEYS.modelSelection));
+  }
+
+  async updateModelSelection(patch: {
+    worker?: ModelSelection | null;
+    router?: ModelSelection | null;
+  }): Promise<ModelSelectionConfig> {
+    const current = await this.modelSelection();
+    const next: ModelSelectionConfig = {
+      worker: patch.worker === undefined ? current.worker : normalizeModelSelection(patch.worker),
+      router: patch.router === undefined ? current.router : normalizeModelSelection(patch.router),
+    };
+    await this.setJson(SETTINGS_KEYS.modelSelection, next);
+    return next;
   }
 
   async resourcePolicy(totalMemoryBytes: number): Promise<ResourcePolicy> {

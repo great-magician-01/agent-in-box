@@ -1,0 +1,12 @@
+{
+  "status": "success",
+  "checks": [
+    "Model Provider 与 Worker/Router 多套选择可通过前端 API 持久化",
+    "Router 可在空闲时切换模型并保留设置",
+    "Cloud-init provisioning 提供经过 token 校验的 user-data，且不泄漏 Guest Token",
+    "Provisioning 完成后撤销 bootstrap 数据并更新 VM 状态"
+  ],
+  "realQemu": false,
+  "browserElectronUi": false,
+  "finishedAt": "2026-11-12T14:47:16.905Z"
+}

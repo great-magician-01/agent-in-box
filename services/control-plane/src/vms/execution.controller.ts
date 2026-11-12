@@ -25,8 +25,14 @@ export class ExecutionController {
   }
 
   @Post(":id/console/sessions")
-  openConsole(@Param("id") id: string): Promise<VmConsoleSession> {
-    return this.consoles.openSession(id);
+  openConsole(
+    @Param("id") id: string,
+    @Body() input?: { viewOnly?: boolean },
+  ): Promise<VmConsoleSession> {
+    if (input?.viewOnly !== undefined && typeof input.viewOnly !== "boolean") {
+      throw new PersistenceError("validation_failed", "viewOnly 必须是布尔值");
+    }
+    return this.consoles.openSession(id, { viewOnly: input?.viewOnly === true });
   }
 
   @Post(":id/lease/worker")

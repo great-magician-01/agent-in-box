@@ -1,5 +1,6 @@
-import { Body, Controller, Get, Post, Query } from "@nestjs/common";
+import { Body, Controller, Get, Post, Put, Query } from "@nestjs/common";
 import type {
+  RouterConfigUpdate,
   RouterMessageRecord,
   RouterSendRequest,
   RouterSendResult,
@@ -35,6 +36,11 @@ export class RouterController {
   @Post("abort")
   abort(): Promise<RouterView> {
     return this.router.abort();
+  }
+
+  @Put("config")
+  configure(@Body() body: RouterConfigUpdate): Promise<RouterView> {
+    return this.router.configure(body);
   }
 
   @Get("tools")

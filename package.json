@@ -22,8 +22,10 @@
     "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
     "package:control-plane": "node scripts/package-control-plane.mjs",
     "package:guest-agent": "node scripts/package-guest-agent.mjs",
+    "package:vm-supervisor": "node scripts/package-vm-supervisor.mjs",
+    "package:guest-runtime": "node scripts/package-guest-runtime.mjs",
     "package:worker-runtime": "pnpm build:packages && node scripts/package-worker-runtime.mjs",
-    "package:prepare": "pnpm build:packages && pnpm --filter @agent-in-box/control-plane build && pnpm --filter @agent-in-box/web build && node scripts/package-control-plane.mjs && pnpm --filter @agent-in-box/desktop build",
+    "package:prepare": "pnpm build:packages && pnpm --filter @agent-in-box/control-plane build && pnpm --filter @agent-in-box/web build && node scripts/package-control-plane.mjs && node scripts/package-vm-supervisor.mjs && node scripts/package-guest-runtime.mjs && pnpm --filter @agent-in-box/desktop build",
     "package:desktop": "pnpm package:prepare && pnpm --filter @agent-in-box/desktop dist",
     "package:desktop:dir": "pnpm package:prepare && pnpm --filter @agent-in-box/desktop pack:dir",
     "package:desktop:win": "pnpm package:prepare && pnpm --filter @agent-in-box/desktop dist:win",
@@ -42,6 +44,7 @@
     "smoke:phase11": "pnpm build:packages && pnpm --filter @agent-in-box/control-plane build && pnpm --filter @agent-in-box/web build && tsx scripts/smoke-phase11.mts",
     "smoke:phase12": "pnpm build:packages && pnpm --filter @agent-in-box/control-plane build && pnpm --filter @agent-in-box/web build && tsx scripts/smoke-phase12.mts",
     "smoke:phase13": "pnpm build:packages && pnpm --filter @agent-in-box/control-plane build && pnpm --filter @agent-in-box/web build && tsx scripts/smoke-phase13.mts",
+    "smoke:phase14": "pnpm build:packages && pnpm --filter @agent-in-box/control-plane build && pnpm --filter @agent-in-box/web build && tsx scripts/smoke-phase14.mts",
     "smoke:desktop": "node scripts/smoke-desktop-package.mjs"
   },
   "devDependencies": {

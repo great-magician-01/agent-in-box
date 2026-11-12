@@ -33,6 +33,8 @@ import { ensureDesktopSession } from "./control-plane-auth";
 import { ControlPlaneSupervisor } from "./control-plane-supervisor";
 import { CredentialBridge } from "./credential-bridge";
 import { CredentialStore } from "./credential-store";
+import { QemuToolchainManager } from "./qemu-toolchain";
+import { VmSupervisor } from "./vm-supervisor";
 import { registerDesktopIpc, type DesktopIpcHandle, type DesktopUpdateActions } from "./ipc";
 import { IPC_CHANNELS } from "./ipc-channels";
 import { JsonLineLogger } from "./logger";
@@ -148,6 +150,33 @@ function updatePreferences(patch: DesktopPreferencesPatch): DesktopPreferences {
   return next;
 }
 
+const vmActions = {
+  status: async () => {
+    const { rootChanged } = await refreshVmRuntime();
+    if (rootChanged && vmSupervisor.getStatus().state === "running") {
+      await vmSupervisor.restart();
+    }
+    return vmSupervisor.getStatus();
+  },
+  installQemu: async () => {
+    await qemuManager.install();
+    await refreshVmRuntime();
+    await vmSupervisor.restart();
+    return vmSupervisor.getStatus();
+  },
+  setQemuPath: async (value: string | null) => {
+    const qemu = await qemuManager.setCustomPath(value);
+    vmSupervisor.setQemuStatus(qemu, qemu.path);
+    await vmSupervisor.restart();
+    return vmSupervisor.getStatus();
+  },
+  restartSupervisor: async () => {
+    await refreshVmRuntime();
+    await vmSupervisor.restart();
+    return vmSupervisor.getStatus();
+  },
+};
+
 const updateActions: DesktopUpdateActions = {
   status: () => updateManager.status(),
   check: async () => {
@@ -202,6 +231,58 @@ function controlPlaneEntry(): {
 }
 
 const controlPlaneLocation = controlPlaneEntry();
+const desktopDataRoot = resolveDesktopDataRoot({ configPath: paths.configPath });
+const qemuManager = new QemuToolchainManager({
+  dataRoot: desktopDataRoot,
+  configPath: path.join(paths.configDirectory, "qemu-runtime.json"),
+  logger: logger.child("qemu"),
+});
+
+function vmSupervisorEntry(): { entryPath: string; workingDirectory: string } {
+  const fileName =
+    process.platform === "win32" ? "vm-supervisor-windows-amd64.exe" : "vm-supervisor-linux-amd64";
+  const directory = app.isPackaged
+    ? path.join(process.resourcesPath, "vm-supervisor")
+    : path.join(__dirname, "..", "..", "..", "release", "vm-supervisor");
+  return { entryPath: path.join(directory, fileName), workingDirectory: directory };
+}
+
+const vmSupervisorLocation = vmSupervisorEntry();
+const vmSupervisor = new VmSupervisor({
+  ...vmSupervisorLocation,
+  storageRoot: path.join(desktopDataRoot, "vms"),
+  qemuBinDirectory: "",
+  env: {
+    AGENT_IN_BOX_CONFIG_DIR: paths.configDirectory,
+    AGENT_IN_BOX_DATA_ROOT: desktopDataRoot,
+  },
+  logger: logger.child("vm-supervisor"),
+});
+
+let activeVmStorageRoot = path.join(desktopDataRoot, "vms");
+
+async function refreshVmRuntime(): Promise<{ rootChanged: boolean }> {
+  const currentDataRoot = resolveDesktopDataRoot({ configPath: paths.configPath });
+  const nextStorageRoot = path.join(currentDataRoot, "vms");
+  const rootChanged = nextStorageRoot !== activeVmStorageRoot;
+  activeVmStorageRoot = nextStorageRoot;
+  qemuManager.setDataRoot(currentDataRoot);
+  vmSupervisor.setStorageRoot(nextStorageRoot);
+  try {
+    const qemu = await qemuManager.status();
+    vmSupervisor.setQemuStatus(qemu, qemu.path);
+  } catch (error) {
+    logger.error("读取 QEMU 工具链状态失败", { error: String(error) });
+    vmSupervisor.setQemuStatus({
+      state: "invalid",
+      path: null,
+      version: null,
+      message: String(error),
+      managedRoot: qemuManager.managedRoot,
+    });
+  }
+  return { rootChanged };
+}
 
 const supervisor = new ControlPlaneSupervisor({
   entryPath: controlPlaneLocation.entryPath,
@@ -211,6 +292,9 @@ const supervisor = new ControlPlaneSupervisor({
   runAsNode: app.isPackaged,
   env: {
     AGENT_IN_BOX_CONFIG_DIR: paths.configDirectory,
+    AGENT_IN_BOX_GUEST_RUNTIME_DIR: app.isPackaged
+      ? path.join(process.resourcesPath, "guest-runtime", "linux-amd64")
+      : path.join(__dirname, "..", "..", "..", "release", "guest-runtime", "linux-amd64"),
     ...(controlPlaneLocation.webRoot
       ? { AGENT_IN_BOX_WEB_ROOT: controlPlaneLocation.webRoot }
       : {}),
@@ -438,7 +522,7 @@ async function installUpdate(): Promise<void> {
   }
   updateManager.setState("installing");
   broadcastStatus();
-  await supervisor.stop();
+  await Promise.all([supervisor.stop(), vmSupervisor.stop()]);
 
   const dataRoot = resolveDesktopDataRoot({ configPath: paths.configPath });
   const databasePath = path.join(dataRoot, "agent-in-box.sqlite");
@@ -477,7 +561,10 @@ async function installUpdate(): Promise<void> {
   } catch (error) {
     updateManager.setState("error", `准备安装失败：${String(error)}`);
     broadcastStatus();
-    await supervisor.start().catch(() => undefined);
+    await Promise.all([
+      supervisor.start().catch(() => undefined),
+      vmSupervisor.start().catch(() => undefined),
+    ]);
     throw error;
   }
 
@@ -491,7 +578,10 @@ async function installUpdate(): Promise<void> {
   } catch (error) {
     updateManager.setState("error", `启动安装程序失败：${String(error)}`);
     broadcastStatus();
-    await supervisor.start().catch(() => undefined);
+    await Promise.all([
+      supervisor.start().catch(() => undefined),
+      vmSupervisor.start().catch(() => undefined),
+    ]);
     throw error;
   }
 
@@ -507,7 +597,7 @@ async function rollbackUpdate(): Promise<void> {
   }
   updateManager.setState("installing");
   broadcastStatus();
-  await supervisor.stop();
+  await Promise.all([supervisor.stop(), vmSupervisor.stop()]);
   try {
     if (rollback.databaseBackupPath) {
       const dataRoot = resolveDesktopDataRoot({ configPath: paths.configPath });
@@ -530,7 +620,10 @@ async function rollbackUpdate(): Promise<void> {
   } catch (error) {
     updateManager.setState("error", `回滚失败：${String(error)}`);
     broadcastStatus();
-    await supervisor.start().catch(() => undefined);
+    await Promise.all([
+      supervisor.start().catch(() => undefined),
+      vmSupervisor.start().catch(() => undefined),
+    ]);
     throw error;
   }
 }
@@ -775,8 +868,8 @@ async function bootstrap(): Promise<void> {
     }
     event.preventDefault();
     shutdownStarted = true;
-    logger.info("正在停止本地控制平面并退出");
-    void supervisor.stop().finally(() => {
+    logger.info("正在停止本地服务并退出");
+    void Promise.all([supervisor.stop(), vmSupervisor.stop()]).finally(() => {
       credentialBridge.stop();
       ipcHandle?.dispose();
       app.quit();
@@ -819,6 +912,7 @@ async function bootstrap(): Promise<void> {
     getPreferences: currentPreferences,
     setPreferences: updatePreferences,
     updates: updateActions,
+    vm: vmActions,
     showNotification: showDesktopNotification,
     quit: requestQuit,
     openLogs: async () => {
@@ -857,6 +951,13 @@ async function bootstrap(): Promise<void> {
     await supervisor.start();
   } catch (error) {
     logger.error("本地控制平面启动失败，界面将显示诊断页", { error: String(error) });
+  }
+
+  await refreshVmRuntime();
+  try {
+    await vmSupervisor.start();
+  } catch (error) {
+    logger.error("VM Supervisor 启动失败；虚拟机功能不可用", { error: String(error) });
   }
 
   installApplicationMenu();

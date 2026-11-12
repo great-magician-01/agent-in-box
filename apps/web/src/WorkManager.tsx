@@ -21,6 +21,8 @@ export type WorkView = "session" | "projects" | "tasks" | "archive";
 interface WorkManagerProps {
   view: WorkView;
   onOpenVmConsole?(vmId: string): void;
+  onOpenWorker?(projectId: string, workerId: string): void;
+  focusProjectId?: string;
 }
 
 const VIEW_COPY: Record<WorkView, { eyebrow: string; title: string; description: string }> = {
@@ -48,7 +50,12 @@ const VIEW_COPY: Record<WorkView, { eyebrow: string; title: string; description:
   },
 };
 
-export function WorkManager({ view, onOpenVmConsole }: WorkManagerProps): React.JSX.Element {
+export function WorkManager({
+  view,
+  onOpenVmConsole,
+  onOpenWorker,
+  focusProjectId,
+}: WorkManagerProps): React.JSX.Element {
   const [projects, setProjects] = useState<ProjectView[]>([]);
   const [board, setBoard] = useState<TaskBoardSnapshot | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
@@ -105,6 +112,14 @@ export function WorkManager({ view, onOpenVmConsole }: WorkManagerProps): React.
   useEffect(() => {
     void load(false);
   }, [load]);
+
+  useEffect(() => {
+    if (!focusProjectId || !projects.some((item) => item.project.id === focusProjectId)) return;
+    if (selectedProjectRef.current === focusProjectId) return;
+    selectedProjectRef.current = focusProjectId;
+    setSelectedProjectId(focusProjectId);
+    setProjectDetail(null);
+  }, [focusProjectId, projects]);
 
   useEffect(() => subscribeTaskEvents(() => void load(true), setStreamState), [load]);
 
@@ -170,13 +185,20 @@ export function WorkManager({ view, onOpenVmConsole }: WorkManagerProps): React.
     setFocusedConversationId(conversationId);
   }, []);
 
-  const openWorker = useCallback((projectId: string, workerId: string) => {
-    const changed = selectedProjectRef.current !== projectId;
-    selectedProjectRef.current = projectId;
-    setSelectedProjectId(projectId);
-    if (changed) setProjectDetail(null);
-    setFocusedWorkerId(workerId);
-  }, []);
+  const openWorker = useCallback(
+    (projectId: string, workerId: string) => {
+      if (onOpenWorker) {
+        onOpenWorker(projectId, workerId);
+        return;
+      }
+      const changed = selectedProjectRef.current !== projectId;
+      selectedProjectRef.current = projectId;
+      setSelectedProjectId(projectId);
+      if (changed) setProjectDetail(null);
+      setFocusedWorkerId(workerId);
+    },
+    [onOpenWorker],
+  );
 
   useEffect(() => {
     if (!focusedWorkerId || !selectedDetail) return;

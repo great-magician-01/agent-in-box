@@ -1,0 +1,81 @@
+{
+  "phase": 13,
+  "startedAt": "2026-11-12T14:12:07.434Z",
+  "finishedAt": "2026-11-12T14:12:08.999Z",
+  "checks": [
+    {
+      "name": "真实 Guest Agent 进程启动、未认证请求被拒绝、平台与能力可读取",
+      "passed": true,
+      "detail": "linux/x11"
+    },
+    {
+      "name": "Guest 只读进程证据在 Windows/Linux 上返回真实 PID",
+      "passed": true,
+      "detail": "node"
+    },
+    {
+      "name": "Guest workspace 归档/恢复在 Windows/Linux 路径上完成 SHA-256 校验往返",
+      "passed": true
+    },
+    {
+      "name": "每 VM Guest/RPC token 生成可复现，默认拒绝覆盖已有 token",
+      "passed": true
+    },
+    {
+      "name": "真实控制平面以自定义镜像 Manifest 启动并保持回环可用",
+      "passed": true
+    },
+    {
+      "name": "Image Service 同时接受 Linux 与 Windows Manifest 条目",
+      "passed": true
+    },
+    {
+      "name": "HTTP 项目创建与双 OS 绑定接受 Windows 绝对工作目录",
+      "passed": true
+    },
+    {
+      "name": "Windows 父目录穿越与 NTFS 数据流路径在 HTTP 边界被拒绝",
+      "passed": true
+    },
+    {
+      "name": "跨 VM 并行、同 VM 串行：两个 Guest 各运行一个任务，其余同 VM 任务保持排队",
+      "passed": true,
+      "detail": "2 running / 2 queued"
+    },
+    {
+      "name": "任务看板对混合任务返回目标 Guest OS，Web/Electron 使用同一快照",
+      "passed": true
+    },
+    {
+      "name": "Router 工具面能看到项目绑定的 Guest OS 与每 VM 队列，不含宿主执行能力",
+      "passed": true
+    },
+    {
+      "name": "Windows Golden Image、无人值守、Guest Runtime 与镜像 Manifest 资产齐全且扩展一致",
+      "passed": true
+    }
+  ],
+  "metrics": {
+    "guestPlatform": "linux",
+    "guestDisplayServer": "x11",
+    "workspaceArchiveBytes": 158,
+    "mixedTaskCount": 4
+  },
+  "boundaries": {
+    "realQemuWxpxWindowsGuest": false,
+    "realWindowsIsoBuild": false,
+    "realWindowsDesktopCapture": false,
+    "realWindowsUnicodeInput": false,
+    "realWindowsUacSecureDesktop": false,
+    "realWindowsPiProcess": false,
+    "realWindowsModel": false,
+    "realWindowsMultiMonitorDpi": false,
+    "realFeishuApp": false,
+    "realQqBot": false,
+    "realBrowserUi": false,
+    "realElectronUi": false,
+    "windowsNsisInstall": false,
+    "longSoak": false
+  },
+  "note": "真实控制平面、SQLite、Guest Agent 进程/认证/进程证据/workspace 往返、Windows/Linux 混合项目与调度；未执行真实 Windows ISO 安装、真实 WHPX Windows Guest、真实 Windows 截图/输入/UAC/DPI、真实 Pi/模型或安装包验收。"
+}

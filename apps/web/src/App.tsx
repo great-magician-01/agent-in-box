@@ -15,7 +15,10 @@ import { useDesktop } from "./desktop";
 import { CONTROL_PLANE_STATE_LABELS, formatDate } from "./format";
 import { LoginScreen } from "./LoginScreen";
 import { NotificationCenter, useNotificationCenter } from "./NotificationCenter";
+import { ObserverSidebar, type ObserverTab } from "./ObserverSidebar";
 import { OnboardingWizard } from "./OnboardingWizard";
+import { WorkerConversation } from "./WorkerConversation";
+import { WorkspaceSidebar } from "./WorkspaceSidebar";
 
 export type AppView =
   "overview" | "session" | "projects" | "tasks" | "vms" | "archive" | "notifications" | "settings";
@@ -222,18 +225,59 @@ function AuthenticatedApp({
   const [restartMessage, setRestartMessage] = useState<string | null>(null);
   const [view, setView] = useState<AppView>(() => viewFromHash());
   const [logoutBusy, setLogoutBusy] = useState(false);
+  const [selectedWorker, setSelectedWorker] = useState<{
+    workerId: string;
+    projectId: string;
+    vmId: string;
+  } | null>(null);
+  const [observerOpen, setObserverOpen] = useState(false);
+  const [observerTab, setObserverTab] = useState<ObserverTab>("vm");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(
+    () => typeof window !== "undefined" && window.innerWidth < 900,
+  );
+  const [workspaceRevision, setWorkspaceRevision] = useState(0);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
 
   const navigate = useCallback((next: string) => {
     const target = NAV_ITEMS.some((item) => item.id === next) ? (next as AppView) : "overview";
     setView(target);
+    if (target !== "session") setSelectedWorker(null);
+    if (target !== "projects") setSelectedProjectId(null);
     if (window.location.hash !== `#/${target}`) {
       window.history.replaceState(null, "", `#/${target}`);
     }
   }, []);
 
+  const selectWorker = useCallback((workerId: string, projectId: string, vmId: string) => {
+    setSelectedWorker({ workerId, projectId, vmId });
+    setView("session");
+    if (window.location.hash !== "#/session") {
+      window.history.replaceState(null, "", "#/session");
+    }
+  }, []);
+
+  const selectRouter = useCallback(() => {
+    setSelectedWorker(null);
+    setView("session");
+    if (window.location.hash !== "#/session") {
+      window.history.replaceState(null, "", "#/session");
+    }
+  }, []);
+
+  const selectProject = useCallback((projectId: string) => {
+    setSelectedWorker(null);
+    setSelectedProjectId(projectId);
+    setView("projects");
+    if (window.location.hash !== "#/projects") {
+      window.history.replaceState(null, "", "#/projects");
+    }
+  }, []);
+
   useEffect(() => {
     function onHashChange(): void {
-      setView(viewFromHash());
+      const next = viewFromHash();
+      setView(next);
+      if (next !== "session") setSelectedWorker(null);
     }
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);
@@ -396,8 +440,26 @@ function AuthenticatedApp({
         ? "本地服务离线"
         : "正在连接本地服务";
 
+  const workspaceVisible = Boolean(onboarding && runtime && online && !onboarding.required);
+  const openWorkerFromBoard = (projectId: string, workerId: string): void => {
+    void api
+      .worker(workerId)
+      .then((view) => selectWorker(workerId, projectId, view.worker.vmId))
+      .catch(() => {
+        setView("projects");
+      });
+  };
+  const onWorkspaceChanged = (): void => {
+    setWorkspaceRevision((value) => value + 1);
+    void refresh(true);
+  };
+
   return (
-    <div className="shell app-shell">
+    <div
+      className={`shell app-shell${workspaceVisible ? "" : " workspace-hidden"}${
+        sidebarCollapsed ? " sidebar-collapsed" : ""
+      }${observerOpen ? " observer-open" : ""}`}
+    >
       <a
         className="skip-link"
         href="#main-content"
@@ -408,206 +470,272 @@ function AuthenticatedApp({
       >
         跳到主要内容
       </a>
-      <header className="header app-header">
-        <div className="brand">
-          <p className="eyebrow">LOCAL-FIRST AI COMPUTER</p>
-          <h1>Agent-in-Box</h1>
-          <div className="top-badges">
-            <span className="badge">{bridge ? "桌面应用" : "本地 Web"}</span>
-            {desktopStatus && (
-              <span className="badge">
-                Electron {desktopStatus.version} · {desktopStatus.platform}/{desktopStatus.arch}
-              </span>
-            )}
-            <span className="badge">{authInfo.user?.displayName ?? "本机管理员"}</span>
+      {workspaceVisible && (
+        <WorkspaceSidebar
+          view={view}
+          selectedWorkerId={selectedWorker?.workerId ?? null}
+          observerOpen={observerOpen}
+          unreadCount={notifications.view?.unreadCount ?? 0}
+          revision={workspaceRevision}
+          onSelectView={navigate}
+          onSelectProject={selectProject}
+          onSelectWorker={(workerId, projectId, vmId) => {
+            selectWorker(workerId, projectId, vmId);
+            setObserverTab("worker");
+          }}
+          onSelectRouter={selectRouter}
+          onToggleObserver={() => setObserverOpen((current) => !current)}
+          onCollapse={() => setSidebarCollapsed(true)}
+        />
+      )}
+      <div className="app-workspace">
+        <header className="header app-header">
+          <div className="brand">
+            <p className="eyebrow">LOCAL-FIRST AI COMPUTER</p>
+            <h1>Agent-in-Box</h1>
+            <div className="top-badges">
+              <span className="badge">{bridge ? "桌面应用" : "本地 Web"}</span>
+              {desktopStatus && (
+                <span className="badge">
+                  Electron {desktopStatus.version} · {desktopStatus.platform}/{desktopStatus.arch}
+                </span>
+              )}
+              <span className="badge">{authInfo.user?.displayName ?? "本机管理员"}</span>
+            </div>
           </div>
-        </div>
-        <div className="header-actions">
-          <button
-            type="button"
-            className="bell-button"
-            aria-label={`通知中心，${notifications.view?.unreadCount ?? 0} 条未读`}
-            onClick={() => navigate("notifications")}
-          >
-            <span aria-hidden="true">🔔</span>
-            {(notifications.view?.unreadCount ?? 0) > 0 && (
-              <span className="bell-count">{notifications.view?.unreadCount}</span>
+          <div className="header-actions">
+            {workspaceVisible && sidebarCollapsed && (
+              <button
+                type="button"
+                className="secondary icon-button"
+                title="展开左栏"
+                onClick={() => setSidebarCollapsed(false)}
+              >
+                ☰
+              </button>
             )}
-          </button>
-          <div
-            className={`status ${connection.state === "online" ? "online" : connection.state === "offline" ? "offline" : "checking"}`}
-            role="status"
-          >
-            <span className="dot" aria-hidden="true" />
-            {statusLabel}
-          </div>
-          {!bridge && (
+            {workspaceVisible && (
+              <button
+                type="button"
+                className={observerOpen ? "secondary active" : "secondary"}
+                aria-pressed={observerOpen}
+                onClick={() => setObserverOpen((current) => !current)}
+              >
+                观察栏
+              </button>
+            )}
             <button
               type="button"
-              className="secondary"
-              onClick={() => void lockUi()}
-              disabled={logoutBusy}
+              className="bell-button"
+              aria-label={`通知中心，${notifications.view?.unreadCount ?? 0} 条未读`}
+              onClick={() => navigate("notifications")}
             >
-              {logoutBusy ? "正在锁定…" : "锁定界面"}
+              <span aria-hidden="true">🔔</span>
+              {(notifications.view?.unreadCount ?? 0) > 0 && (
+                <span className="bell-count">{notifications.view?.unreadCount}</span>
+              )}
             </button>
-          )}
-        </div>
-      </header>
-
-      <nav className="app-nav" aria-label="主导航">
-        {NAV_ITEMS.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            className={view === item.id ? "nav-item active" : "nav-item"}
-            aria-current={view === item.id ? "page" : undefined}
-            title={item.hint}
-            onClick={() => navigate(item.id)}
-          >
-            {item.label}
-            {item.id === "notifications" && (notifications.view?.unreadCount ?? 0) > 0 && (
-              <span className="nav-count">{notifications.view?.unreadCount}</span>
+            <div
+              className={`status ${connection.state === "online" ? "online" : connection.state === "offline" ? "offline" : "checking"}`}
+              role="status"
+            >
+              <span className="dot" aria-hidden="true" />
+              {statusLabel}
+            </div>
+            {!bridge && (
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => void lockUi()}
+                disabled={logoutBusy}
+              >
+                {logoutBusy ? "正在锁定…" : "锁定界面"}
+              </button>
             )}
-          </button>
-        ))}
-      </nav>
+          </div>
+        </header>
 
-      {desktopStatus && (
-        <div className="desktop-strip">
-          <span>
-            本地服务：{CONTROL_PLANE_STATE_LABELS[desktopStatus.controlPlane.state]}
-            {desktopStatus.controlPlane.pid ? ` · pid ${desktopStatus.controlPlane.pid}` : ""}
-          </span>
-          <span className="muted">配置目录：{desktopStatus.configDirectory}</span>
-          {desktopStatus.controlPlane.message && (
-            <span className="muted">{desktopStatus.controlPlane.message}</span>
-          )}
-        </div>
-      )}
-      {desktopError && <div className="notice">桌面桥接异常：{desktopError}</div>}
+        {desktopStatus && (
+          <div className="desktop-strip">
+            <span>
+              本地服务：{CONTROL_PLANE_STATE_LABELS[desktopStatus.controlPlane.state]}
+              {desktopStatus.controlPlane.pid ? ` · pid ${desktopStatus.controlPlane.pid}` : ""}
+            </span>
+            <span className="muted">配置目录：{desktopStatus.configDirectory}</span>
+            {desktopStatus.controlPlane.message && (
+              <span className="muted">{desktopStatus.controlPlane.message}</span>
+            )}
+          </div>
+        )}
+        {desktopError && <div className="notice">桌面桥接异常：{desktopError}</div>}
 
-      <main id="main-content" tabIndex={-1} className="app-main">
-        {pendingRestart ? (
-          <section className="panel restart-panel">
-            <p className="eyebrow">RESTART REQUIRED</p>
-            <h2>需要重启本地服务</h2>
-            <p className="muted">{pendingRestart.reason}</p>
-            <p className="muted small">新数据目录：{pendingRestart.targetRoot}</p>
-            {restartMessage && <div className="notice">{restartMessage}</div>}
-            <div className="action-row">
-              {bridge ? (
-                <button
-                  type="button"
-                  className="primary"
-                  disabled={restartBusy}
-                  onClick={() => void retryControlPlane()}
-                >
-                  {restartBusy ? "正在重启…" : "重新启动本地服务"}
-                </button>
-              ) : (
-                <>
-                  <code className="command">pnpm --filter @agent-in-box/control-plane start</code>
+        <main id="main-content" tabIndex={-1} className="app-main">
+          {pendingRestart ? (
+            <section className="panel restart-panel">
+              <p className="eyebrow">RESTART REQUIRED</p>
+              <h2>需要重启本地服务</h2>
+              <p className="muted">{pendingRestart.reason}</p>
+              <p className="muted small">新数据目录：{pendingRestart.targetRoot}</p>
+              {restartMessage && <div className="notice">{restartMessage}</div>}
+              <div className="action-row">
+                {bridge ? (
                   <button
                     type="button"
                     className="primary"
+                    disabled={restartBusy}
                     onClick={() => void retryControlPlane()}
                   >
-                    我已重启，重新连接
+                    {restartBusy ? "正在重启…" : "重新启动本地服务"}
                   </button>
-                </>
-              )}
-              {bridge && (
-                <button
-                  type="button"
-                  className="secondary"
-                  onClick={() => void bridge.app.openLogs()}
-                >
-                  打开日志目录
-                </button>
-              )}
-            </div>
-            <p className="muted small">
-              重启后如果仍停留在本页，请检查控制平面日志；旧数据目录会保留，不会自动删除。
-            </p>
-          </section>
-        ) : connection.state === "offline" ? (
-          <section className="notice offline-panel" role="alert">
-            <strong>无法连接本地控制平面。</strong>
-            <span>{connection.message}</span>
-            {desktopStatus?.controlPlane.message && (
-              <span>{desktopStatus.controlPlane.message}</span>
-            )}
-            <div className="action-row">
-              <button type="button" className="primary" onClick={() => void retryControlPlane()}>
-                {bridge ? "重新启动本地服务" : "重试连接"}
-              </button>
-              {bridge && (
-                <button
-                  type="button"
-                  className="secondary"
-                  onClick={() => void bridge.app.openLogs()}
-                >
-                  打开日志目录
-                </button>
-              )}
-            </div>
-            {!bridge && <code>pnpm --filter @agent-in-box/control-plane dev</code>}
-          </section>
-        ) : connection.state === "loading" ? (
-          <section className="panel loading-panel" aria-live="polite">
-            <span className="spinner" aria-hidden="true" />
-            <div>
-              <h2>正在连接本地服务</h2>
-              <p className="muted">
-                {desktopStatus?.controlPlane.message ??
-                  "正在检查控制平面健康状态、首次启动配置和存储目录。"}
+                ) : (
+                  <>
+                    <code className="command">pnpm --filter @agent-in-box/control-plane start</code>
+                    <button
+                      type="button"
+                      className="primary"
+                      onClick={() => void retryControlPlane()}
+                    >
+                      我已重启，重新连接
+                    </button>
+                  </>
+                )}
+                {bridge && (
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => void bridge.app.openLogs()}
+                  >
+                    打开日志目录
+                  </button>
+                )}
+              </div>
+              <p className="muted small">
+                重启后如果仍停留在本页，请检查控制平面日志；旧数据目录会保留，不会自动删除。
               </p>
-            </div>
-          </section>
-        ) : onboarding && runtime && online ? (
-          onboarding.required ? (
-            <OnboardingWizard
-              initialState={onboarding}
-              bridge={bridge}
-              onCompleted={(result) => void completed(result)}
-            />
-          ) : view === "notifications" ? (
-            <NotificationCenter state={notifications} onNavigate={navigate} />
+            </section>
+          ) : connection.state === "offline" ? (
+            <section className="notice offline-panel" role="alert">
+              <strong>无法连接本地控制平面。</strong>
+              <span>{connection.message}</span>
+              {desktopStatus?.controlPlane.message && (
+                <span>{desktopStatus.controlPlane.message}</span>
+              )}
+              <div className="action-row">
+                <button type="button" className="primary" onClick={() => void retryControlPlane()}>
+                  {bridge ? "重新启动本地服务" : "重试连接"}
+                </button>
+                {bridge && (
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => void bridge.app.openLogs()}
+                  >
+                    打开日志目录
+                  </button>
+                )}
+              </div>
+              {!bridge && <code>pnpm --filter @agent-in-box/control-plane dev</code>}
+            </section>
+          ) : connection.state === "loading" ? (
+            <section className="panel loading-panel" aria-live="polite">
+              <span className="spinner" aria-hidden="true" />
+              <div>
+                <h2>正在连接本地服务</h2>
+                <p className="muted">
+                  {desktopStatus?.controlPlane.message ??
+                    "正在检查控制平面健康状态、首次启动配置和存储目录。"}
+                </p>
+              </div>
+            </section>
+          ) : onboarding && runtime && online ? (
+            onboarding.required ? (
+              <OnboardingWizard
+                initialState={onboarding}
+                bridge={bridge}
+                onCompleted={(result) => void completed(result)}
+              />
+            ) : view === "notifications" ? (
+              <NotificationCenter state={notifications} onNavigate={navigate} />
+            ) : selectedWorker ? (
+              <section className="panel worker-main" aria-labelledby="worker-main-title">
+                <div className="panel-heading">
+                  <div>
+                    <p className="eyebrow">WORKER SESSION</p>
+                    <h2 id="worker-main-title">Worker {selectedWorker.workerId.slice(0, 8)}</h2>
+                  </div>
+                  <div className="action-row">
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() => {
+                        setObserverTab("vm");
+                        setObserverOpen(true);
+                      }}
+                    >
+                      观察 VM
+                    </button>
+                    <button type="button" className="secondary" onClick={selectRouter}>
+                      返回主会话
+                    </button>
+                  </div>
+                </div>
+                <WorkerConversation
+                  workerId={selectedWorker.workerId}
+                  revision={workspaceRevision}
+                  onChanged={onWorkspaceChanged}
+                />
+              </section>
+            ) : (
+              <Dashboard
+                view={view}
+                onboarding={onboarding}
+                runtime={runtime}
+                health={online}
+                bridge={bridge}
+                authInfo={authInfo}
+                controlPlaneState={desktopStatus?.controlPlane.state ?? "running"}
+                onNavigate={navigate}
+                onChanged={async () => {
+                  await refresh(true);
+                  setWorkspaceRevision((value) => value + 1);
+                }}
+                onRestartRequired={restartRequired}
+                onOpenWorker={openWorkerFromBoard}
+                initialProjectId={selectedProjectId}
+              />
+            )
           ) : (
-            <Dashboard
-              view={view}
-              onboarding={onboarding}
-              runtime={runtime}
-              health={online}
-              bridge={bridge}
-              authInfo={authInfo}
-              controlPlaneState={desktopStatus?.controlPlane.state ?? "running"}
-              onNavigate={navigate}
-              onChanged={async () => {
-                await refresh(true);
-              }}
-              onRestartRequired={restartRequired}
-            />
-          )
-        ) : (
-          <section className="panel loading-panel" aria-live="polite">
-            <span className="spinner" aria-hidden="true" />
-            <div>
-              <h2>正在读取本地配置</h2>
-              <p className="muted">控制平面已连接，正在加载首次启动状态。</p>
-            </div>
-          </section>
-        )}
-      </main>
+            <section className="panel loading-panel" aria-live="polite">
+              <span className="spinner" aria-hidden="true" />
+              <div>
+                <h2>正在读取本地配置</h2>
+                <p className="muted">控制平面已连接，正在加载首次启动状态。</p>
+              </div>
+            </section>
+          )}
+        </main>
 
-      <footer className="footer">
-        <span>所有密钥只保存在系统安全存储中，不写入普通配置、日志或 VM。</span>
-        <span>
-          {online && view !== "notifications"
-            ? `控制平面启动于 ${formatDate(online.startedAt)}`
-            : "本页面不连接模型。"}
-        </span>
-      </footer>
+        <footer className="footer">
+          <span>所有密钥只保存在系统安全存储中，不写入普通配置、日志或 VM。</span>
+          <span>
+            {online && view !== "notifications"
+              ? `控制平面启动于 ${formatDate(online.startedAt)}`
+              : "本页面不连接模型。"}
+          </span>
+        </footer>
+      </div>
+      {workspaceVisible && (
+        <ObserverSidebar
+          open={observerOpen}
+          tab={observerTab}
+          workerId={selectedWorker?.workerId ?? null}
+          preferredVmId={selectedWorker?.vmId ?? null}
+          revision={workspaceRevision}
+          onTabChange={setObserverTab}
+          onClose={() => setObserverOpen(false)}
+          onChanged={onWorkspaceChanged}
+        />
+      )}
     </div>
   );
 }

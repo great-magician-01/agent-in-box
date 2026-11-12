@@ -1,0 +1,100 @@
+name: Release runtime assets
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  qemu-windows:
+    name: QEMU Windows toolchain
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+      - name: Package QEMU
+        shell: pwsh
+        run: ./scripts/package-qemu-windows.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qemu-windows
+          path: |
+            release/qemu/qemu-windows-x64.tar.gz
+            release/qemu/qemu-windows-x64.tar.gz.sha256
+            release/qemu/qemu-windows-x64.json
+          if-no-files-found: error
+
+  guest-runtime:
+    name: Linux guest runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:packages
+      - name: Package guest runtime
+        run: node scripts/package-guest-runtime.mjs
+      - name: Archive guest runtime
+        run: |
+          tar -czf release/guest-runtime-linux-amd64.tar.gz \
+            -C release/guest-runtime/linux-amd64 .
+          sha256sum release/guest-runtime-linux-amd64.tar.gz \
+            > release/guest-runtime-linux-amd64.tar.gz.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: guest-runtime
+          path: |
+            release/guest-runtime-linux-amd64.tar.gz
+            release/guest-runtime-linux-amd64.tar.gz.sha256
+            release/guest-runtime/linux-amd64/manifest.json
+          if-no-files-found: error
+
+  publish:
+    name: Publish runtime asset manifest
+    needs: [qemu-windows, guest-runtime]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: runtime-assets
+      - name: Build runtime-assets.json
+        run: |
+          node - <<'NODE'
+          const fs = require("node:fs");
+          const qemu = JSON.parse(fs.readFileSync("runtime-assets/qemu-windows-x64.json", "utf8"));
+          const guest = JSON.parse(fs.readFileSync("runtime-assets/manifest.json", "utf8"));
+          fs.writeFileSync(
+            "runtime-assets/runtime-assets.json",
+            `${JSON.stringify({ schemaVersion: 1, qemu: { "windows-x64": qemu }, guestRuntime: guest }, null, 2)}\n`,
+          );
+          NODE
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            runtime-assets/qemu-windows-x64.tar.gz
+            runtime-assets/qemu-windows-x64.tar.gz.sha256
+            runtime-assets/qemu-windows-x64.json
+            runtime-assets/guest-runtime-linux-amd64.tar.gz
+            runtime-assets/guest-runtime-linux-amd64.tar.gz.sha256
+            runtime-assets/runtime-assets.json
+          fail_on_unmatched_files: true

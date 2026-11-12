@@ -22,6 +22,8 @@ import { chooseDirectory, savePreferences } from "./desktop";
 import { VmManager, type ConsoleRequest } from "./VmManager";
 import { WorkManager, type WorkView } from "./WorkManager";
 import { BotManager } from "./BotManager";
+import { ModelSettings } from "./ModelSettings";
+import { VmRuntimeSettings } from "./VmRuntimeSettings";
 import {
   CONTROL_PLANE_STATE_LABELS,
   DATA_ROOT_SOURCE_LABELS,
@@ -49,6 +51,8 @@ interface DashboardProps {
   onNavigate(view: string): void;
   onChanged(): Promise<void>;
   onRestartRequired(request: RestartRequest): void;
+  onOpenWorker?(projectId: string, workerId: string): void;
+  initialProjectId?: string | null;
 }
 
 export function Dashboard({
@@ -62,6 +66,8 @@ export function Dashboard({
   onNavigate,
   onChanged,
   onRestartRequired,
+  onOpenWorker,
+  initialProjectId,
 }: DashboardProps): React.JSX.Element {
   const [host, setHost] = useState<HostInspectionReport | null>(null);
   const [storage, setStorage] = useState<StorageReport | null>(null);
@@ -539,6 +545,8 @@ export function Dashboard({
       {workView && (
         <WorkManager
           view={workView}
+          {...(onOpenWorker ? { onOpenWorker } : {})}
+          {...(initialProjectId ? { focusProjectId: initialProjectId } : {})}
           onOpenVmConsole={(vmId) => {
             setConsoleRequest((current) => ({ vmId, nonce: (current?.nonce ?? 0) + 1 }));
             onNavigate("vms");
@@ -546,6 +554,9 @@ export function Dashboard({
         />
       )}
 
+      {view === "overview" && <VmRuntimeSettings bridge={bridge} />}
+      {view === "settings" && <ModelSettings bridge={bridge} />}
+      {view === "settings" && <VmRuntimeSettings bridge={bridge} />}
       {view === "settings" && <BotManager bridge={bridge} />}
 
       {view === "vms" && (

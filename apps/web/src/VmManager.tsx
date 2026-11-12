@@ -90,6 +90,11 @@ export function VmManager({
   const [memoryInput, setMemoryInput] = useState("4");
   const [diskInput, setDiskInput] = useState("20");
   const [seedInput, setSeedInput] = useState("");
+  const [quickStart, setQuickStart] = useState<{
+    stage: "idle" | "image" | "create" | "start" | "provision" | "ready" | "failed";
+    message: string;
+    vmId: string | null;
+  } | null>(null);
 
   const mountedRef = useRef(true);
   const inFlightRef = useRef(false);
@@ -471,7 +476,9 @@ export function VmManager({
       }
       const info = await api.openVmConsole(id);
       if (!mountedRef.current) {
-        await api.releaseVmLease(id, info.lease.id).catch(() => undefined);
+        if (info.lease) {
+          await api.releaseVmLease(id, info.lease.id).catch(() => undefined);
+        }
         return;
       }
       setConsoles((current) => ({ ...current, [id]: info }));
@@ -638,6 +645,113 @@ export function VmManager({
     if (disk === null || disk < 32) setDiskInput("64");
   }
 
+  async function quickCreateLinuxVm(): Promise<void> {
+    const image = (catalog?.items ?? []).find(
+      (item) => item.osFamily === "linux" && item.provisioningProfile,
+    );
+    if (!image) {
+      setQuickStart({
+        stage: "failed",
+        message: "默认 Manifest 中没有带 cloud-init provisioning profile 的 Linux 镜像。",
+        vmId: null,
+      });
+      return;
+    }
+    setFeedback(null);
+    let activeVmId: string | null = null;
+    try {
+      let readyImage = image;
+      if (readyImage.status !== "available") {
+        setQuickStart({
+          stage: "image",
+          message: "正在下载并校验 Ubuntu 官方镜像…",
+          vmId: null,
+        });
+        await api.downloadImage(readyImage.id);
+        readyImage = await waitForImageAvailable(readyImage.id);
+      }
+      setQuickStart({
+        stage: "create",
+        message: "正在创建 qcow2 覆盖盘并写入初始化配置…",
+        vmId: null,
+      });
+      const created = await api.createVm({
+        name: `Linux 工作 VM ${new Date().toLocaleDateString("zh-CN")}`,
+        imageId: readyImage.id,
+        cpuCount: 4,
+        memoryGb: 8,
+        diskGb: 40,
+        provisioning: "auto",
+      });
+      if (!mountedRef.current) return;
+      replaceVm(created);
+      activeVmId = created.vm.id;
+      setQuickStart({
+        stage: "start",
+        message: "正在启动 VM；首次启动会安装桌面、Guest Agent 与 Worker…",
+        vmId: created.vm.id,
+      });
+      let view = await api.startVm(created.vm.id);
+      if (!mountedRef.current) return;
+      replaceVm(view);
+      const deadline = Date.now() + 45 * 60_000;
+      while (Date.now() < deadline) {
+        view = await api.vm(created.vm.id);
+        if (!mountedRef.current) return;
+        replaceVm(view);
+        const provisioning = view.vm.provisioning;
+        if (provisioning.state === "ready") {
+          setQuickStart({
+            stage: "ready",
+            message: "桌面、Guest Agent 与 Worker 已就绪。下一步可创建项目并绑定 VM。",
+            vmId: created.vm.id,
+          });
+          setFeedback({
+            kind: "ok",
+            text: `「${view.vm.name}」已完成初始化，可以打开只读观察或绑定项目。`,
+          });
+          void load(true);
+          return;
+        }
+        if (provisioning.state === "failed") {
+          throw new Error(provisioning.message ?? "Guest 初始化失败");
+        }
+        setQuickStart({
+          stage: "provision",
+          message: provisioning.message ?? "正在等待 Guest 完成桌面、Guest Agent 与 Worker 安装…",
+          vmId: created.vm.id,
+        });
+        await sleep(2000);
+      }
+      throw new Error("Guest 初始化超过 45 分钟，请检查 VM 控制台和 Guest 日志");
+    } catch (error) {
+      if (mountedRef.current) {
+        setQuickStart({
+          stage: "failed",
+          message: errorMessage(error),
+          vmId: activeVmId,
+        });
+      }
+      void load(true);
+    }
+  }
+
+  async function waitForImageAvailable(imageId: string): Promise<ImageRecord> {
+    const deadline = Date.now() + 30 * 60_000;
+    while (Date.now() < deadline) {
+      const next = await api.images();
+      if (mountedRef.current) setCatalog(next);
+      const found = next.items.find((item) => item.id === imageId);
+      if (!found) throw new Error("镜像记录在下载后消失");
+      if (found.status === "available") return found;
+      if (found.status === "failed") {
+        throw new Error(found.errorMessage ?? "镜像下载或校验失败");
+      }
+      await sleep(2000);
+    }
+    throw new Error("镜像下载超过 30 分钟，请检查网络或镜像源");
+  }
+
   async function createVm(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (!canCreate || cpuCount === null || memoryGb === null || diskGb === null) {
@@ -697,8 +811,8 @@ export function VmManager({
         <div>
           <h2 id="vm-section-title">虚拟机与镜像</h2>
           <p className="muted small">
-            镜像需下载并校验为 Available 后才能创建 Linux
-            VM。创建不会自动启动，停止后仍保留磁盘、配置与项目绑定。
+            可以一键下载 Ubuntu 官方镜像并创建已初始化桌面、Guest Agent 与 Worker 的 Linux
+            VM；也可以手动下载镜像、创建 VM 后再启动。
           </p>
         </div>
         <div className="vm-toolbar">
@@ -723,6 +837,56 @@ export function VmManager({
           </button>
         </div>
       </div>
+
+      <section className="quick-start-card" aria-labelledby="quick-start-title">
+        <div>
+          <p className="eyebrow">ONE-CLICK LINUX WORK VM</p>
+          <h3 id="quick-start-title">一键创建 Linux 工作 VM</h3>
+          <p className="muted small">
+            下载并校验 Ubuntu 24.04 官方镜像，创建 4 vCPU / 8 GiB / 40 GiB VM，首次启动通过
+            cloud-init 安装 XFCE 桌面、Guest Agent 与 Pi Worker。首次初始化可能需要 5～20 分钟。
+          </p>
+        </div>
+        <button
+          type="button"
+          className="primary"
+          disabled={
+            quickStart?.stage === "image" ||
+            quickStart?.stage === "create" ||
+            quickStart?.stage === "start" ||
+            quickStart?.stage === "provision"
+          }
+          onClick={() => void quickCreateLinuxVm()}
+        >
+          {quickStart && !["ready", "failed"].includes(quickStart.stage)
+            ? "正在初始化…"
+            : "下载并创建可用 VM"}
+        </button>
+        {quickStart && (
+          <div className={`quick-start-status ${quickStart.stage}`} role="status">
+            <strong>
+              {quickStart.stage === "ready"
+                ? "已就绪"
+                : quickStart.stage === "failed"
+                  ? "初始化失败"
+                  : "进行中"}
+            </strong>
+            <span>{quickStart.message}</span>
+            {quickStart.vmId && (
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => {
+                  const view = (vms?.items ?? []).find((item) => item.vm.id === quickStart.vmId);
+                  if (view) void openConsole(view);
+                }}
+              >
+                打开控制台
+              </button>
+            )}
+          </div>
+        )}
+      </section>
 
       <div aria-live="polite">
         {loading && catalog === null && vms === null && (
@@ -1274,6 +1438,18 @@ export function VmManager({
                         : "未知（Supervisor 不可用）"}
                     </dd>
                   </div>
+                  {view.vm.provisioning.state !== "none" && (
+                    <div>
+                      <dt>初始化</dt>
+                      <dd>
+                        {view.vm.provisioning.state === "ready"
+                          ? "Desktop / Agent / Worker 已就绪"
+                          : view.vm.provisioning.state === "failed"
+                            ? `失败：${view.vm.provisioning.message ?? "未知错误"}`
+                            : (view.vm.provisioning.message ?? "初始化中")}
+                      </dd>
+                    </div>
+                  )}
                   <div>
                     <dt>存储根目录</dt>
                     <dd>
@@ -1622,7 +1798,7 @@ export function VmManager({
 
                 {consoleInfo && (
                   <VmConsole
-                    key={consoleInfo.lease.id}
+                    key={consoleInfo.lease?.id ?? `${view.vm.id}-view-only`}
                     session={consoleInfo}
                     vmName={view.vm.name}
                     onClose={() =>
@@ -1713,4 +1889,8 @@ function errorMessage(error: unknown): string {
     return error.message;
   }
   return error instanceof Error ? error.message : String(error);
+}
+
+function sleep(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }

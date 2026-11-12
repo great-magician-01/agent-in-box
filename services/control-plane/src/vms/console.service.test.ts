@@ -81,6 +81,8 @@ describe("ConsoleService", () => {
 
   it("uses one-time tickets and enforces the human Lease on every RFB input", async () => {
     const session = await consoles.openSession(ctx.vmId);
+    expect(session.viewOnly).toBe(false);
+    expect(session.lease).not.toBeNull();
     const url = `ws://127.0.0.1:${httpPort}${session.webSocketUrl}`;
     const socket = new WebSocket(url);
     await once(socket, "open");
@@ -97,12 +99,35 @@ describe("ConsoleService", () => {
     await waitFor(() => upstreamData.length === update.length + key.length);
     expect(upstreamData).toEqual(Buffer.concat([update, key]));
 
-    await leases.release(ctx.vmId, session.lease.id);
+    await leases.release(ctx.vmId, session.lease!.id);
     const closed = once(socket, "close");
     socket.send(Buffer.from([5, 1, 0, 100, 0, 200]), { binary: true });
     const [code] = (await closed) as [number];
     expect(code).toBe(1008);
     expect(upstreamData.length).toBe(update.length + key.length);
+  });
+
+  it("opens a passive view-only session without a Lease and drops all input", async () => {
+    const session = await consoles.openSession(ctx.vmId, { viewOnly: true });
+    expect(session.viewOnly).toBe(true);
+    expect(session.lease).toBeNull();
+    expect((await leases.control(ctx.vmId)).state).toBe("idle");
+
+    const socket = new WebSocket(`ws://127.0.0.1:${httpPort}${session.webSocketUrl}`);
+    await once(socket, "open");
+    const [firstFrame] = (await once(socket, "message")) as [Buffer];
+    expect(firstFrame.subarray(0, 12).toString()).toBe("RFB 003.008\n");
+
+    const update = Buffer.from([3, 1, 0, 0, 0, 0, 0, 100, 0, 100]);
+    const key = Buffer.from([4, 1, 0, 0, 0, 0, 0, 65]);
+    const pointer = Buffer.from([5, 1, 0, 100, 0, 200]);
+    socket.send(Buffer.concat([update, key, pointer]), { binary: true });
+    await waitFor(() => upstreamData.length === update.length);
+    // Only the framebuffer update request reaches QEMU; keyboard and pointer
+    // events are discarded server-side.
+    expect(upstreamData).toEqual(update);
+    expect((await leases.control(ctx.vmId)).state).toBe("idle");
+    socket.close();
   });
 
   it("does not let early input bypass the Lease when ServerInit is split", async () => {
@@ -113,7 +138,7 @@ describe("ConsoleService", () => {
     await once(socket, "message"); // Only the 12-byte RFB version has arrived.
     const closed = once(socket, "close");
     socket.send(Buffer.from([4, 1, 0, 0, 0, 0, 0, 65]), { binary: true });
-    await leases.release(ctx.vmId, session.lease.id);
+    await leases.release(ctx.vmId, session.lease!.id);
     const [code] = (await closed) as [number];
     expect(code).toBe(1008);
     expect(upstreamData).toHaveLength(0);

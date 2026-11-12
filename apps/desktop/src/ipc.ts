@@ -9,6 +9,7 @@ import type {
   DesktopPreferences,
   DesktopPreferencesPatch,
   DesktopUpdateStatus,
+  VmRuntimeStatus,
 } from "@agent-in-box/protocol";
 import type { ControlPlaneSupervisor } from "./control-plane-supervisor";
 import type { CredentialStore } from "./credential-store";
@@ -24,6 +25,13 @@ export interface DesktopUpdateActions {
   rollback(): Promise<void>;
 }
 
+export interface DesktopVmActions {
+  status(): Promise<VmRuntimeStatus>;
+  installQemu(): Promise<VmRuntimeStatus>;
+  setQemuPath(value: string | null): Promise<VmRuntimeStatus>;
+  restartSupervisor(): Promise<VmRuntimeStatus>;
+}
+
 export interface DesktopIpcDependencies {
   supervisor: ControlPlaneSupervisor;
   credentialStore: CredentialStore;
@@ -33,6 +41,7 @@ export interface DesktopIpcDependencies {
   getPreferences(): DesktopPreferences;
   setPreferences(patch: DesktopPreferencesPatch): DesktopPreferences;
   updates: DesktopUpdateActions;
+  vm: DesktopVmActions;
   showNotification(request: DesktopNotificationRequest): boolean;
   quit(): void;
   openLogs(): Promise<void>;
@@ -103,6 +112,28 @@ export function registerDesktopIpc(dependencies: DesktopIpcDependencies): Deskto
     dependencies.logger.info("渲染进程请求停止本地控制平面");
     await dependencies.supervisor.stop();
     return status();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.vmStatus, async (event) => {
+    assertTrustedSender(event);
+    return dependencies.vm.status();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.vmInstallQemu, async (event) => {
+    assertTrustedSender(event);
+    dependencies.logger.info("渲染进程请求安装托管 QEMU");
+    return dependencies.vm.installQemu();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.vmSetQemuPath, async (event, value: string | null) => {
+    assertTrustedSender(event);
+    return dependencies.vm.setQemuPath(value);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.vmRestartSupervisor, async (event) => {
+    assertTrustedSender(event);
+    dependencies.logger.info("渲染进程请求重启 VM Supervisor");
+    return dependencies.vm.restartSupervisor();
   });
 
   ipcMain.handle(IPC_CHANNELS.quit, (event) => {

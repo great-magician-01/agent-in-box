@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { PersistenceModule } from "../persistence/persistence.module";
+import { SettingsModule } from "../settings/settings.module";
 import { HostCredentialProvider } from "./credential-provider";
 import { ModelBrokerService } from "./model-broker.service";
 import { ModelController } from "./model.controller";
@@ -8,7 +9,7 @@ import { ModelTokenService } from "./model-token.service";
 import { MODEL_CREDENTIAL_PROVIDER } from "./tokens";
 
 @Module({
-  imports: [PersistenceModule],
+  imports: [PersistenceModule, SettingsModule],
   controllers: [ModelController],
   providers: [
     ModelProviderService,

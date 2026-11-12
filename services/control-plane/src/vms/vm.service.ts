@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto";
-import { lstat } from "node:fs/promises";
+import { randomBytes, randomUUID } from "node:crypto";
+import { lstat, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Inject, Injectable, Optional } from "@nestjs/common";
 import type {
@@ -33,9 +33,14 @@ import {
   maxIsoTimestamp,
 } from "../resources/resource-policy";
 import { directoryStats } from "../storage/fs-utils";
+import { ProvisioningService } from "../provisioning/provisioning.service";
 import { SupervisorClient } from "./supervisor.client";
 
 const GIB = 1024 * 1024 * 1024;
+
+async function writeToken(file: string): Promise<void> {
+  await writeFile(file, randomBytes(32).toString("base64url"), { mode: 0o600, flag: "wx" });
+}
 const ACTIVE_TASK_STATUSES = [
   "created",
   "waiting_resources",
@@ -65,6 +70,7 @@ export class VmService {
     @Optional() @Inject(VM_SERVICE_OPTIONS) options: VmServiceOptions = {},
     @Optional() private readonly tasks?: TaskService,
     @Optional() private readonly resources?: ResourceManagerService,
+    @Optional() private readonly provisioning?: ProvisioningService,
   ) {
     this.guestFetch = options.guestFetchImpl ?? fetch;
     this.guestTimeoutMs = options.guestTimeoutMs ?? 1000;
@@ -128,6 +134,13 @@ export class VmService {
     if (typeof input.imageId !== "string" || !input.imageId) {
       throw new PersistenceError("validation_failed", "必须选择一个镜像");
     }
+    if (
+      input.provisioning !== undefined &&
+      input.provisioning !== "auto" &&
+      input.provisioning !== "none"
+    ) {
+      throw new PersistenceError("validation_failed", "provisioning 必须是 auto 或 none");
+    }
     const image = await this.images.get(input.imageId);
     if (image.status !== "available" || !image.localPath || !image.verifiedAt) {
       throw new PersistenceError("conflict", "只有校验通过的 Available 镜像可以创建 VM");
@@ -155,12 +168,36 @@ export class VmService {
     }
 
     const id = randomUUID();
+    const storageRoot = path.join(this.database.layout.vms, id);
+    const profile = image.provisioningProfile;
+    const autoProvision =
+      !seedImagePath &&
+      input.provisioning !== "none" &&
+      profile === "linux-desktop-worker" &&
+      image.osFamily === "linux";
+    let provisioningUrl: string | undefined;
+    if (autoProvision) {
+      if (!profile || !this.provisioning?.availableFor(profile)) {
+        throw new PersistenceError(
+          "unavailable",
+          this.provisioning?.unavailableMessage() ??
+            "Cloud-init provisioning 不可用；请先打包 Guest Runtime 资产",
+        );
+      }
+      await mkdir(storageRoot, { recursive: true, mode: 0o700 });
+      await Promise.all([
+        writeToken(path.join(storageRoot, "guest-agent.token")),
+        writeToken(path.join(storageRoot, "worker-rpc.token")),
+      ]);
+      provisioningUrl = this.provisioning.contextFor(id).url;
+    }
     const runtime = await this.supervisor.create({
       id,
       name,
       osFamily: image.osFamily,
       baseImagePath: image.localPath,
       seedImagePath,
+      ...(provisioningUrl ? { provisioningUrl } : {}),
       cpuCount: input.cpuCount,
       memoryMb: input.memoryGb * 1024,
       diskSizeGb: input.diskGb,
@@ -182,13 +219,19 @@ export class VmService {
         cpu_count: input.cpuCount,
         memory_bytes: input.memoryGb * GIB,
         disk_bytes: input.diskGb * GIB,
-        storage_root: path.join(this.database.layout.vms, id),
+        storage_root: storageRoot,
         power_state: "stopped",
         guest_health: "unknown",
         created_at: now,
         last_started_at: null,
+        provisioning_state: provisioningUrl ? "waiting" : "none",
+        provisioning_message: provisioningUrl
+          ? "VM 已创建；首次启动时由 cloud-init 安装桌面与 Worker"
+          : null,
+        provisioning_started_at: null,
       })
       .execute();
+    if (provisioningUrl) await this.provisioning?.markStarting(id);
     return this.view(id, runtime, await this.resourceReport());
   }
 

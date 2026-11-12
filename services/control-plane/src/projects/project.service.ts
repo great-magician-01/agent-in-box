@@ -628,7 +628,7 @@ function normalizeDescription(value: unknown): string {
 }
 
 function normalizeWorkspace(value: unknown): { defaultGuestWorkspacePath: string } {
-  if (value === undefined) return { defaultGuestWorkspacePath: "/home/worker/workspace" };
+  if (value === undefined) return { defaultGuestWorkspacePath: "/home/aib-worker/workspace" };
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     throw new PersistenceError("validation_failed", "workspaceConfig 必须是对象");
   }

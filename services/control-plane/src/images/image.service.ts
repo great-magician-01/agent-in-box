@@ -75,6 +75,13 @@ function normalizeArtifact(value: unknown, field: string): ImageArtifactManifest
   };
 }
 
+function normalizeProvisioningProfile(value: unknown, imageId: string): string {
+  if (typeof value !== "string" || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(value)) {
+    throw new PersistenceError("validation_failed", `镜像 ${imageId} 的 provisioning profile 无效`);
+  }
+  return value;
+}
+
 function normalizeManifest(value: unknown): ImageManifest {
   if (typeof value !== "object" || value === null) {
     throw new PersistenceError("validation_failed", "镜像 Manifest 必须是 JSON 对象");
@@ -117,6 +124,9 @@ function normalizeManifest(value: unknown): ImageManifest {
       architecture: input.architecture,
       version: requiredText(input.version, `images.${id}.version`),
       ...(input.seed ? { seed: normalizeArtifact(input.seed, `images.${id}.seed`) } : {}),
+      ...(input.provisioning !== undefined
+        ? { provisioning: normalizeProvisioningProfile(input.provisioning, id) }
+        : {}),
     };
   });
   const ids = images.map((image) => image.id);
@@ -232,6 +242,7 @@ export class ImageService implements OnModuleInit, OnModuleDestroy {
             updated_at: now,
             seed_local_path: null,
             manifest_json: encoded,
+            provisioning_profile: entry.provisioning ?? null,
           })
           .execute();
       }

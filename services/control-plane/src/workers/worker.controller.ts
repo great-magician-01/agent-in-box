@@ -4,6 +4,7 @@ import type {
   WorkerArchiveBlockers,
   WorkerArchiveRecord,
   WorkerCreateRequest,
+  WorkerModelSwitchRequest,
   WorkerPromptRequest,
   WorkerResumeRequest,
   WorkerResumeResult,
@@ -87,6 +88,14 @@ export class WorkerController {
   @Post(":id/archive")
   archive(@Param("id") id: string): Promise<WorkerView> {
     return this.workers.archive(id);
+  }
+
+  @Post(":id/switch-model")
+  switchModel(
+    @Param("id") id: string,
+    @Body() input: WorkerModelSwitchRequest,
+  ): Promise<WorkerView> {
+    return this.workers.switchModel(id, input);
   }
 
   @Post(":id/resume")

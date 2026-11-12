@@ -52,7 +52,10 @@ type VmSpec struct {
 	Name           string `json:"name"`
 	BaseImagePath  string `json:"baseImagePath"`
 	SeedImagePath  string `json:"seedImagePath"`
-	CPUCount       int    `json:"cpuCount"`
+	// ProvisioningURL enables QEMU's NoCloud-net datasource through SMBIOS for
+	// Linux cloud images that do not ship a prebuilt seed image.
+	ProvisioningURL string `json:"provisioningUrl,omitempty"`
+	CPUCount        int    `json:"cpuCount"`
 	MemoryMB       int    `json:"memoryMb"`
 	DiskSizeGB     int    `json:"diskSizeGb"`
 	Desktop        bool   `json:"desktop"`

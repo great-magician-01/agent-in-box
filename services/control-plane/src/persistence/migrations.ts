@@ -1612,6 +1612,30 @@ const migrations: Record<string, MigrationDefinition> = {
       await db.schema.alterTable("projects").dropColumn("agent_config_json").execute();
     },
   },
+  "013_cloud_init_provisioning": {
+    async up(db: Kysely<DatabaseSchema>): Promise<void> {
+      await db.schema.alterTable("images").addColumn("provisioning_profile", "text").execute();
+      await db.schema
+        .alterTable("vm_instances")
+        .addColumn("provisioning_state", "text", (column) => column.notNull().defaultTo("none"))
+        .execute();
+      await db.schema
+        .alterTable("vm_instances")
+        .addColumn("provisioning_message", "text")
+        .execute();
+      await db.schema
+        .alterTable("vm_instances")
+        .addColumn("provisioning_started_at", "text")
+        .execute();
+    },
+
+    async down(db: Kysely<DatabaseSchema>): Promise<void> {
+      await db.schema.alterTable("images").dropColumn("provisioning_profile").execute();
+      await db.schema.alterTable("vm_instances").dropColumn("provisioning_started_at").execute();
+      await db.schema.alterTable("vm_instances").dropColumn("provisioning_message").execute();
+      await db.schema.alterTable("vm_instances").dropColumn("provisioning_state").execute();
+    },
+  },
 };
 
 /** Migration ids in the order the runner applies them. */

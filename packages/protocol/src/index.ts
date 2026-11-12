@@ -92,6 +92,15 @@ export interface ImageRecord {
   errorMessage: string | null;
   updatedAt: IsoTimestamp;
   seedLocalPath: string | null;
+  provisioningProfile: string | null;
+}
+
+export type VmProvisioningState = "none" | "waiting" | "installing" | "ready" | "failed";
+
+export interface VmProvisioningRecord {
+  state: VmProvisioningState;
+  message: string | null;
+  startedAt: IsoTimestamp | null;
 }
 
 export interface VmInstanceRecord {
@@ -107,6 +116,7 @@ export interface VmInstanceRecord {
   guestHealth: GuestHealthState;
   createdAt: IsoTimestamp;
   lastStartedAt: IsoTimestamp | null;
+  provisioning: VmProvisioningRecord;
 }
 
 export interface ProjectWorkspaceConfig {
@@ -887,6 +897,25 @@ export interface DesktopAppStatus {
   arch: string;
 }
 
+export type DesktopVmRuntimeState = "unavailable" | "stopped" | "starting" | "running" | "error";
+export type QemuToolchainState = "missing" | "managed" | "custom" | "system" | "invalid";
+
+export interface QemuToolchainStatus {
+  state: QemuToolchainState;
+  path: string | null;
+  version: string | null;
+  message: string | null;
+  managedRoot: string | null;
+}
+
+export interface VmRuntimeStatus {
+  state: DesktopVmRuntimeState;
+  pid: number | null;
+  message: string | null;
+  lastError: string | null;
+  qemu: QemuToolchainStatus;
+}
+
 export interface DesktopCredentialProvider {
   providerId: string;
   updatedAt: IsoTimestamp;
@@ -924,6 +953,12 @@ export interface DesktopBridge {
     onNavigate(listener: (view: string) => void): () => void;
     quit(): Promise<void>;
     openLogs(): Promise<void>;
+  };
+  vm: {
+    status(): Promise<VmRuntimeStatus>;
+    installQemu(): Promise<VmRuntimeStatus>;
+    setQemuPath(path: string | null): Promise<VmRuntimeStatus>;
+    restartSupervisor(): Promise<VmRuntimeStatus>;
   };
   dialog: {
     chooseDirectory(input?: { title?: string; defaultPath?: string }): Promise<string | null>;
@@ -970,6 +1005,8 @@ export interface ImageManifestEntry extends ImageArtifactManifest {
   architecture: "amd64" | "arm64";
   version: string;
   seed?: ImageArtifactManifest;
+  /** Built-in cloud-init provisioning profile; never inferred from model input. */
+  provisioning?: string;
 }
 
 export interface ImageManifest {
@@ -1020,6 +1057,11 @@ export interface VmCreateRequest {
    * It is never generated from model input.
    */
   seedImagePath?: string;
+  /**
+   * "auto" enables the image's built-in cloud-init provisioning profile.
+   * "none" forces a plain image even when the profile is advertised.
+   */
+  provisioning?: "auto" | "none";
 }
 
 export interface VmProjectReference {
@@ -1276,7 +1318,9 @@ export interface VmConsoleSession {
   vmId: Id;
   /** Relative loopback WebSocket URL containing a short-lived, one-time ticket. */
   webSocketUrl: string;
-  lease: ExecutionLeaseView;
+  /** Null for a passive view-only session; interactive sessions hold a human lease. */
+  lease: ExecutionLeaseView | null;
+  viewOnly: boolean;
   ticketExpiresAt: IsoTimestamp;
 }
 
@@ -1730,6 +1774,8 @@ export interface WorkerCreateRequest {
   model?: string;
   /** Create a fresh Worker from a searchable archive summary instead of reusing a session. */
   restoreArchiveId?: Id;
+  /** Skip reuse of an existing Worker in the same conversation (used by model switching). */
+  forceNew?: boolean;
 }
 
 export type WorkerRestoreMode = "native" | "summary";
@@ -1976,12 +2022,23 @@ export interface RouterView {
   status: RouterStatus;
   providerId: string | null;
   modelId: string | null;
+  /** Effective selection for the next Router session. */
+  selectedProviderId: string | null;
+  selectedModelId: string | null;
+  selectionSource: ModelSelectionSource;
+  /** True when AGENT_IN_BOX_ROUTER_PROVIDER/MODEL overrides settings. */
+  selectionLockedByEnv: boolean;
   engineVersion: string | null;
   sessionVersion: string | null;
   lastError: string | null;
   lastActiveAt: IsoTimestamp;
   tools: RouterToolDefinition[];
   messageCount: number;
+}
+
+export interface RouterConfigUpdate {
+  providerId: string;
+  model: string;
 }
 
 export interface RouterSendRequest {
@@ -2221,6 +2278,35 @@ export interface ModelProviderUpsert {
   credentialProviderId: string;
   models: ModelDefinition[];
   enabled?: boolean;
+}
+
+export interface ModelSelection {
+  providerId: string;
+  model: string;
+}
+
+export interface ModelSelectionConfig {
+  worker: ModelSelection | null;
+  router: ModelSelection | null;
+}
+
+export type ModelSelectionSource = "env" | "settings" | "default";
+
+export interface ModelConfigurationView {
+  providers: ModelProviderView[];
+  selection: ModelSelectionConfig;
+  /** Router model selection is pinned by AGENT_IN_BOX_ROUTER_PROVIDER/MODEL. */
+  routerLockedByEnv: boolean;
+}
+
+export interface ModelConfigurationUpdate {
+  worker?: ModelSelection | null;
+  router?: ModelSelection | null;
+}
+
+export interface WorkerModelSwitchRequest {
+  providerId: string;
+  model: string;
 }
 
 export interface ModelRequestUsage {

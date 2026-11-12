@@ -144,6 +144,43 @@ func TestBuildQemuArgs(t *testing.T) {
 	}
 }
 
+func TestBuildQemuArgsAddsNoCloudNetProvisioningForLinux(t *testing.T) {
+	metadata := &vmMetadata{
+		Spec: VmSpec{
+			ID:              "vm-provision",
+			BaseImagePath:   "/images/base.qcow2",
+			ProvisioningURL: "http://10.0.2.2:6722/v1/vm-provision/token/",
+			CPUCount:        2,
+			MemoryMB:        4096,
+			Desktop:         true,
+			QMPPort:         14445,
+			SSHHostPort:     10023,
+			VNCDisplay:      1,
+		},
+		State: VmState{DiskPath: "/vms/vm-provision/disk.qcow2"},
+	}
+	qemuArgs, err := buildQemuArgs(metadata, "whpx", "qemu64")
+	if err != nil {
+		t.Fatalf("build args: %v", err)
+	}
+	args := strings.Join(qemuArgs, " ")
+	if !strings.Contains(args, "-smbios type=1,serial=ds=nocloud-net;s=http://10.0.2.2:6722/v1/vm-provision/token/") {
+		t.Fatalf("Linux provisioning args missing NoCloud-net SMBIOS: %s", args)
+	}
+	if !strings.Contains(args, "share=force-shared") {
+		t.Fatalf("VNC args must allow a passive observer: %s", args)
+	}
+
+	metadata.Spec.OsFamily = OsWindows
+	windowsArgs, err := buildQemuArgs(metadata, "whpx", "qemu64")
+	if err != nil {
+		t.Fatalf("build windows args: %v", err)
+	}
+	if strings.Contains(strings.Join(windowsArgs, " "), "nocloud-net") {
+		t.Fatalf("Windows args must not contain Linux cloud-init provisioning")
+	}
+}
+
 func TestBuildQemuArgsResolvesUnicodePaths(t *testing.T) {
 	vmDir := filepath.Join("vms", "路径 测试", "vm-1")
 	metadata := &vmMetadata{

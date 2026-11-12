@@ -1,6 +1,7 @@
 import "reflect-metadata";
 import type { NextFunction, Request, Response } from "express";
 import { NestFactory } from "@nestjs/core";
+import { installBodyParsers } from "./http/body-parsers";
 import type { NestExpressApplication } from "@nestjs/platform-express";
 import { controlPlaneConfigFromEnv } from "@agent-in-box/config";
 import { AppModule } from "./app.module";
@@ -19,7 +20,14 @@ async function bootstrap(): Promise<void> {
       `CONTROL_PLANE_HOST=${config.host} 不是回环地址。阶段 11 的本地 Web 只允许本机访问；远程访问必须通过后续单独实现并授权的加密 Relay。`,
     );
   }
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    // The inbox upload route streams the File itself. Nest's global parser
+    // would consume an application/json upload before the controller can read
+    // the request, storing a 0-byte file. Register parsers manually and skip
+    // that one route.
+    bodyParser: false,
+  });
+  installBodyParsers(app);
 
   // No CORS: Web and Electron always use the same origin. A malicious page on
   // another local port therefore cannot read responses or send custom headers.

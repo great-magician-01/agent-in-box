@@ -84,9 +84,12 @@ func main() {
 		Handler:           supervisor,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      120 * time.Second,
-		IdleTimeout:       60 * time.Second,
-		MaxHeaderBytes:    16 << 10,
+		// Snapshot create/restore has a 5 minute provider budget. The server must
+		// wait longer than that so it can return the real result instead of closing
+		// the connection while qemu-img is still running.
+		WriteTimeout:   330 * time.Second,
+		IdleTimeout:    60 * time.Second,
+		MaxHeaderBytes: 16 << 10,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

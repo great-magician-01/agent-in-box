@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { lstat, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { Inject, Injectable, Optional } from "@nestjs/common";
+import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import type {
   GuestHealthState,
   ResourceReport,
@@ -61,6 +61,7 @@ export interface VmServiceOptions {
 export class VmService {
   private readonly guestFetch: typeof fetch;
   private readonly guestTimeoutMs: number;
+  private readonly logger = new Logger(VmService.name);
 
   constructor(
     private readonly database: DatabaseService,
@@ -327,8 +328,12 @@ export class VmService {
     if (runtime.powerState !== "stopped") {
       throw new PersistenceError("conflict", "删除 VM 前必须完全停止（stopped）VM");
     }
-    await this.supervisor.delete(id);
     const now = nowIso();
+    // Delete the database rows first. Foreign-key restrictions make this the
+    // authoritative dependency check, so a concurrent bind/task rolls the
+    // transaction back while the supervisor directory is still intact. Only
+    // after the commit do we remove the disk; a cleanup failure leaves an
+    // orphan directory instead of a live row pointing at a missing disk.
     await this.db.transaction().execute(async (trx) => {
       await trx.deleteFrom("vm_snapshots").where("vm_id", "=", id).execute();
       await trx.deleteFrom("vm_instances").where("id", "=", id).execute();
@@ -343,6 +348,13 @@ export class VmService {
           last_error: null,
         })
         .execute();
+    });
+    await this.supervisor.delete(id).catch((error: unknown) => {
+      this.logger.warn(
+        `VM ${id} 的数据库记录已删除，但 Supervisor 目录清理失败：${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
     });
     return { deleted: true, vmId: id };
   }

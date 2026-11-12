@@ -1,5 +1,5 @@
 /* eslint-disable react-hooks/set-state-in-effect -- wizard steps load host, storage and credential state on entry */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   AutoStartPolicy,
   CloseBehavior,
@@ -56,6 +56,7 @@ export function OnboardingWizard({
   const [dataRoot, setDataRoot] = useState(initialState.dataRoot);
   const [validation, setValidation] = useState<StorageValidation | null>(null);
   const [validating, setValidating] = useState(false);
+  const validationRequest = useRef(0);
   const [storageError, setStorageError] = useState<string | null>(null);
   const [requestedPath, setRequestedPath] = useState<string | null>(null);
 
@@ -117,20 +118,25 @@ export function OnboardingWizard({
       setStorageError("请先选择存储目录");
       return;
     }
+    const request = ++validationRequest.current;
     setValidating(true);
     setStorageError(null);
     setRequestedPath(path.trim());
     try {
       const result = await api.validateStorage(path.trim());
+      if (validationRequest.current !== request) return;
       setValidation(result);
       if (result.ok) {
         setDataRoot(result.resolvedPath);
       }
     } catch (error) {
+      if (validationRequest.current !== request) return;
       setStorageError(errorMessage(error));
       setValidation(null);
     } finally {
-      setValidating(false);
+      if (validationRequest.current === request) {
+        setValidating(false);
+      }
     }
   }, []);
 
@@ -211,6 +217,8 @@ export function OnboardingWizard({
       defaultPath: dataRoot,
     });
     if (selected) {
+      validationRequest.current += 1;
+      setValidating(false);
       setDataRoot(selected);
       setValidation(null);
       setRequestedPath(null);
@@ -405,6 +413,8 @@ export function OnboardingWizard({
                 <input
                   value={dataRoot}
                   onChange={(event) => {
+                    validationRequest.current += 1;
+                    setValidating(false);
                     setDataRoot(event.target.value);
                     setValidation(null);
                     setRequestedPath(null);

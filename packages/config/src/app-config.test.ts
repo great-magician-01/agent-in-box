@@ -91,6 +91,33 @@ describe("app config persistence", () => {
     });
   });
 
+  it("preserves desktop-only keys across a control-plane rewrite", () => {
+    const directory = temporaryDirectory();
+    const file = path.join(directory, "app-config.json");
+    writeFileSync(
+      file,
+      JSON.stringify({
+        version: 1,
+        dataRoot: path.join(directory, "data"),
+        launchAtLogin: true,
+        autoUpdateCheck: true,
+        updateFeedUrl: "https://updates.example.com/latest.json",
+      }),
+    );
+
+    const config = readAppConfig(file);
+    expect(config.launchAtLogin).toBe(true);
+    expect(config.autoUpdateCheck).toBe(true);
+
+    writeAppConfig(file, { ...config, closeBehavior: "quit" });
+
+    const persisted = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+    expect(persisted.launchAtLogin).toBe(true);
+    expect(persisted.autoUpdateCheck).toBe(true);
+    expect(persisted.updateFeedUrl).toBe("https://updates.example.com/latest.json");
+    expect(persisted.closeBehavior).toBe("quit");
+  });
+
   it("rejects a corrupt config instead of silently losing the data root", () => {
     const directory = temporaryDirectory();
     const file = path.join(directory, "app-config.json");

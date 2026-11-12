@@ -1,5 +1,5 @@
 /* eslint-disable react-hooks/set-state-in-effect -- worker snapshots refresh from server events */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ConversationMessageRecord, WorkerView } from "@agent-in-box/protocol";
 import { api } from "./api";
 
@@ -22,8 +22,10 @@ export function WorkerConversation({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const loadRequest = useRef(0);
 
   const load = useCallback(async (): Promise<void> => {
+    const request = ++loadRequest.current;
     if (!workerId) {
       setWorker(null);
       setMessages([]);
@@ -34,12 +36,22 @@ export function WorkerConversation({
         api.worker(workerId),
         api.workerMessages(workerId),
       ]);
+      if (loadRequest.current !== request) return;
       setWorker(nextWorker);
       setMessages(nextMessages);
       setError(null);
     } catch (cause) {
+      if (loadRequest.current !== request) return;
       setError(errorMessage(cause));
     }
+  }, [workerId]);
+
+  useEffect(() => {
+    // A stale response must never be shown under the newly selected Worker.
+    setWorker(null);
+    setMessages([]);
+    setError(null);
+    setNotice(null);
   }, [workerId]);
 
   useEffect(() => {

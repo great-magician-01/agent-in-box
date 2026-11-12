@@ -178,6 +178,33 @@ describe("ProjectBackupService", () => {
     expect(restoreCalls).toEqual([]);
   });
 
+  it("blocks restore when another project's workspace is nested inside the target", async () => {
+    const catalog = new CatalogRepository(ctx.app.db);
+    const other = await catalog.createProject({ name: "Nested project" });
+    const binding = await ctx.app.db
+      .selectFrom("project_vm_bindings")
+      .select("guest_workspace_path")
+      .where("project_id", "=", ctx.projectId)
+      .where("vm_id", "=", ctx.vmId)
+      .executeTakeFirstOrThrow();
+    await catalog.bindVm({
+      projectId: other.id,
+      vmId: ctx.vmId,
+      guestWorkspacePath: `${binding.guest_workspace_path}/reports`,
+      isPrimary: true,
+    });
+    const backup = await service.create(ctx.projectId, { label: "nested" });
+    const impact = await service.impact(ctx.projectId, backup.id);
+    expect(impact.blocked).toBe(true);
+    expect(impact.conflicts.some((conflict) => conflict.reason === "shared_workspace_path")).toBe(
+      true,
+    );
+    await expect(
+      service.restore(ctx.projectId, backup.id, { confirm: true }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    expect(restoreCalls).toEqual([]);
+  });
+
   it("requires a running VM and no active worker before backing up", async () => {
     powerState = "stopped";
     await expect(service.create(ctx.projectId)).rejects.toMatchObject({ code: "conflict" });

@@ -2,6 +2,7 @@ package vmprovider
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -303,5 +304,48 @@ func TestQemuProviderCreateSnapshotAndDelete(t *testing.T) {
 		if !strings.Contains(string(logData), expected) {
 			t.Fatalf("qemu-img log missing %q:\n%s", expected, logData)
 		}
+	}
+}
+
+func TestUsedVmResourcesSeparatesPortsAndLegacyVncSentinel(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "vm-1")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	metadata := vmMetadata{
+		Spec: VmSpec{
+			ID: "vm-1", Name: "Legacy", BaseImagePath: filepath.Join(root, "base.qcow2"),
+			CPUCount: 2, MemoryMB: 2048, DiskSizeGB: 20,
+			QMPPort: 41001, SSHHostPort: 41002, GuestHostPort: 41003, WorkerHostPort: 41004,
+			VNCDisplay: 0,
+		},
+		State: VmState{ID: "vm-1", PowerState: PowerStopped},
+	}
+	data, err := json.Marshal(metadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, metadataFilename), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	provider, err := NewQemuProvider(QemuConfig{StorageRoot: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	used := provider.usedVmResources()
+	if !used.qmpPorts[41001] || !used.sshPorts[41002] ||
+		!used.guestPorts[41003] || !used.workerPorts[41004] {
+		t.Fatalf("ports not reserved: %+v", used)
+	}
+	if used.vncDisplays[0] {
+		t.Fatal("legacy display 0 must remain the unset sentinel")
+	}
+	display, err := freeVNCDisplay(used.vncDisplays)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if display < 1 {
+		t.Fatalf("new display must not reuse the sentinel, got %d", display)
 	}
 }

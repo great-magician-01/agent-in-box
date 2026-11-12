@@ -44,6 +44,7 @@ import {
   removeDirectoryContents,
 } from "./fs-utils";
 import { StorageError, StorageLockedError } from "./storage-errors";
+import { SupervisorClient } from "../vms/supervisor.client";
 
 const execFileAsync = promisify(execFile);
 const GIB = 1024 * 1024 * 1024;
@@ -164,6 +165,9 @@ export class StorageService {
     @Optional()
     @Inject(STORAGE_OPTIONS)
     private readonly options: StorageServiceOptions = {},
+    @Optional()
+    @Inject(SupervisorClient)
+    private readonly supervisor?: SupervisorClient,
   ) {
     this.platform = options.platform ?? process.platform;
     this.hostname = options.hostname ?? os.hostname();
@@ -360,6 +364,41 @@ export class StorageService {
     writeAppConfig(this.configPath(), { ...config, dataRoot: path.resolve(root) });
   }
 
+  /**
+   * Refuse to copy vms/snapshots while any VM might still be writing them.
+   * Prefer the Supervisor's live view; fall back to persisted state when the
+   * Supervisor is not running yet (for example during first-run onboarding).
+   */
+  private async assertAllVmsStopped(): Promise<void> {
+    let active: Array<{ id: string; name: string }> = [];
+    let checkedLive = false;
+    if (this.supervisor) {
+      try {
+        const states = await this.supervisor.list();
+        active = states
+          .filter((state) => state.powerState !== "stopped")
+          .map((state) => ({ id: state.id, name: state.id }));
+        checkedLive = true;
+      } catch {
+        // Fall through to the database snapshot below.
+      }
+    }
+    if (!checkedLive) {
+      const rows = await this.database.db
+        .selectFrom("vm_instances")
+        .select(["id", "name", "power_state"])
+        .where("power_state", "!=", "stopped")
+        .execute();
+      active = rows.map((row) => ({ id: row.id, name: row.name }));
+    }
+    if (active.length > 0) {
+      throw new StorageError(
+        "conflict",
+        `迁移前必须完全停止所有 VM：${active.map((vm) => vm.name).join("、")}`,
+      );
+    }
+  }
+
   async migrateTo(targetRoot: string): Promise<StorageMigrationResult> {
     if (this.currentSource() === "environment") {
       throw new StorageError("conflict", "数据根目录由 AGENT_IN_BOX_DATA_ROOT 管理，不能执行迁移");
@@ -408,6 +447,7 @@ export class StorageService {
     let configUpdated = false;
 
     try {
+      await this.assertAllVmsStopped();
       await this.prepareMigrationMarker(toLayout.root, fromRoot, startedAt);
       await this.insertAudit(audit, "running");
 
@@ -432,6 +472,10 @@ export class StorageService {
         verifiedFiles += copied.verifiedFiles;
         copyWarnings.push(...copied.warnings);
       }
+
+      // A VM may have started while the tree was being copied. Abort before the
+      // config switch so the source root remains authoritative.
+      await this.assertAllVmsStopped();
 
       await this.database.backup(toLayout.database);
       await verifySqliteDatabase(toLayout.database);

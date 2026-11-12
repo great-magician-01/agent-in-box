@@ -85,7 +85,12 @@ export class PiWorkerEngine implements WorkerEngine {
   async startSession(spec: WorkerSessionSpec): Promise<WorkerSessionHandle> {
     this.assertCompatible(spec);
     const session = await this.startPi(spec);
-    return this.registerSession(session, false);
+    try {
+      return this.registerSession(session, false);
+    } catch (error) {
+      await session.process.close().catch(() => undefined);
+      throw error;
+    }
   }
 
   private assertCompatible(spec: WorkerSessionSpec): void {
@@ -197,18 +202,25 @@ export class PiWorkerEngine implements WorkerEngine {
       },
     });
     await process.start();
-    const state = await process.command<PiState>("get_state");
-    const sessionId = state.sessionId ?? workerId;
-    const sessionFile = state.sessionFile ? path.resolve(state.sessionFile) : null;
-    const handle: WorkerSessionHandle = {
-      sessionId,
-      ...(sessionFile ? { archiveRef: sessionFile } : {}),
-      engineVersion: this.engineVersion,
-      sessionVersion: this.sessionVersion,
-    };
-    const session = { process, workerId, sessionFile, closing: false, homeDirectory, ...handle };
-    await this.writeSessionManifest(session, spec ?? resumed?.manifest.spec);
-    return session;
+    try {
+      const state = await process.command<PiState>("get_state");
+      const sessionId = state.sessionId ?? workerId;
+      const sessionFile = state.sessionFile ? path.resolve(state.sessionFile) : null;
+      const handle: WorkerSessionHandle = {
+        sessionId,
+        ...(sessionFile ? { archiveRef: sessionFile } : {}),
+        engineVersion: this.engineVersion,
+        sessionVersion: this.sessionVersion,
+      };
+      const session = { process, workerId, sessionFile, closing: false, homeDirectory, ...handle };
+      await this.writeSessionManifest(session, spec ?? resumed?.manifest.spec);
+      return session;
+    } catch (error) {
+      // The child may already hold model Broker credentials in its environment.
+      // Never leak one orphan Pi process per failed start/retry.
+      await process.close().catch(() => undefined);
+      throw error;
+    }
   }
 
   private async writeModelsConfig(homeDirectory: string, spec: WorkerSessionSpec): Promise<void> {

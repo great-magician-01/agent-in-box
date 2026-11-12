@@ -82,6 +82,32 @@ describe("update manifest", () => {
       parseUpdateManifest(base, { platform: "darwin", arch: "arm64", currentVersion: "0.1.0" }),
     ).toThrow(/darwin/);
   });
+
+  it("rejects a version that escapes the installer directory", () => {
+    const base = {
+      version: "0.2.0",
+      files: [
+        {
+          platform: "win32",
+          arch: "x64",
+          url: "https://example.com/a.exe",
+          sha256: "a".repeat(64),
+        },
+      ],
+    };
+    expect(() =>
+      parseUpdateManifest(
+        { ...base, version: "0.2.0-../../../../Startup/evil" },
+        { platform: "win32", arch: "x64", currentVersion: "0.1.0" },
+      ),
+    ).toThrow(/安全的语义化版本号/);
+    expect(() =>
+      parseUpdateManifest(
+        { ...base, version: "0.2.0-rc.1+build.5" },
+        { platform: "win32", arch: "x64", currentVersion: "0.1.0" },
+      ),
+    ).not.toThrow();
+  });
 });
 
 describe("UpdateManager", () => {

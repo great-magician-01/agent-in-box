@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { Inject, Injectable } from "@nestjs/common";
 import type { Kysely } from "kysely";
 import type {
@@ -17,6 +17,12 @@ import { WorkerRuntimeService } from "../workers/worker-runtime.service";
 
 export interface RouterToolContext {
   conversationId: string;
+  /**
+   * Stable id supplied by Pi for one model tool call. It lets a retried call
+   * reuse the same task while a later, identical objective gets a new task.
+   * Omitted for direct/internal callers; those get a fresh key per invocation.
+   */
+  toolCallId?: string;
 }
 
 type RouterToolHandler = (
@@ -423,7 +429,15 @@ export class RouterToolService {
         const idempotencyKey =
           optionalString(args, "idempotencyKey") ??
           `router:${context.conversationId}:${sha256(
-            JSON.stringify({ projectId, vmId, objective, priority, dependsOn, parentTaskId }),
+            JSON.stringify({
+              call: context.toolCallId ?? randomUUID(),
+              projectId,
+              vmId,
+              objective,
+              priority,
+              dependsOn,
+              parentTaskId,
+            }),
           )}`;
         const result = await this.tasks.create({
           projectId,
@@ -476,7 +490,13 @@ export class RouterToolService {
           priority,
           dependsOn,
           idempotencyKey: `router:${context.conversationId}:assign:${sha256(
-            JSON.stringify({ workerId: worker.id, objective, priority, dependsOn }),
+            JSON.stringify({
+              call: context.toolCallId ?? randomUUID(),
+              workerId: worker.id,
+              objective,
+              priority,
+              dependsOn,
+            }),
           )}`,
         });
         return {

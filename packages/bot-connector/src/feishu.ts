@@ -43,6 +43,7 @@ import {
   parseJsonObject,
   type HttpClient,
   type HttpRequest,
+  type HttpResponse,
 } from "./http";
 
 const FEISHU_DEFAULT_DOMAIN = "https://open.feishu.cn";
@@ -53,6 +54,8 @@ const FEISHU_MESSAGE_EVENT = "im.message.receive_v1";
 
 export interface AccessTokenProvider {
   getToken(signal?: AbortSignal): Promise<string>;
+  /** Drop a cached token after the platform rejects it as invalid/expired. */
+  invalidate?(): void;
 }
 
 /** Exchanges app credentials for tenant_access_token and caches it. */
@@ -366,31 +369,44 @@ export class OfficialFeishuConnector implements BotConnector {
     if (message.attachments && message.attachments.length > 0) {
       throw new Error("feishu attachments are not supported by the phase 0.5 adapter skeleton");
     }
-    const token = await this.tokenProvider.getToken();
-    const request: HttpRequest = {
+    const body = JSON.stringify({
+      receive_id: message.conversationId,
+      msg_type: "text",
+      content: JSON.stringify({ text: message.text }),
+    });
+
+    let token = await this.tokenProvider.getToken();
+    let response = await this.postMessage(token, body);
+    let parsed = parseJsonObject(response.body);
+    if (response.status === 401 || (asNumber(parsed?.code) ?? -1) === 99991663) {
+      // The cached tenant token was rejected. Drop it and retry once so an
+      // expired credential affects one reply instead of every reply for 2h.
+      this.tokenProvider.invalidate?.();
+      token = await this.tokenProvider.getToken();
+      response = await this.postMessage(token, body);
+      parsed = parseJsonObject(response.body);
+    }
+    if (response.status < 200 || response.status >= 300) {
+      throw new Error(
+        `feishu message send failed (HTTP ${response.status}, code ${asNumber(parsed?.code) ?? -1})`,
+      );
+    }
+    const code = asNumber(parsed?.code) ?? -1;
+    if (code !== 0) {
+      throw new Error(`feishu message send failed (code ${code})`);
+    }
+  }
+
+  private postMessage(token: string, body: string): Promise<HttpResponse> {
+    return this.httpClient({
       url: joinUrl(this.domain, "/open-apis/im/v1/messages?receive_id_type=chat_id"),
       method: "POST",
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json; charset=utf-8",
       },
-      body: JSON.stringify({
-        receive_id: message.conversationId,
-        msg_type: "text",
-        content: JSON.stringify({ text: message.text }),
-      }),
-    };
-    const response = await this.httpClient(request);
-    const body = parseJsonObject(response.body);
-    if (response.status < 200 || response.status >= 300) {
-      throw new Error(
-        `feishu message send failed (HTTP ${response.status}, code ${asNumber(body?.code) ?? -1})`,
-      );
-    }
-    const code = asNumber(body?.code) ?? -1;
-    if (code !== 0) {
-      throw new Error(`feishu message send failed (code ${code})`);
-    }
+      body,
+    });
   }
 
   private markConnected(): void {

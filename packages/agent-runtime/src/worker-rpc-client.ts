@@ -8,6 +8,8 @@ import {
   type WorkerSessionSpec,
 } from "./index";
 
+const WORKER_RPC_LONG_TIMEOUT_MS = 180_000;
+
 export interface WorkerRpcClientOptions {
   baseUrl: string;
   token?: string;
@@ -80,7 +82,7 @@ export class WorkerRpcClient {
   }
 
   startSession(spec: WorkerSessionSpec): Promise<WorkerSessionView> {
-    return this.request("POST", "/v1/sessions", { spec });
+    return this.request("POST", "/v1/sessions", { spec }, [], WORKER_RPC_LONG_TIMEOUT_MS);
   }
 
   session(sessionId: string): Promise<WorkerSessionView> {
@@ -112,14 +114,26 @@ export class WorkerRpcClient {
   }
 
   archive(sessionId: string): Promise<{ archiveRef: string; summary: string }> {
-    return this.request("POST", `/v1/sessions/${encodeURIComponent(sessionId)}/archive`, {});
+    return this.request(
+      "POST",
+      `/v1/sessions/${encodeURIComponent(sessionId)}/archive`,
+      {},
+      [],
+      WORKER_RPC_LONG_TIMEOUT_MS,
+    );
   }
 
   resume(
     archiveRef: string,
     spec: WorkerSessionSpec,
   ): Promise<WorkerSessionView & { mode: "native" | "summary" }> {
-    return this.request("POST", "/v1/sessions/resume", { archiveRef, spec });
+    return this.request(
+      "POST",
+      "/v1/sessions/resume",
+      { archiveRef, spec },
+      [],
+      WORKER_RPC_LONG_TIMEOUT_MS,
+    );
   }
 
   subscribe(sessionId: string, listener: (event: WorkerEngineEvent) => void): () => void {
@@ -198,6 +212,7 @@ export class WorkerRpcClient {
     route: string,
     body?: unknown,
     acceptStatuses: readonly number[] = [],
+    timeoutMs: number = this.timeoutMs,
   ): Promise<T> {
     const token = await this.token();
     let response: Response;
@@ -211,7 +226,7 @@ export class WorkerRpcClient {
         },
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
         redirect: "error",
-        signal: AbortSignal.timeout(this.timeoutMs),
+        signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (error) {
       throw new WorkerRpcError(

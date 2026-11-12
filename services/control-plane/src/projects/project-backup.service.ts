@@ -16,7 +16,7 @@ import {
   type RestoreProjectBackupRequest,
   type VmProjectReference,
 } from "@agent-in-box/protocol";
-import { guestPathsEqual } from "@agent-in-box/domain";
+import { guestPathEqualsOrWithin, guestPathsEqual } from "@agent-in-box/domain";
 import { NotFoundError, PersistenceError } from "../persistence/errors";
 import { DatabaseService } from "../persistence/database.service";
 import { OutboxRepository } from "../persistence/repositories/outbox-repository";
@@ -309,8 +309,10 @@ export class ProjectBackupService {
         .where("project_vm_bindings.vm_id", "=", binding.vm_id)
         .where("project_vm_bindings.project_id", "!=", projectId)
         .execute();
-      const shared = bindings.filter((candidate) =>
-        guestPathsEqual(candidate.guest_workspace_path, binding.guest_workspace_path),
+      const shared = bindings.filter(
+        (candidate) =>
+          guestPathEqualsOrWithin(candidate.guest_workspace_path, binding.guest_workspace_path) ||
+          guestPathEqualsOrWithin(binding.guest_workspace_path, candidate.guest_workspace_path),
       );
       if (shared.length > 0) {
         conflicts.push({

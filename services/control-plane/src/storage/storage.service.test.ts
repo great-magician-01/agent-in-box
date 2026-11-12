@@ -267,6 +267,40 @@ describe("storage migration", () => {
     },
   );
 
+  it("refuses to copy a data root while a VM is not stopped", async () => {
+    const fixture = await createFixture();
+    const image = await fixture.catalog.createImage({
+      name: "Test image",
+      osFamily: "linux",
+      osVersion: "24.04",
+      architecture: "x64",
+      version: "1",
+      sizeBytes: 1024,
+      checksum: "a".repeat(64),
+    });
+    const vm = await fixture.catalog.createVm({
+      name: "Running VM",
+      imageId: image.id,
+      osFamily: "linux",
+      cpuCount: 2,
+      memoryBytes: 2 * 1024 ** 3,
+      diskBytes: 10 * 1024 ** 3,
+      storageRoot: path.join(fixture.root, "vms", "vm-running"),
+    });
+    await fixture.app.db
+      .updateTable("vm_instances")
+      .set({ power_state: "running" })
+      .where("id", "=", vm.id)
+      .execute();
+
+    await expect(
+      fixture.service.migrateTo(path.join(fixture.dir, "new-storage")),
+    ).rejects.toMatchObject({
+      code: "conflict",
+      message: expect.stringContaining("Running VM"),
+    });
+  });
+
   it("refuses to migrate when the root is controlled by the environment", async () => {
     const fixture = await createFixture({ source: "environment" });
 

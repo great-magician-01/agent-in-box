@@ -27,6 +27,12 @@ export interface AppConfigFile {
   closeBehavior?: CloseBehavior;
   pendingMigration?: PendingMigrationConfig;
   updatedAt?: string;
+  /**
+   * Desktop-only preferences (launch-at-login, notifications, update feed,
+   * pending/rollback state) share this file. Unknown keys must survive a
+   * control-plane read/write cycle.
+   */
+  [key: string]: unknown;
 }
 
 export type DataRootSource = "environment" | "config" | "default";
@@ -101,18 +107,26 @@ export function readAppConfig(configPath: string): AppConfigFile {
     throw new Error(`Application config must be a JSON object: ${configPath}`);
   }
 
-  const config: AppConfigFile = {
-    version: typeof parsed.version === "number" ? parsed.version : APP_CONFIG_VERSION,
-  };
+  // Start from every persisted key, then normalize/validate the known ones.
+  // The desktop stores additional keys in this same file; rebuilding a filtered
+  // object here made every control-plane write silently delete them.
+  const config = { ...parsed } as AppConfigFile;
+  config.version = typeof parsed.version === "number" ? parsed.version : APP_CONFIG_VERSION;
 
   if (typeof parsed.dataRoot === "string" && parsed.dataRoot.trim() !== "") {
     config.dataRoot = path.resolve(parsed.dataRoot.trim());
+  } else {
+    delete config.dataRoot;
   }
   if (typeof parsed.onboardingCompletedAt === "string") {
     config.onboardingCompletedAt = parsed.onboardingCompletedAt;
+  } else {
+    delete config.onboardingCompletedAt;
   }
   if (parsed.closeBehavior === "keep_running" || parsed.closeBehavior === "quit") {
     config.closeBehavior = parsed.closeBehavior;
+  } else {
+    delete config.closeBehavior;
   }
   if (isRecord(parsed.pendingMigration)) {
     const pending = parsed.pendingMigration;
@@ -126,10 +140,16 @@ export function readAppConfig(configPath: string): AppConfigFile {
         startedAt: pending.startedAt,
         operation: pending.operation,
       };
+    } else {
+      delete config.pendingMigration;
     }
+  } else {
+    delete config.pendingMigration;
   }
   if (typeof parsed.updatedAt === "string") {
     config.updatedAt = parsed.updatedAt;
+  } else {
+    delete config.updatedAt;
   }
 
   return config;

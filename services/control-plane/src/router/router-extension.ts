@@ -33,7 +33,7 @@ export default function registerRouterTools(pi) {
       label: tool.name,
       description: tool.description,
       parameters: schema(tool.parameters),
-      async execute(_id, params, signal) {
+      async execute(id, params, signal) {
         const response = await fetch(
           routerUrl() + "/v1/tools/" + encodeURIComponent(tool.name),
           {
@@ -42,6 +42,7 @@ export default function registerRouterTools(pi) {
               accept: "application/json",
               authorization: "Bearer " + routerToken(),
               "content-type": "application/json; charset=utf-8",
+              "x-agent-in-box-tool-call-id": String(id ?? ""),
             },
             body: JSON.stringify(params ?? {}),
             signal,

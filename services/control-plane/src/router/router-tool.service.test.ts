@@ -134,10 +134,14 @@ describe("RouterToolService", () => {
       }),
     ]);
 
+    const toolCall = {
+      conversationId: harness.routerConversationId,
+      toolCallId: "tool-call-weekly-report",
+    };
     const first = (await harness.tools.execute(
       "create_task",
       { projectId: harness.projectId, objective: "Prepare the weekly report" },
-      { conversationId: harness.routerConversationId },
+      toolCall,
     )) as { created: boolean; task: { id: string; vmId: string; status: string } };
     expect(first.created).toBe(true);
     expect(first.task.vmId).toBe(harness.vmId);
@@ -148,7 +152,7 @@ describe("RouterToolService", () => {
     const repeat = (await harness.tools.execute(
       "create_task",
       { projectId: harness.projectId, objective: "Prepare the weekly report" },
-      { conversationId: harness.routerConversationId },
+      toolCall,
     )) as { created: boolean; task: { id: string } };
     expect(repeat.created).toBe(false);
     expect(repeat.task.id).toBe(first.task.id);
@@ -159,6 +163,24 @@ describe("RouterToolService", () => {
       { conversationId: harness.routerConversationId },
     )) as { countsByStatus: Record<string, number> };
     expect(board.countsByStatus.queued).toBe(1);
+  });
+
+  it("creates a new task when the same objective is requested in a later tool call", async () => {
+    const harness = await createHarness();
+    const objective = "Prepare the weekly report";
+    const first = (await harness.tools.execute(
+      "create_task",
+      { projectId: harness.projectId, objective },
+      { conversationId: harness.routerConversationId, toolCallId: "tool-call-1" },
+    )) as { created: boolean; task: { id: string } };
+    const second = (await harness.tools.execute(
+      "create_task",
+      { projectId: harness.projectId, objective },
+      { conversationId: harness.routerConversationId, toolCallId: "tool-call-2" },
+    )) as { created: boolean; task: { id: string } };
+    expect(first.created).toBe(true);
+    expect(second.created).toBe(true);
+    expect(second.task.id).not.toBe(first.task.id);
   });
 
   it("routes cross-project tasks to each project's primary VM", async () => {

@@ -125,7 +125,16 @@ export class RouterToolBrokerService implements OnModuleInit, OnModuleDestroy {
     let args: Record<string, unknown> = {};
     try {
       args = await this.body(request);
-      const result = await this.tools.execute(toolName, args, { conversationId });
+      const rawToolCallId = request.headers["x-agent-in-box-tool-call-id"];
+      const toolCallId = Array.isArray(rawToolCallId) ? rawToolCallId[0] : rawToolCallId;
+      const result = await this.tools.execute(toolName, args, {
+        conversationId,
+        ...(typeof toolCallId === "string" &&
+        toolCallId !== "" &&
+        /^[A-Za-z0-9._:-]{1,200}$/.test(toolCallId)
+          ? { toolCallId }
+          : {}),
+      });
       await this.audit({
         id,
         conversationId,

@@ -1622,7 +1622,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     const stale = await this.db
       .selectFrom("workers")
       .selectAll()
-      .where("status", "in", ["starting", "running", "idle"])
+      .where("status", "in", ["starting", "running", "idle", "archiving", "restoring"])
       .execute();
     for (const row of stale) {
       await this.workers.updateRuntime(row.id, {
@@ -1652,6 +1652,32 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
         if (lease && lease.taskId === taskId) await this.leases.release(row.vm_id, lease.id);
         await this.cua.finishExecution(taskId, "failed");
       }
+    }
+
+    // A crash can happen after claimNext marked the task running but before
+    // current_task_id was persisted (or after finishTurn cleared it before the
+    // block/failure write). Reconcile every running task, not only rows reached
+    // through a stale Worker's current_task_id, or the VM queue stays blocked
+    // by an orphan forever.
+    const orphaned = await this.db
+      .selectFrom("tasks")
+      .select(["id", "vm_id"])
+      .where("status", "in", ["running", "waiting_approval"])
+      .execute();
+    for (const task of orphaned) {
+      await this.tasks.recordWorkerEvent(task.id, "worker.runtime_restarted", {
+        taskId: task.id,
+      });
+      await this.tasks.fail(
+        task.id,
+        "worker_runtime_restarted",
+        "控制平面重启导致任务回合中断；不会假定旧桌面动作成功，请重试",
+      );
+      const lease = await this.leaseRepository.getByVm(task.vm_id);
+      if (lease && lease.taskId === task.id) {
+        await this.leases.release(task.vm_id, lease.id);
+      }
+      await this.cua.finishExecution(task.id, "failed");
     }
   }
 

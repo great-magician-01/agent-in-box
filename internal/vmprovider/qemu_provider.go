@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"agent-in-box/internal/qmp"
@@ -44,6 +45,10 @@ type QemuProvider struct {
 	// is the only writer of vm.json, so this is sufficient to prevent concurrent
 	// start/stop/suspend/resume races.
 	locks keyedMutex
+	// createMu serializes cross-VM resource allocation. freePort/freeVNCDisplay
+	// probe the OS and close the listener immediately, so two concurrent creates
+	// would otherwise be able to choose the same port or VNC display.
+	createMu sync.Mutex
 }
 
 func NewQemuProvider(config QemuConfig) (*QemuProvider, error) {
@@ -169,8 +174,80 @@ func freePort() (int, error) {
 	return listener.Addr().(*net.TCPAddr).Port, nil
 }
 
-func freeVNCDisplay() (int, error) {
-	for display := 0; display <= 20; display++ {
+type vmResources struct {
+	qmpPorts    map[int]bool
+	sshPorts    map[int]bool
+	guestPorts  map[int]bool
+	workerPorts map[int]bool
+	vncDisplays map[int]bool
+}
+
+func newVMResources() vmResources {
+	return vmResources{
+		qmpPorts:    map[int]bool{},
+		sshPorts:    map[int]bool{},
+		guestPorts:  map[int]bool{},
+		workerPorts: map[int]bool{},
+		vncDisplays: map[int]bool{},
+	}
+}
+
+// usedVmResources reads the persisted metadata of every VM. Ports and VNC
+// displays must be reserved across VMs, not only checked against the OS:
+// freePort closes its probe listener immediately, and a stopped VM's ports are
+// not bound yet.
+func (p *QemuProvider) usedVmResources() vmResources {
+	used := newVMResources()
+	entries, err := os.ReadDir(p.config.StorageRoot)
+	if err != nil {
+		return used
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		metadata, err := p.load(entry.Name())
+		if err != nil {
+			continue
+		}
+		if metadata.Spec.QMPPort > 0 {
+			used.qmpPorts[metadata.Spec.QMPPort] = true
+		}
+		if metadata.Spec.SSHHostPort > 0 {
+			used.sshPorts[metadata.Spec.SSHHostPort] = true
+		}
+		if metadata.Spec.GuestHostPort > 0 {
+			used.guestPorts[metadata.Spec.GuestHostPort] = true
+		}
+		if metadata.Spec.WorkerHostPort > 0 {
+			used.workerPorts[metadata.Spec.WorkerHostPort] = true
+		}
+		// Display 0 is the legacy "unset" sentinel. New allocations start at 1.
+		if metadata.Spec.VNCDisplay > 0 {
+			used.vncDisplays[metadata.Spec.VNCDisplay] = true
+		}
+	}
+	return used
+}
+
+func allocatePort(used map[int]bool) (int, error) {
+	for attempts := 0; attempts < 100; attempts++ {
+		port, err := freePort()
+		if err != nil {
+			return 0, err
+		}
+		if !used[port] {
+			return port, nil
+		}
+	}
+	return 0, fmt.Errorf("could not allocate an unused loopback port")
+}
+
+func freeVNCDisplay(used map[int]bool) (int, error) {
+	for display := 1; display <= 30; display++ {
+		if used[display] {
+			continue
+		}
 		address := net.JoinHostPort("127.0.0.1", strconv.Itoa(5900+display))
 		listener, err := net.Listen("tcp", address)
 		if err == nil {
@@ -178,7 +255,7 @@ func freeVNCDisplay() (int, error) {
 			return display, nil
 		}
 	}
-	return 0, fmt.Errorf("no free loopback VNC display in 0..20")
+	return 0, fmt.Errorf("no free loopback VNC display in 1..30")
 }
 
 func (p *QemuProvider) CreateVm(ctx context.Context, spec VmSpec) (VmState, error) {
@@ -187,6 +264,8 @@ func (p *QemuProvider) CreateVm(ctx context.Context, spec VmSpec) (VmState, erro
 	}
 	unlock := p.locks.Lock(spec.ID)
 	defer unlock()
+	p.createMu.Lock()
+	defer p.createMu.Unlock()
 	dir, err := p.vmDir(spec.ID)
 	if err != nil {
 		return VmState{}, err
@@ -198,32 +277,37 @@ func (p *QemuProvider) CreateVm(ctx context.Context, spec VmSpec) (VmState, erro
 		return VmState{}, fmt.Errorf("create vm directory: %w", err)
 	}
 
+	used := p.usedVmResources()
 	if spec.QMPPort == 0 {
-		spec.QMPPort, err = freePort()
+		spec.QMPPort, err = allocatePort(used.qmpPorts)
 		if err != nil {
 			return VmState{}, fmt.Errorf("allocate qmp port: %w", err)
 		}
+		used.qmpPorts[spec.QMPPort] = true
 	}
 	if spec.SSHHostPort == 0 {
-		spec.SSHHostPort, err = freePort()
+		spec.SSHHostPort, err = allocatePort(used.sshPorts)
 		if err != nil {
 			return VmState{}, fmt.Errorf("allocate ssh port: %w", err)
 		}
+		used.sshPorts[spec.SSHHostPort] = true
 	}
 	if spec.GuestHostPort == 0 {
-		spec.GuestHostPort, err = freePort()
+		spec.GuestHostPort, err = allocatePort(used.guestPorts)
 		if err != nil {
 			return VmState{}, fmt.Errorf("allocate guest agent port: %w", err)
 		}
+		used.guestPorts[spec.GuestHostPort] = true
 	}
 	if spec.WorkerHostPort == 0 {
-		spec.WorkerHostPort, err = freePort()
+		spec.WorkerHostPort, err = allocatePort(used.workerPorts)
 		if err != nil {
 			return VmState{}, fmt.Errorf("allocate worker rpc port: %w", err)
 		}
+		used.workerPorts[spec.WorkerHostPort] = true
 	}
 	if spec.VNCDisplay == 0 {
-		spec.VNCDisplay, err = freeVNCDisplay()
+		spec.VNCDisplay, err = freeVNCDisplay(used.vncDisplays)
 		if err != nil {
 			return VmState{}, err
 		}
@@ -423,6 +507,24 @@ func (p *QemuProvider) StartVm(ctx context.Context, vmID string) (VmState, error
 		return VmState{}, fmt.Errorf("%w: existing qemu process %d did not answer", ErrQmpUnavailable, metadata.State.PID)
 	}
 
+	if metadata.Spec.VNCDisplay == 0 {
+		// Legacy metadata used 0 as "auto". Assign a persisted display that no
+		// other VM currently reserves before QEMU binds port 5900.
+		p.createMu.Lock()
+		display, displayErr := freeVNCDisplay(p.usedVmResources().vncDisplays)
+		if displayErr != nil {
+			p.createMu.Unlock()
+			return p.failStart(metadata, displayErr)
+		}
+		metadata.Spec.VNCDisplay = display
+		metadata.State.ConsoleURL = fmt.Sprintf("vnc://127.0.0.1:%d", 5900+display)
+		if err := p.save(metadata); err != nil {
+			p.createMu.Unlock()
+			return p.failStart(metadata, err)
+		}
+		p.createMu.Unlock()
+	}
+
 	arguments, err := buildQemuArgs(metadata, p.config.Accelerator, p.config.CPUModel)
 	if err != nil {
 		return p.failStart(metadata, fmt.Errorf("prepare QEMU paths: %w", err))
@@ -462,11 +564,14 @@ func (p *QemuProvider) StartVm(ctx context.Context, vmID string) (VmState, error
 	metadata.State.PowerState = PowerStarting
 	metadata.State.LastError = ""
 	if err := p.save(metadata); err != nil {
-		return VmState{}, err
+		// Never leave an unpersisted QEMU child running: a later StartVm would
+		// launch a second process on the same overlay, and DeleteVm would treat
+		// the running disk as stoppable.
+		_ = command.Process.Kill()
+		_ = command.Wait()
+		return VmState{}, fmt.Errorf("save vm metadata after starting qemu: %w", err)
 	}
-	if err := command.Process.Release(); err != nil {
-		p.config.Logger.Warn("release qemu process handle", "error", err)
-	}
+	go p.reapQemuProcess(vmID, command.Process.Pid, command)
 
 	deadline := time.Now().Add(45 * time.Second)
 	for time.Now().Before(deadline) {
@@ -494,6 +599,35 @@ func (p *QemuProvider) StartVm(ctx context.Context, vmID string) (VmState, error
 	metadata.State.LastError = ErrQmpUnavailable.Error()
 	_ = p.save(metadata)
 	return metadata.State, ErrQmpUnavailable
+}
+
+// reapQemuProcess waits for the child so a clean guest power-off cannot leave a
+// zombie process whose PID still passes processAlive(). It also persists the
+// exit so a later GetVmState/StartVm does not need to race QMP.
+func (p *QemuProvider) reapQemuProcess(vmID string, pid int, command *exec.Cmd) {
+	waitErr := command.Wait()
+
+	unlock := p.locks.Lock(vmID)
+	defer unlock()
+	metadata, err := p.load(vmID)
+	if err != nil || metadata.State.PID != pid {
+		return
+	}
+	metadata.State.PID = 0
+	metadata.State.GuestHealth = "unknown"
+	if metadata.State.PowerState == PowerStopping || metadata.State.PowerState == PowerStopped {
+		metadata.State.PowerState = PowerStopped
+		metadata.State.LastError = ""
+	} else {
+		metadata.State.PowerState = PowerError
+		metadata.State.LastError = "qemu exited unexpectedly"
+		if waitErr != nil {
+			metadata.State.LastError = fmt.Sprintf("qemu exited: %v", waitErr)
+		}
+	}
+	if saveErr := p.save(metadata); saveErr != nil {
+		p.config.Logger.Warn("persist qemu exit", "vm", vmID, "error", saveErr)
+	}
 }
 
 func (p *QemuProvider) StopVm(ctx context.Context, vmID string, mode string) (VmState, error) {

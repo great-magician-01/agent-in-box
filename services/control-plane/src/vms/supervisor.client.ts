@@ -7,6 +7,11 @@ import { PersistenceError } from "../persistence/errors";
 
 export const SUPERVISOR_OPTIONS = Symbol("AGENT_IN_BOX_SUPERVISOR_OPTIONS");
 
+const SUPERVISOR_REQUEST_TIMEOUT_MS = 100_000;
+// Snapshot create/restore budget is 5 minutes in the supervisor. Leave room for
+// the supervisor to cancel qemu-img itself before the HTTP client disconnects.
+const SUPERVISOR_SNAPSHOT_TIMEOUT_MS = 330_000;
+
 export interface SupervisorOptions {
   baseUrl?: string;
   tokenFile?: string;
@@ -60,7 +65,7 @@ export class SupervisorClient {
       process.env.AGENT_IN_BOX_SUPERVISOR_TOKEN_FILE?.trim() ??
       path.join(database.dataRoot, "supervisor-acl.token");
     this.fetchImpl = options.fetchImpl ?? fetch;
-    this.requestTimeoutMs = options.requestTimeoutMs ?? 100_000;
+    this.requestTimeoutMs = options.requestTimeoutMs ?? SUPERVISOR_REQUEST_TIMEOUT_MS;
   }
 
   list(): Promise<SupervisorVmState[]> {
@@ -101,13 +106,21 @@ export class SupervisorClient {
   }
 
   createSnapshot(id: string, tag: string): Promise<SupervisorVmState> {
-    return this.request("POST", `/api/v1/vms/${encodeURIComponent(id)}/snapshots`, { tag });
+    return this.request(
+      "POST",
+      `/api/v1/vms/${encodeURIComponent(id)}/snapshots`,
+      { tag },
+      SUPERVISOR_SNAPSHOT_TIMEOUT_MS,
+    );
   }
 
   restoreSnapshot(id: string, tag: string): Promise<SupervisorVmState> {
-    return this.request("POST", `/api/v1/vms/${encodeURIComponent(id)}/snapshots/restore`, {
-      tag,
-    });
+    return this.request(
+      "POST",
+      `/api/v1/vms/${encodeURIComponent(id)}/snapshots/restore`,
+      { tag },
+      SUPERVISOR_SNAPSHOT_TIMEOUT_MS,
+    );
   }
 
   delete(id: string): Promise<{ deleted: true }> {
@@ -118,7 +131,12 @@ export class SupervisorClient {
     return this.request("POST", `/api/v1/vms/${encodeURIComponent(id)}/${action}`, body);
   }
 
-  private async request<T>(method: string, route: string, body?: unknown): Promise<T> {
+  private async request<T>(
+    method: string,
+    route: string,
+    body?: unknown,
+    timeoutMs: number = this.requestTimeoutMs,
+  ): Promise<T> {
     let token: string;
     try {
       const info = await lstat(this.tokenFile);
@@ -146,7 +164,7 @@ export class SupervisorClient {
           ...(body !== undefined ? { "content-type": "application/json" } : {}),
         },
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-        signal: AbortSignal.timeout(this.requestTimeoutMs),
+        signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (error) {
       throw new PersistenceError(

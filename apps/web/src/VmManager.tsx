@@ -51,12 +51,15 @@ export interface VmManagerProps {
   host: HostInspectionReport | null;
   hostReserveBytes: number;
   consoleRequest?: ConsoleRequest | null;
+  /** Lets the owner clear the request so a remount cannot replay it. */
+  onConsoleRequestConsumed?(request: ConsoleRequest): void;
 }
 
 export function VmManager({
   host,
   hostReserveBytes,
   consoleRequest,
+  onConsoleRequestConsumed,
 }: VmManagerProps): React.JSX.Element {
   const [catalog, setCatalog] = useState<ImageCatalog | null>(null);
   const [vms, setVms] = useState<VmListResponse | null>(null);
@@ -201,6 +204,7 @@ export function VmManager({
     const view = (vms?.items ?? []).find((item) => item.vm.id === consoleRequest.vmId);
     if (!view) return;
     lastConsoleNonce.current = consoleRequest.nonce;
+    onConsoleRequestConsumed?.(consoleRequest);
     document
       .getElementById(`vm-${view.vm.id}`)
       ?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -216,7 +220,7 @@ export function VmManager({
             : "目标 VM 当前不可用，无法打开实时控制台。",
       });
     }
-  }, [consoleRequest, vms, supervisorAvailable]);
+  }, [consoleRequest, vms, supervisorAvailable, onConsoleRequestConsumed]);
 
   const availableImages = useMemo(
     () => (catalog?.items ?? []).filter((image) => image.status === "available"),

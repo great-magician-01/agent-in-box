@@ -1,5 +1,5 @@
 /* eslint-disable react-hooks/set-state-in-effect -- initial data fetch effects intentionally set loading/result state */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   AutoStartPolicy,
   ControlPlaneState,
@@ -109,6 +109,7 @@ export function Dashboard({
   const [migrationBusy, setMigrationBusy] = useState(false);
   const [migrationError, setMigrationError] = useState<string | null>(null);
   const [consoleRequest, setConsoleRequest] = useState<ConsoleRequest | null>(null);
+  const consoleNonce = useRef(0);
 
   const reload = useCallback(async () => {
     setLoadError(null);
@@ -548,7 +549,8 @@ export function Dashboard({
           {...(onOpenWorker ? { onOpenWorker } : {})}
           {...(initialProjectId ? { focusProjectId: initialProjectId } : {})}
           onOpenVmConsole={(vmId) => {
-            setConsoleRequest((current) => ({ vmId, nonce: (current?.nonce ?? 0) + 1 }));
+            consoleNonce.current += 1;
+            setConsoleRequest({ vmId, nonce: consoleNonce.current });
             onNavigate("vms");
           }}
         />
@@ -563,6 +565,9 @@ export function Dashboard({
         <VmManager
           host={host}
           consoleRequest={consoleRequest}
+          onConsoleRequestConsumed={(request) =>
+            setConsoleRequest((current) => (current?.nonce === request.nonce ? null : current))
+          }
           hostReserveBytes={
             settings?.resourcePolicy.hostReserveBytes ?? onboarding.resourcePolicy.hostReserveBytes
           }

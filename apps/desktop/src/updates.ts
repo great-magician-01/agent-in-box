@@ -10,6 +10,11 @@ import type {
 const MAX_MANIFEST_BYTES = 256 * 1024;
 const MAX_DOWNLOAD_BYTES = 2 * 1024 * 1024 * 1024;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/i;
+// Manifest versions become installer directory names. Keep the whole string
+// path-safe; compareVersions only validates the numeric core before a dash.
+const UPDATE_VERSION_PATTERN =
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+const MAX_VERSION_LENGTH = 120;
 
 export interface UpdateManifestFile {
   platform: "win32" | "darwin" | "linux";
@@ -96,6 +101,12 @@ export function parseUpdateManifest(
   const manifest = raw as Record<string, unknown>;
   if (typeof manifest.version !== "string") {
     throw new Error("更新 Manifest 缺少 version");
+  }
+  if (
+    manifest.version.length > MAX_VERSION_LENGTH ||
+    !UPDATE_VERSION_PATTERN.test(manifest.version)
+  ) {
+    throw new Error("更新 Manifest 的 version 不是安全的语义化版本号");
   }
   compareVersions(manifest.version, input.currentVersion);
   if (!Array.isArray(manifest.files)) {
@@ -245,6 +256,15 @@ export class UpdateManager {
       this.error = "更新安装包超过允许的大小";
       return this.status();
     }
+    if (
+      update.version.length > MAX_VERSION_LENGTH ||
+      !UPDATE_VERSION_PATTERN.test(update.version)
+    ) {
+      this.busy = false;
+      this.state = "error";
+      this.error = "更新版本号不安全，已拒绝创建安装目录";
+      return this.status();
+    }
     const installers = path.join(this.options.directory, "installers", update.version);
     await fs.promises.mkdir(installers, { recursive: true, mode: 0o700 });
     const fileName = safeInstallerName(update.url, update.version);
@@ -344,7 +364,8 @@ function safeInstallerName(url: string, version: string): string {
   if (base && base.length <= 120) {
     return base;
   }
-  return `agent-in-box-${version}${process.platform === "win32" ? ".exe" : ""}`;
+  const safeVersion = version.replace(/[^A-Za-z0-9._+-]/g, "_").slice(0, 80);
+  return `agent-in-box-${safeVersion}${process.platform === "win32" ? ".exe" : ""}`;
 }
 
 /** Files under resources/ that make up the installed app (not user data). */

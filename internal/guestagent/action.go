@@ -116,6 +116,9 @@ func newActionTracker(now func() time.Time) *actionTracker {
 // reserve returns false when the id was already used within the retention
 // window. It always keeps the tracker bounded, even under sustained load.
 func (t *actionTracker) reserve(id string) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
 	now := t.now()
 	for key, seenAt := range t.seen {
 		if now.Sub(seenAt) > t.ttl {

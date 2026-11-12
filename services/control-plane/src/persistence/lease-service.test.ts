@@ -138,10 +138,15 @@ describe("LeaseService", () => {
   });
 
   it("renews a lease while a long input holds the VM input lock", async () => {
+    // Pin both timestamps: acquire and renew can otherwise land in the same
+    // millisecond, leaving the expiry unchanged and making this test flaky.
+    const acquiredAt = new Date();
+    const renewAt = new Date(acquiredAt.getTime() + 1_000);
     const lease = await service.acquire({
       vmId: ctx.vmId,
       owner: "worker",
       taskId: "task-a",
+      now: acquiredAt,
       ttlMs: 30_000,
     });
     let finishInput!: () => void;
@@ -158,7 +163,7 @@ describe("LeaseService", () => {
     await inputStarted;
     try {
       const renewed = await Promise.race([
-        service.renewForVm(ctx.vmId, lease.id, 30_000),
+        service.renewForVm(ctx.vmId, lease.id, 30_000, renewAt),
         new Promise<null>((resolve) => setTimeout(() => resolve(null), 250)),
       ]);
       expect(renewed).not.toBeNull();

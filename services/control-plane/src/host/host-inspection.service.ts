@@ -75,7 +75,7 @@ async function probeWindowsVirtualization(): Promise<VirtualizationProbe> {
         "-Command",
         WINDOWS_VIRTUALIZATION_SCRIPT,
       ],
-      { timeout: 8000, windowsHide: true, maxBuffer: 64 * 1024 },
+      { timeout: 15_000, windowsHide: true, maxBuffer: 64 * 1024 },
     );
     const parsed = parseWindowsVirtualizationOutput(stdout);
     if (parsed.detection === "detected") {

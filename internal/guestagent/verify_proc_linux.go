@@ -25,7 +25,7 @@ func verifyProcess(check VerifyCheck) VerifyCheckResult {
 	}
 	seen := make(map[int]struct{})
 	for _, entry := range entries {
-		if entry.IsDir() {
+		if !entry.IsDir() {
 			continue
 		}
 		pid, parseErr := strconv.Atoi(entry.Name())

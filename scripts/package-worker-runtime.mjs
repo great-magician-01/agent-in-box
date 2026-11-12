@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -11,7 +10,10 @@ const outputDirectory = path.join(repository, "release", "worker-runtime");
 const version = JSON.parse(await readFile(path.join(repository, "package.json"), "utf8")).version;
 const filename = `agent-in-box-worker-${version}.tar.gz`;
 
-const staging = await mkdtemp(path.join(os.tmpdir(), "agent-in-box-worker-package-"));
+await mkdir(outputDirectory, { recursive: true });
+// Stage next to the archive: a relative path between the archive and the
+// staging directory stays colon-free only when both live on the same drive.
+const staging = await mkdtemp(path.join(outputDirectory, ".staging-"));
 try {
   const dist = path.join(staging, "dist");
   await mkdir(dist, { recursive: true });
@@ -49,14 +51,14 @@ try {
     { mode: 0o644 },
   );
 
-  await mkdir(outputDirectory, { recursive: true });
   const archive = path.join(outputDirectory, filename);
   await rm(archive, { force: true });
-  // Use a relative archive name with cwd set to the output directory. Windows
-  // tar interprets a drive-letter prefix such as "F:\..." as a remote host in
-  // the -f argument ("Cannot connect to F: resolve failed").
-  const result = spawnSync("tar", ["-czf", filename, "-C", staging.replace(/\\/g, "/"), "."], {
-    cwd: outputDirectory,
+  // Keep every path argument relative because Windows tar interprets a
+  // drive-letter prefix such as "F:\..." as a remote host ("Cannot connect to
+  // F: resolve failed") when it is passed via -f or -C.
+  const relativeArchive = path.relative(staging, archive).split(path.sep).join("/");
+  const result = spawnSync("tar", ["-czf", relativeArchive, "."], {
+    cwd: staging,
     stdio: "inherit",
   });
   if (result.status !== 0) throw new Error("tar failed to create the Worker runtime archive");

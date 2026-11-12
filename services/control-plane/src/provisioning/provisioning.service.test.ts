@@ -96,7 +96,9 @@ describe("ProvisioningService", () => {
       .executeTakeFirstOrThrow();
     expect(row.provisioning_state).toBe("installing");
     const secretStat = await stat(path.join(ctx.dir, "provisioning.key"));
-    expect(secretStat.mode & 0o077).toBe(0);
+    if (process.platform !== "win32") {
+      expect(secretStat.mode & 0o077).toBe(0);
+    }
   });
 
   it("rejects invalid tokens and does not expose arbitrary paths", async () => {

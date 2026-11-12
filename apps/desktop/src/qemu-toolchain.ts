@@ -161,7 +161,8 @@ export class QemuToolchainManager {
       const staging = await fs.mkdtemp(path.join(this.managedRoot, ".install-"));
       try {
         this.assertSafeArchive(archive);
-        const result = this.spawn("tar", ["-xzf", archive, "-C", staging], {
+        const result = this.spawn("tar", ["-xzf", this.relativeTarPath(staging, archive)], {
+          cwd: staging,
           stdio: "ignore",
           windowsHide: true,
         });
@@ -285,8 +286,13 @@ export class QemuToolchainManager {
     throw new Error("运行时资产重定向次数过多");
   }
 
+  private relativeTarPath(from: string, target: string): string {
+    return path.relative(from, target).split(path.sep).join("/");
+  }
+
   private assertSafeArchive(archive: string): void {
-    const listed = this.spawn("tar", ["-tzf", archive], {
+    const listed = this.spawn("tar", ["-tzf", path.basename(archive)], {
+      cwd: path.dirname(archive),
       encoding: "utf8",
       maxBuffer: 16 * 1024 * 1024,
       windowsHide: true,

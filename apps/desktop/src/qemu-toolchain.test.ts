@@ -73,7 +73,17 @@ describe("QemuToolchainManager", () => {
     const staging = path.join(root, "package");
     await makeBinDirectory(staging);
     const archive = path.join(root, "qemu.tar.gz");
-    const tar = spawnSync("tar", ["-czf", archive, "-C", staging, "."], { stdio: "ignore" });
+    const tar = spawnSync(
+      "tar",
+      [
+        "-czf",
+        path.relative(root, archive).split(path.sep).join("/"),
+        "-C",
+        path.relative(root, staging).split(path.sep).join("/"),
+        ".",
+      ],
+      { cwd: root, stdio: "ignore" },
+    );
     expect(tar.status).toBe(0);
     const bytes = await readFile(archive);
     const sha256 = createHash("sha256").update(bytes).digest("hex");

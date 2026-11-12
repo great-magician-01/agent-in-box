@@ -818,10 +818,19 @@ try {
     `task=${taskId} turn=${turn.status}`,
   );
 
+  // The router reply and the task-created notification are separate outbound
+  // rows delivered by the pump. Drain them before snapshotting so a reply that
+  // is still in flight is not mistaken for duplicate-event handling.
+  await waitFor(async () => (await bots()).pendingOutbound === 0, "bot outbound drain");
   const beforeDuplicate = qq.sends.length;
   qq.sendC2C("qq-user-1", "BOT-CREATE 请创建一个任务", "qq-nl-1");
   await delay(1200);
-  assert.equal(qq.sends.length, beforeDuplicate, "duplicate platform event must not be processed");
+  const duplicateSends = qq.sends.slice(beforeDuplicate);
+  assert.equal(
+    duplicateSends.length,
+    0,
+    `duplicate platform event must not be processed: ${JSON.stringify(duplicateSends)}`,
+  );
   passed("平台重推同一事件 ID 不会重复创建任务或回复");
 
   const beforeCancel = qq.sends.length;

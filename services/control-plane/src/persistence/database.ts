@@ -1,5 +1,12 @@
 import BetterSqlite3 from "better-sqlite3";
-import { Kysely, SqliteDialect } from "kysely";
+import {
+  CompiledQuery,
+  Kysely,
+  SqliteDialect,
+  SqliteDriver,
+  type DatabaseConnection,
+  type SqliteDialectConfig,
+} from "kysely";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { migrateToLatest } from "./migrations";
@@ -7,6 +14,30 @@ import type { DatabaseSchema } from "./schema";
 
 export interface OpenDatabaseOptions {
   filename: string;
+}
+
+// SQLite starts transactions as deferred by default. In WAL mode a deferred
+// transaction that reads before it writes can fail with SQLITE_BUSY_SNAPSHOT
+// when another connection commits in between, and busy_timeout does not help
+// because the snapshot is already stale. Taking the write lock up front with
+// BEGIN IMMEDIATE lets busy_timeout serialize writers instead of aborting.
+class ImmediateSqliteDriver extends SqliteDriver {
+  override async beginTransaction(connection: DatabaseConnection): Promise<void> {
+    await connection.executeQuery(CompiledQuery.raw("begin immediate"));
+  }
+}
+
+class ImmediateSqliteDialect extends SqliteDialect {
+  readonly #config: SqliteDialectConfig;
+
+  constructor(config: SqliteDialectConfig) {
+    super(config);
+    this.#config = config;
+  }
+
+  override createDriver(): SqliteDriver {
+    return new ImmediateSqliteDriver(this.#config);
+  }
 }
 
 export class AppDatabase {
@@ -40,7 +71,7 @@ export class AppDatabase {
     }
 
     const db = new Kysely<DatabaseSchema>({
-      dialect: new SqliteDialect({ database: sqlite }),
+      dialect: new ImmediateSqliteDialect({ database: sqlite }),
     });
 
     return new AppDatabase(sqlite, db, filename);

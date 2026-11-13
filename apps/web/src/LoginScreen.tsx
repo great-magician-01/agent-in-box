@@ -45,7 +45,6 @@ export function LoginScreen({
 
   return (
     <section className="panel login-panel" aria-labelledby="login-title">
-      <p className="eyebrow">LOCAL AUTHENTICATION</p>
       <h2 id="login-title">解锁本地 Web</h2>
       <p className="muted">
         控制平面只监听本机回环地址，但仍然要求本机访问密钥。仅绑定 127.0.0.1

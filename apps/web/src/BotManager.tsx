@@ -308,7 +308,6 @@ export function BotManager({ bridge }: BotManagerProps): React.JSX.Element {
     <section className="panel bot-manager" aria-labelledby="bot-manager-title">
       <div className="panel-heading">
         <div>
-          <p className="eyebrow">LOCAL BOT CONNECTORS</p>
           <h2 id="bot-manager-title">飞书与 QQ 机器人</h2>
         </div>
         <div className="action-row">

@@ -123,7 +123,6 @@ export function WorkerRegistryPanel({
     <section className="panel registry-panel" aria-labelledby="registry-panel-title">
       <div className="panel-heading">
         <div>
-          <p className="eyebrow">ACTIVE ROSTER / ARCHIVE REGISTRY</p>
           <h3 id="registry-panel-title">Worker 注册表与归档</h3>
         </div>
         <span className="muted small">

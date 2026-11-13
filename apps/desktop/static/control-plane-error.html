@@ -10,33 +10,46 @@
     <title>Agent-in-Box · 本地服务未就绪</title>
     <style>
       :root {
-        color-scheme: light;
+        color-scheme: light dark;
         font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
-        background: #f2f1eb;
-        color: #18201c;
+        --bg: #fbfbfc;
+        --surface: #ffffff;
+        --border: #e4e4e8;
+        --text: #19191c;
+        --text-2: #55555c;
+        --muted: #8d8d97;
+        --accent: #19191c;
+        --on-accent: #ffffff;
+        --bad: #b3261e;
+        background: var(--bg);
+        color: var(--text);
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #101012;
+          --surface: #17171a;
+          --border: #28282e;
+          --text: #f2f2f4;
+          --text-2: #c2c2ca;
+          --muted: #8f8f99;
+          --accent: #f2f2f4;
+          --on-accent: #17171a;
+          --bad: #f87171;
+        }
       }
       body {
         margin: 0;
         min-height: 100vh;
         display: grid;
         place-items: center;
-        background:
-          radial-gradient(circle at 15% 5%, rgba(201, 121, 58, 0.14), transparent 32rem), #f2f1eb;
+        background: var(--bg);
       }
       main {
         width: min(560px, calc(100% - 3rem));
         padding: 2.2rem;
-        border: 1px solid rgba(24, 32, 28, 0.12);
-        border-radius: 20px;
-        background: rgba(255, 255, 255, 0.72);
-        box-shadow: 0 24px 60px rgba(43, 47, 39, 0.08);
-      }
-      .eyebrow {
-        margin: 0 0 0.8rem;
-        color: #9a5a2f;
-        font-size: 0.72rem;
-        font-weight: 700;
-        letter-spacing: 0.18em;
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        background: var(--surface);
       }
       h1 {
         margin: 0 0 0.8rem;
@@ -45,18 +58,20 @@
       }
       p {
         margin: 0 0 0.8rem;
-        color: #5d665f;
+        color: var(--text-2);
         line-height: 1.7;
         font-size: 0.92rem;
       }
       .status {
         margin: 1.2rem 0;
         padding: 0.9rem 1rem;
+        border: 1px solid color-mix(in srgb, var(--bad) 25%, transparent);
         border-radius: 12px;
-        background: rgba(163, 64, 50, 0.08);
-        color: #6d2e25;
+        background: color-mix(in srgb, var(--bad) 7%, transparent);
+        color: var(--bad);
         font-size: 0.85rem;
         word-break: break-word;
+        white-space: pre-line;
       }
       .actions {
         display: flex;
@@ -67,7 +82,7 @@
       button {
         appearance: none;
         border: 0;
-        border-radius: 999px;
+        border-radius: 10px;
         padding: 0.72rem 1.2rem;
         font: inherit;
         font-size: 0.85rem;
@@ -75,12 +90,13 @@
         cursor: pointer;
       }
       .primary {
-        background: #2c5e4b;
-        color: white;
+        background: var(--accent);
+        color: var(--on-accent);
       }
       .secondary {
-        background: rgba(24, 32, 28, 0.08);
-        color: #18201c;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        color: var(--text);
       }
       button:disabled {
         opacity: 0.55;
@@ -88,13 +104,12 @@
       }
       code {
         font-size: 0.78rem;
-        color: #6d756e;
+        color: var(--muted);
       }
     </style>
   </head>
   <body>
     <main>
-      <p class="eyebrow">AGENT-IN-BOX · LOCAL SERVICE</p>
       <h1>本地服务还没有就绪</h1>
       <p>
         界面已加载，但本地控制平面未能在预期时间内响应。服务可能在启动、崩溃或端口被占用。你的数据不会因此被删除。

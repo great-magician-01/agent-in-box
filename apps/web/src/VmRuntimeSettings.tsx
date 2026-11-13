@@ -72,7 +72,6 @@ export function VmRuntimeSettings({ bridge }: VmRuntimeSettingsProps): React.JSX
     <section className="panel" aria-labelledby="vm-runtime-title">
       <div className="panel-heading">
         <div>
-          <p className="eyebrow">VM RUNTIME / QEMU</p>
           <h2 id="vm-runtime-title">虚拟机运行组件</h2>
         </div>
         <button type="button" className="secondary" onClick={() => void load()} disabled={busy}>

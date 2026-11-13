@@ -111,7 +111,6 @@ export function ObserverSidebar({
     <aside className="observer-sidebar" aria-label="Agent 观察栏">
       <div className="observer-header">
         <div>
-          <p className="eyebrow">OBSERVER</p>
           <h2>观察</h2>
         </div>
         <button type="button" className="secondary" onClick={onClose}>

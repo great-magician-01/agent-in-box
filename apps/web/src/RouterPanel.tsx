@@ -119,22 +119,16 @@ export function RouterPanel({ revision, onChanged }: RouterPanelProps): React.JS
     <section className="panel router-panel" aria-labelledby="router-panel-title">
       <div className="panel-heading">
         <div>
-          <p className="eyebrow">LOCAL ROUTER / STRUCTURED TOOLS</p>
-          <h2 id="router-panel-title">Router 主会话</h2>
+          <h2 id="router-panel-title">主会话</h2>
         </div>
         <span className={`pill ${view?.status === "failed" ? "warn" : running ? "live" : "ok"}`}>
           {view?.status === "failed" ? "失败" : running ? "处理中" : "空闲"}
         </span>
       </div>
-      <p className="muted small">
-        Router 只拥有项目、任务、Worker、看板和归档工具；没有 VM 输入、Shell 或 Supervisor
-        接口。任务完成后由看板和工作证据判定，Router 不能自行宣告完成。
-      </p>
       {view && (
         <div className="router-meta">
           <span>
-            当前会话 Provider {view.providerId ?? "未配置"} · Model {view.modelId ?? "未配置"} ·{" "}
-            {view.messageCount} 条消息
+            {view.providerId ?? "未配置"} · {view.modelId ?? "未配置"} · {view.messageCount} 条消息
           </span>
           <span className="muted small">
             下次启动：{view.selectedProviderId ?? "未配置"} / {view.selectedModelId ?? "未配置"} ·{" "}

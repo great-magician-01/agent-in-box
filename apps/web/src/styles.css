@@ -1,7 +1,50 @@
 :root {
+  color-scheme: light dark;
   font-family: "Inter", "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
-  color: #18201c;
-  background: #f2f1eb;
+  --bg: #fbfbfc;
+  --surface: #ffffff;
+  --surface-2: #f3f3f5;
+  --surface-3: #eaeaed;
+  --border: #e4e4e8;
+  --border-2: #d2d2d8;
+  --text: #19191c;
+  --text-2: #55555c;
+  --muted: #8d8d97;
+  --accent: #19191c;
+  --on-accent: #ffffff;
+  --ok: #177a47;
+  --warn: #a16207;
+  --bad: #b3261e;
+  --ok-bg: color-mix(in srgb, var(--ok) 9%, transparent);
+  --warn-bg: color-mix(in srgb, var(--warn) 11%, transparent);
+  --bad-bg: color-mix(in srgb, var(--bad) 8%, transparent);
+  --focus: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #101012;
+    --surface: #17171a;
+    --surface-2: #1e1e22;
+    --surface-3: #26262b;
+    --border: #28282e;
+    --border-2: #34343b;
+    --text: #f2f2f4;
+    --text-2: #c2c2ca;
+    --muted: #8f8f99;
+    --accent: #f2f2f4;
+    --on-accent: #17171a;
+    --ok: #4ade80;
+    --warn: #fbbf24;
+    --bad: #f87171;
+  }
+}
+
+/* Design system: monochrome black/white, light default, follows system dark. */
+:root {
+  font-family: "Inter", "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  color: var(--text);
+  background: var(--bg);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
@@ -14,9 +57,7 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  background:
-    radial-gradient(circle at 15% 5%, rgba(201, 121, 58, 0.14), transparent 32rem),
-    radial-gradient(circle at 92% 18%, rgba(44, 94, 75, 0.12), transparent 28rem), #f2f1eb;
+  background: var(--bg);
 }
 
 .shell {
@@ -35,7 +76,7 @@ body {
 
 .eyebrow {
   margin: 0 0 0.8rem;
-  color: #9a5a2f;
+  color: var(--muted);
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.2em;
@@ -52,7 +93,7 @@ h1 {
 .subtitle {
   max-width: 38rem;
   margin: 1.2rem 0 0;
-  color: #5d665f;
+  color: var(--text-2);
   font-size: 1rem;
   line-height: 1.7;
 }
@@ -63,9 +104,9 @@ h1 {
   align-items: center;
   gap: 0.55rem;
   padding: 0.65rem 0.9rem;
-  border: 1px solid rgba(24, 32, 28, 0.12);
+  border: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.55);
+  background: var(--surface);
   font-size: 0.78rem;
   font-weight: 600;
 }
@@ -74,16 +115,16 @@ h1 {
   width: 0.5rem;
   height: 0.5rem;
   border-radius: 50%;
-  background: #a0a69f;
+  background: var(--muted);
 }
 
 .status.online .dot {
-  background: #2f7a56;
-  box-shadow: 0 0 0 4px rgba(47, 122, 86, 0.12);
+  background: var(--ok);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 12%, transparent);
 }
 
 .status.offline .dot {
-  background: #a34032;
+  background: var(--bad);
 }
 
 .notice {
@@ -91,10 +132,10 @@ h1 {
   gap: 0.35rem;
   margin-bottom: 1.25rem;
   padding: 1rem 1.2rem;
-  border: 1px solid rgba(163, 64, 50, 0.24);
+  border: 1px solid color-mix(in srgb, var(--bad) 24%, transparent);
   border-radius: 14px;
-  background: rgba(255, 245, 241, 0.9);
-  color: #6d2e25;
+  background: var(--bad-bg);
+  color: var(--bad);
   font-size: 0.86rem;
 }
 
@@ -102,7 +143,7 @@ h1 {
   width: fit-content;
   padding: 0.25rem 0.45rem;
   border-radius: 6px;
-  background: rgba(163, 64, 50, 0.08);
+  background: color-mix(in srgb, var(--bad) 8%, transparent);
 }
 
 .grid {
@@ -114,10 +155,10 @@ h1 {
 
 .card,
 .panel {
-  border: 1px solid rgba(24, 32, 28, 0.11);
+  border: 1px solid color-mix(in srgb, var(--text) 11%, transparent);
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.6);
-  box-shadow: 0 18px 50px rgba(43, 47, 39, 0.05);
+  background: var(--surface);
+  box-shadow: 0 18px 50px color-mix(in srgb, #000000 5%, transparent);
 }
 
 .card {
@@ -135,21 +176,21 @@ h1 {
 .card p {
   min-height: 3.2rem;
   margin: 0 0 1rem;
-  color: #626b64;
+  color: var(--text-2);
   font-size: 0.86rem;
   line-height: 1.65;
 }
 
 .card.muted {
-  background: rgba(255, 255, 255, 0.32);
+  background: var(--surface);
 }
 
 .tag {
   display: inline-block;
   padding: 0.28rem 0.55rem;
   border-radius: 999px;
-  background: rgba(154, 90, 47, 0.1);
-  color: #8a512c;
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  color: var(--muted);
   font-size: 0.7rem;
   font-weight: 700;
 }
@@ -168,7 +209,7 @@ dl div {
 }
 
 dt {
-  color: #7b837c;
+  color: var(--muted);
 }
 
 dd {
@@ -189,7 +230,7 @@ dd {
 }
 
 .panel-heading span {
-  color: #8b928b;
+  color: var(--muted);
   font-size: 0.72rem;
 }
 
@@ -206,13 +247,13 @@ dd {
   display: flex;
   align-items: flex-start;
   gap: 0.65rem;
-  color: #48514a;
+  color: var(--text-2);
   font-size: 0.84rem;
   line-height: 1.5;
 }
 
 .check {
-  color: #2f7a56;
+  color: var(--ok);
   font-weight: 800;
 }
 
@@ -221,7 +262,7 @@ dd {
   justify-content: space-between;
   gap: 1rem;
   margin-top: 1.5rem;
-  color: #8b928b;
+  color: var(--muted);
   font-size: 0.72rem;
 }
 
@@ -241,8 +282,8 @@ button.secondary {
 }
 
 button.primary {
-  background: #2c5e4b;
-  color: #fff;
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
 button.primary:disabled {
@@ -251,8 +292,8 @@ button.primary:disabled {
 }
 
 button.secondary {
-  background: rgba(24, 32, 28, 0.08);
-  color: #18201c;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--text);
 }
 
 button.secondary:disabled {
@@ -264,7 +305,7 @@ button.link-button {
   padding: 0;
   border: 0;
   background: none;
-  color: #9a5a2f;
+  color: var(--muted);
   font-size: 0.72rem;
   font-weight: 700;
   cursor: pointer;
@@ -280,8 +321,8 @@ button.link-button {
 .badge {
   padding: 0.25rem 0.55rem;
   border-radius: 999px;
-  background: rgba(44, 94, 75, 0.1);
-  color: #2c5e4b;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent);
   font-size: 0.68rem;
   font-weight: 700;
 }
@@ -292,15 +333,15 @@ button.link-button {
   gap: 1rem;
   margin-bottom: 1rem;
   padding: 0.55rem 0.8rem;
-  border: 1px solid rgba(24, 32, 28, 0.09);
+  border: 1px solid color-mix(in srgb, var(--text) 9%, transparent);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.4);
+  background: var(--surface);
   font-size: 0.72rem;
 }
 
 .status.checking .dot {
-  background: #c9793a;
-  box-shadow: 0 0 0 4px rgba(201, 121, 58, 0.12);
+  background: var(--warn);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--warn) 12%, transparent);
 }
 
 .wizard {
@@ -312,10 +353,10 @@ button.link-button {
 
 .wizard-steps,
 .wizard-panel {
-  border: 1px solid rgba(24, 32, 28, 0.11);
+  border: 1px solid color-mix(in srgb, var(--text) 11%, transparent);
   border-radius: 22px;
-  background: rgba(255, 255, 255, 0.62);
-  box-shadow: 0 18px 50px rgba(43, 47, 39, 0.05);
+  background: var(--surface);
+  box-shadow: 0 18px 50px color-mix(in srgb, #000000 5%, transparent);
 }
 
 .wizard-steps {
@@ -339,15 +380,15 @@ button.link-button {
 .wizard-steps li {
   display: flex;
   gap: 0.8rem;
-  color: #7c847d;
+  color: var(--muted);
 }
 
 .wizard-steps li.active {
-  color: #18201c;
+  color: var(--text);
 }
 
 .wizard-steps li.done {
-  color: #2f7a56;
+  color: var(--ok);
 }
 
 .wizard-steps li strong {
@@ -361,19 +402,19 @@ button.link-button {
   width: 1.7rem;
   height: 1.7rem;
   border-radius: 50%;
-  background: rgba(24, 32, 28, 0.08);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
   font-size: 0.72rem;
   font-weight: 800;
 }
 
 .wizard-steps li.active .step-index {
-  background: #c9793a;
-  color: #fff;
+  background: var(--warn);
+  color: var(--on-accent);
 }
 
 .wizard-steps li.done .step-index {
-  background: rgba(47, 122, 86, 0.14);
-  color: #2f7a56;
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+  color: var(--ok);
 }
 
 .wizard-steps small {
@@ -386,8 +427,8 @@ button.link-button {
 .wizard-note {
   margin-top: 1.6rem;
   padding-top: 1rem;
-  border-top: 1px solid rgba(24, 32, 28, 0.08);
-  color: #8b928b;
+  border-top: 1px solid color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--muted);
   font-size: 0.72rem;
   line-height: 1.6;
 }
@@ -407,12 +448,12 @@ button.link-button {
 
 .wizard-heading p {
   margin: 0 0 1.4rem;
-  color: #5d665f;
+  color: var(--text-2);
   font-size: 0.86rem;
 }
 
 .step-count {
-  color: #9a5a2f;
+  color: var(--muted);
   font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.12em;
@@ -432,7 +473,7 @@ button.link-button {
 }
 
 .muted {
-  color: #7b837c;
+  color: var(--muted);
 }
 
 .small {
@@ -451,9 +492,9 @@ button.link-button {
 .field select {
   width: 100%;
   padding: 0.62rem 0.7rem;
-  border: 1px solid rgba(24, 32, 28, 0.16);
+  border: 1px solid color-mix(in srgb, var(--text) 16%, transparent);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.7);
+  background: var(--surface);
   color: inherit;
   font: inherit;
   font-weight: 400;
@@ -461,7 +502,7 @@ button.link-button {
 
 .field input:focus,
 .field select:focus {
-  outline: 2px solid rgba(44, 94, 75, 0.35);
+  outline: 2px solid color-mix(in srgb, var(--accent) 35%, transparent);
   outline-offset: 1px;
 }
 
@@ -493,9 +534,9 @@ legend {
   align-items: flex-start;
   gap: 0.65rem;
   padding: 0.7rem 0.8rem;
-  border: 1px solid rgba(24, 32, 28, 0.1);
+  border: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.4);
+  background: var(--surface);
   font-size: 0.8rem;
   cursor: pointer;
 }
@@ -503,14 +544,14 @@ legend {
 .radio input,
 .toggle input {
   margin-top: 0.2rem;
-  accent-color: #2c5e4b;
+  accent-color: var(--accent);
 }
 
 .radio small,
 .toggle small {
   display: block;
   margin-top: 0.15rem;
-  color: #7b837c;
+  color: var(--muted);
   font-weight: 400;
   line-height: 1.45;
 }
@@ -524,7 +565,7 @@ legend {
 
 .summary-grid dt {
   margin-bottom: 0.15rem;
-  color: #8b928b;
+  color: var(--muted);
   font-size: 0.68rem;
 }
 
@@ -548,16 +589,16 @@ legend {
   align-items: flex-start;
   gap: 0.7rem;
   padding: 0.62rem 0.75rem;
-  border: 1px solid rgba(24, 32, 28, 0.08);
+  border: 1px solid color-mix(in srgb, var(--text) 8%, transparent);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.45);
+  background: var(--surface);
   font-size: 0.78rem;
 }
 
 .host-check small {
   display: block;
   margin-top: 0.15rem;
-  color: #7b837c;
+  color: var(--muted);
   line-height: 1.45;
 }
 
@@ -572,50 +613,50 @@ legend {
 }
 
 .host-check.ok .check-badge {
-  background: rgba(47, 122, 86, 0.12);
-  color: #2f7a56;
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
+  color: var(--ok);
 }
 
 .host-check.warning .check-badge {
-  background: rgba(190, 130, 40, 0.15);
-  color: #8a5b13;
+  background: color-mix(in srgb, var(--warn) 15%, transparent);
+  color: var(--warn);
 }
 
 .host-check.error .check-badge {
-  background: rgba(163, 64, 50, 0.12);
-  color: #a34032;
+  background: color-mix(in srgb, var(--bad) 12%, transparent);
+  color: var(--bad);
 }
 
 .host-check.unknown .check-badge {
-  background: rgba(24, 32, 28, 0.08);
-  color: #626b64;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--text-2);
 }
 
 .validation-box {
   display: grid;
   gap: 0.25rem;
   padding: 0.8rem 0.9rem;
-  border: 1px solid rgba(24, 32, 28, 0.12);
+  border: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
   border-radius: 12px;
   font-size: 0.78rem;
 }
 
 .validation-box.ok {
-  border-color: rgba(47, 122, 86, 0.22);
-  background: rgba(47, 122, 86, 0.06);
+  border-color: color-mix(in srgb, var(--ok) 22%, transparent);
+  background: color-mix(in srgb, var(--ok) 6%, transparent);
 }
 
 .validation-box.bad {
-  border-color: rgba(163, 64, 50, 0.25);
-  background: rgba(163, 64, 50, 0.06);
+  border-color: color-mix(in srgb, var(--bad) 25%, transparent);
+  background: color-mix(in srgb, var(--bad) 6%, transparent);
 }
 
 .error-line {
-  color: #a34032;
+  color: var(--bad);
 }
 
 .warning-line {
-  color: #8a5b13;
+  color: var(--warn);
 }
 
 .layout-preview {
@@ -631,7 +672,7 @@ legend {
 }
 
 .layout-preview span {
-  color: #8b928b;
+  color: var(--muted);
   font-size: 0.62rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -646,9 +687,9 @@ legend {
   display: grid;
   gap: 0.8rem;
   padding: 1rem;
-  border: 1px solid rgba(24, 32, 28, 0.1);
+  border: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.4);
+  background: var(--surface);
 }
 
 .credential-status {
@@ -671,7 +712,7 @@ legend {
   gap: 0.6rem;
   padding: 0.45rem 0.6rem;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.4);
+  background: var(--surface);
 }
 
 .credential-status li span {
@@ -705,21 +746,21 @@ legend {
 .pill {
   padding: 0.2rem 0.55rem;
   border-radius: 999px;
-  background: rgba(24, 32, 28, 0.08);
-  color: #626b64;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--text-2);
   font-size: 0.66rem;
   font-weight: 800;
   white-space: nowrap;
 }
 
 .pill.ok {
-  background: rgba(47, 122, 86, 0.12);
-  color: #2f7a56;
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
+  color: var(--ok);
 }
 
 .pill.warn {
-  background: rgba(190, 130, 40, 0.15);
-  color: #8a5b13;
+  background: color-mix(in srgb, var(--warn) 15%, transparent);
+  color: var(--warn);
 }
 
 .truncate {
@@ -742,22 +783,22 @@ legend {
 .mini-checks li {
   padding: 0.2rem 0.45rem;
   border-radius: 999px;
-  background: rgba(24, 32, 28, 0.06);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
 }
 
 .mini-checks li.ok {
-  background: rgba(47, 122, 86, 0.12);
-  color: #2f7a56;
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
+  color: var(--ok);
 }
 
 .mini-checks li.warning {
-  background: rgba(190, 130, 40, 0.15);
-  color: #8a5b13;
+  background: color-mix(in srgb, var(--warn) 15%, transparent);
+  color: var(--warn);
 }
 
 .mini-checks li.error {
-  background: rgba(163, 64, 50, 0.12);
-  color: #a34032;
+  background: color-mix(in srgb, var(--bad) 12%, transparent);
+  color: var(--bad);
 }
 
 .storage-summary {
@@ -783,14 +824,14 @@ legend {
   height: 0.45rem;
   margin-bottom: 1rem;
   border-radius: 999px;
-  background: rgba(24, 32, 28, 0.08);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
   overflow: hidden;
 }
 
 .meter span {
   display: block;
   height: 100%;
-  background: linear-gradient(90deg, #c9793a, #2c5e4b);
+  background: var(--accent);
 }
 
 .usage-list {
@@ -808,7 +849,7 @@ legend {
   gap: 0.8rem;
   padding: 0.4rem 0.5rem;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.35);
+  background: var(--surface);
 }
 
 .action-row {
@@ -824,9 +865,9 @@ legend {
   gap: 0.8rem;
   margin-top: 1rem;
   padding: 1rem;
-  border: 1px solid rgba(24, 32, 28, 0.1);
+  border: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.35);
+  background: var(--surface);
 }
 
 .migration-box h3 {
@@ -868,7 +909,7 @@ legend {
 }
 
 .muted-panel {
-  background: rgba(255, 255, 255, 0.32);
+  background: var(--surface);
 }
 
 .restart-panel h2 {
@@ -899,8 +940,8 @@ legend {
   flex: 0 0 auto;
   width: 1.4rem;
   height: 1.4rem;
-  border: 2px solid rgba(44, 94, 75, 0.2);
-  border-top-color: #2c5e4b;
+  border: 2px solid color-mix(in srgb, var(--accent) 20%, transparent);
+  border-top-color: var(--accent);
   border-radius: 50%;
   animation: spin 1s linear infinite;
 }
@@ -915,23 +956,23 @@ legend {
   display: block;
   padding: 0.5rem 0.6rem;
   border-radius: 8px;
-  background: rgba(24, 32, 28, 0.06);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
   font-size: 0.75rem;
 }
 
 /* Phase 3: VM and image management */
 .notice.ok {
-  border-color: rgba(47, 122, 86, 0.24);
-  background: rgba(241, 250, 244, 0.9);
-  color: #235a41;
+  border-color: color-mix(in srgb, var(--ok) 24%, transparent);
+  background: var(--ok-bg);
+  color: var(--ok);
 }
 
 button.danger {
   border: 0;
   border-radius: 999px;
   padding: 0.68rem 1.15rem;
-  background: rgba(163, 64, 50, 0.12);
-  color: #a34032;
+  background: color-mix(in srgb, var(--bad) 12%, transparent);
+  color: var(--bad);
   font-size: 0.82rem;
   font-weight: 700;
   cursor: pointer;
@@ -943,8 +984,8 @@ button.danger:disabled {
 }
 
 .pill.bad {
-  background: rgba(163, 64, 50, 0.12);
-  color: #a34032;
+  background: color-mix(in srgb, var(--bad) 12%, transparent);
+  color: var(--bad);
 }
 
 .vm-heading {
@@ -994,9 +1035,9 @@ button.danger:disabled {
   display: grid;
   gap: 0.6rem;
   padding: 1rem;
-  border: 1px solid rgba(24, 32, 28, 0.1);
+  border: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.42);
+  background: var(--surface);
 }
 
 .image-card-head {
@@ -1025,7 +1066,7 @@ button.danger:disabled {
 .progress-track {
   height: 0.45rem;
   border-radius: 999px;
-  background: rgba(24, 32, 28, 0.08);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
   overflow: hidden;
 }
 
@@ -1033,7 +1074,7 @@ button.danger:disabled {
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, #c9793a, #2c5e4b);
+  background: var(--accent);
   transition: width 0.25s ease;
 }
 
@@ -1055,7 +1096,7 @@ button.danger:disabled {
   display: block;
   padding: 0.3rem 0.4rem;
   border-radius: 6px;
-  background: rgba(24, 32, 28, 0.05);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
   font-size: 0.68rem;
 }
 
@@ -1068,9 +1109,9 @@ button.danger:disabled {
   gap: 0.9rem;
   margin-bottom: 1rem;
   padding: 1rem;
-  border: 1px solid rgba(24, 32, 28, 0.1);
+  border: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.38);
+  background: var(--surface);
 }
 
 .create-grid {
@@ -1084,7 +1125,7 @@ button.danger:disabled {
 }
 
 .form-hint {
-  color: #7b837c;
+  color: var(--muted);
   font-size: 0.7rem;
   font-weight: 400;
   line-height: 1.5;
@@ -1095,7 +1136,7 @@ button.danger:disabled {
   gap: 0.2rem;
   padding: 0.7rem 0.8rem;
   border-radius: 10px;
-  background: rgba(44, 94, 75, 0.06);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
   font-size: 0.74rem;
   line-height: 1.55;
 }
@@ -1114,10 +1155,10 @@ button.danger:disabled {
   display: grid;
   gap: 0.7rem;
   padding: 1.1rem;
-  border: 1px solid rgba(24, 32, 28, 0.11);
+  border: 1px solid color-mix(in srgb, var(--text) 11%, transparent);
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.5);
-  box-shadow: 0 12px 30px rgba(43, 47, 39, 0.04);
+  background: var(--surface);
+  box-shadow: 0 12px 30px color-mix(in srgb, #000000 4%, transparent);
 }
 
 .vm-card-head {
@@ -1147,13 +1188,13 @@ button.danger:disabled {
   margin: 0;
   padding: 0.55rem 0.65rem;
   border-radius: 10px;
-  background: rgba(201, 121, 58, 0.07);
-  color: #6d5a45;
+  background: color-mix(in srgb, var(--warn) 7%, transparent);
+  color: var(--text-2);
   line-height: 1.55;
 }
 
 .ownership-note strong {
-  color: #18201c;
+  color: var(--text);
 }
 
 .vm-facts {
@@ -1170,7 +1211,7 @@ button.danger:disabled {
 }
 
 .vm-facts dt {
-  color: #7b837c;
+  color: var(--muted);
 }
 
 .vm-facts dd {
@@ -1182,7 +1223,7 @@ button.danger:disabled {
 .vm-facts code {
   padding: 0.1rem 0.3rem;
   border-radius: 5px;
-  background: rgba(24, 32, 28, 0.05);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
   font-size: 0.7rem;
   font-weight: 400;
 }
@@ -1203,9 +1244,9 @@ button.danger:disabled {
   display: grid;
   gap: 0.3rem;
   padding: 0.7rem 0.8rem;
-  border: 1px solid rgba(44, 94, 75, 0.18);
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
   border-radius: 12px;
-  background: rgba(44, 94, 75, 0.06);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
 }
 
 .console-box code {
@@ -1222,10 +1263,10 @@ button.danger:disabled {
   gap: 0.55rem;
   min-width: 0;
   padding: 0.75rem;
-  border: 1px solid rgba(44, 94, 75, 0.24);
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
   border-radius: 12px;
   background: #17201b;
-  color: #f3f5f0;
+  color: var(--text);
 }
 
 .console-toolbar {
@@ -1244,20 +1285,20 @@ button.danger:disabled {
 .console-state {
   width: fit-content;
   font-size: 0.75rem;
-  color: #d9c58b;
+  color: var(--warn);
 }
 
 .console-state.connected {
-  color: #8ee0ad;
+  color: var(--ok);
 }
 
 .console-state.error {
-  color: #ffaaa3;
+  color: var(--bad);
 }
 
 .console-message {
   margin: 0;
-  color: #cbd3cd;
+  color: var(--muted);
 }
 
 .novnc-screen {
@@ -1267,7 +1308,7 @@ button.danger:disabled {
   max-height: 70vh;
   aspect-ratio: 16 / 10;
   overflow: auto;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--border);
   border-radius: 8px;
   background: #050706;
 }
@@ -1291,7 +1332,7 @@ button.danger:disabled {
   align-items: center;
   flex-wrap: wrap;
   gap: 0.35rem;
-  color: #6f786f;
+  color: var(--text-2);
   font-size: 0.72rem;
 }
 
@@ -1299,18 +1340,18 @@ button.danger:disabled {
   width: 0.5rem;
   height: 0.5rem;
   border-radius: 50%;
-  background: #c9793a;
+  background: var(--warn);
 }
 
 .stream-status .dot.live {
-  background: #2f7a56;
+  background: var(--ok);
 }
 
 .project-workspace {
   grid-template-columns: minmax(12rem, 0.28fr) minmax(0, 1fr);
   align-items: start;
   padding-top: 1rem;
-  border-top: 1px solid rgba(24, 32, 28, 0.09);
+  border-top: 1px solid color-mix(in srgb, var(--text) 9%, transparent);
 }
 
 .project-list,
@@ -1352,33 +1393,33 @@ button.danger:disabled {
   display: grid;
   gap: 0.25rem;
   padding: 0.7rem 0.8rem;
-  border: 1px solid rgba(24, 32, 28, 0.1);
+  border: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.35);
+  background: var(--surface);
   color: inherit;
   text-align: left;
   cursor: pointer;
 }
 
 .project-tabs button.selected {
-  border-color: rgba(44, 94, 75, 0.45);
-  background: rgba(44, 94, 75, 0.09);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
 }
 
 .project-tabs button span {
-  color: #747d75;
+  color: var(--muted);
   font-size: 0.68rem;
 }
 
 .create-box {
-  border: 1px solid rgba(24, 32, 28, 0.1);
+  border: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.3);
+  background: var(--surface);
 }
 
 .create-box > summary {
   padding: 0.75rem 0.85rem;
-  color: #2c5e4b;
+  color: var(--accent);
   font-size: 0.78rem;
   font-weight: 700;
   cursor: pointer;
@@ -1397,9 +1438,9 @@ button.danger:disabled {
   min-height: 4.5rem;
   padding: 0.62rem 0.7rem;
   resize: vertical;
-  border: 1px solid rgba(24, 32, 28, 0.16);
+  border: 1px solid color-mix(in srgb, var(--text) 16%, transparent);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.7);
+  background: var(--surface);
   color: inherit;
   font: inherit;
   font-weight: 400;
@@ -1427,7 +1468,7 @@ button.danger:disabled {
   display: grid;
   gap: 0.65rem;
   padding-top: 0.9rem;
-  border-top: 1px solid rgba(24, 32, 28, 0.08);
+  border-top: 1px solid color-mix(in srgb, var(--text) 8%, transparent);
 }
 
 .binding-list {
@@ -1439,17 +1480,17 @@ button.danger:disabled {
   display: grid;
   gap: 0.55rem;
   padding: 0.85rem;
-  border: 1px solid rgba(24, 32, 28, 0.09);
+  border: 1px solid color-mix(in srgb, var(--text) 9%, transparent);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.32);
+  background: var(--surface);
 }
 
 .shared-warning {
   margin: 0;
   padding: 0.6rem 0.7rem;
   border-radius: 8px;
-  background: rgba(201, 121, 58, 0.09);
-  color: #76502e;
+  background: color-mix(in srgb, var(--warn) 9%, transparent);
+  color: var(--warn);
   font-size: 0.74rem;
   line-height: 1.55;
 }
@@ -1472,7 +1513,7 @@ button.danger:disabled {
 .binding-form {
   padding: 0.75rem;
   border-radius: 12px;
-  background: rgba(44, 94, 75, 0.05);
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
 }
 
 .compact-toggle {
@@ -1508,12 +1549,12 @@ button.danger:disabled {
 }
 
 .danger-link {
-  color: #a34032;
+  color: var(--bad);
 }
 
 .task-workspace {
   padding-top: 1.2rem;
-  border-top: 1px solid rgba(24, 32, 28, 0.09);
+  border-top: 1px solid color-mix(in srgb, var(--text) 9%, transparent);
 }
 
 .task-filters {
@@ -1529,7 +1570,7 @@ button.danger:disabled {
 
 .task-table-wrap {
   overflow-x: auto;
-  border: 1px solid rgba(24, 32, 28, 0.09);
+  border: 1px solid color-mix(in srgb, var(--text) 9%, transparent);
   border-radius: 12px;
 }
 
@@ -1543,14 +1584,14 @@ button.danger:disabled {
 .task-table th,
 .task-table td {
   padding: 0.7rem;
-  border-bottom: 1px solid rgba(24, 32, 28, 0.07);
+  border-bottom: 1px solid color-mix(in srgb, var(--text) 7%, transparent);
   text-align: left;
   vertical-align: top;
 }
 
 .task-table th {
-  background: rgba(24, 32, 28, 0.035);
-  color: #6c756d;
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+  color: var(--muted);
   font-size: 0.68rem;
 }
 
@@ -1584,8 +1625,8 @@ button.danger:disabled {
   width: fit-content;
   padding: 0.2rem 0.45rem;
   border-radius: 999px;
-  background: rgba(24, 32, 28, 0.07);
-  color: #59635b;
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+  color: var(--text-2);
   font-size: 0.68rem;
   font-weight: 750;
   white-space: nowrap;
@@ -1593,21 +1634,21 @@ button.danger:disabled {
 
 .task-status.running,
 .task-status.completed {
-  background: rgba(47, 122, 86, 0.12);
-  color: #2f6d50;
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
+  color: var(--ok);
 }
 
 .task-status.waiting_approval,
 .task-status.waiting_resources,
 .task-status.waiting_vm,
 .task-status.blocked {
-  background: rgba(190, 130, 40, 0.13);
-  color: #7c571d;
+  background: color-mix(in srgb, var(--warn) 13%, transparent);
+  color: var(--warn);
 }
 
 .task-status.failed {
-  background: rgba(163, 64, 50, 0.12);
-  color: #923d30;
+  background: color-mix(in srgb, var(--bad) 12%, transparent);
+  color: var(--bad);
 }
 
 .task-status.cancelled {
@@ -1615,7 +1656,7 @@ button.danger:disabled {
 }
 
 .queue-position {
-  color: #2c5e4b;
+  color: var(--accent);
   font-weight: 800;
 }
 
@@ -1628,9 +1669,9 @@ button.danger:disabled {
 .priority-editor input {
   width: 4.2rem;
   padding: 0.25rem;
-  border: 1px solid rgba(24, 32, 28, 0.14);
+  border: 1px solid color-mix(in srgb, var(--text) 14%, transparent);
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.55);
+  background: var(--surface);
   color: inherit;
 }
 
@@ -1651,9 +1692,9 @@ button.danger:disabled {
 
 .task-detail {
   padding: 1rem;
-  border: 1px solid rgba(44, 94, 75, 0.2);
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
   border-radius: 14px;
-  background: rgba(44, 94, 75, 0.045);
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
 }
 
 .task-detail-badges {
@@ -1678,7 +1719,7 @@ button.danger:disabled {
   padding: 0.75rem;
   overflow: auto;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.45);
+  background: var(--surface);
   font-size: 0.75rem;
   white-space: pre-wrap;
 }
@@ -1695,7 +1736,7 @@ button.danger:disabled {
   display: flex;
   gap: 0.7rem;
   padding: 0.5rem 0;
-  border-bottom: 1px solid rgba(24, 32, 28, 0.07);
+  border-bottom: 1px solid color-mix(in srgb, var(--text) 7%, transparent);
 }
 
 .timeline li > div {
@@ -1705,7 +1746,7 @@ button.danger:disabled {
 
 .timeline-id {
   min-width: 2.8rem;
-  color: #8b928b;
+  color: var(--muted);
   font-size: 0.68rem;
 }
 
@@ -1773,59 +1814,6 @@ button.danger:disabled {
   }
 }
 
-@media (prefers-color-scheme: dark) {
-  .notice.ok {
-    border-color: rgba(71, 161, 116, 0.3);
-    background: rgba(71, 161, 116, 0.1);
-    color: #8fd4ac;
-  }
-
-  button.danger,
-  .pill.bad {
-    background: rgba(212, 96, 78, 0.16);
-    color: #e59b8d;
-  }
-
-  .image-card,
-  .create-form,
-  .vm-card {
-    border-color: rgba(233, 234, 227, 0.1);
-    background: rgba(255, 255, 255, 0.04);
-  }
-
-  .progress-track {
-    background: rgba(255, 255, 255, 0.08);
-  }
-
-  .image-path,
-  .vm-facts code {
-    background: rgba(255, 255, 255, 0.07);
-  }
-
-  .ownership-note {
-    background: rgba(201, 121, 58, 0.12);
-    color: #d8c4ac;
-  }
-
-  .ownership-note strong {
-    color: #e9eae3;
-  }
-
-  .resource-guide,
-  .console-box {
-    border-color: rgba(71, 161, 116, 0.22);
-    background: rgba(71, 161, 116, 0.08);
-  }
-
-  .form-hint {
-    color: #aab2aa;
-  }
-
-  .vm-facts dt {
-    color: #8f978f;
-  }
-}
-
 @media (max-width: 1020px) {
   .wizard {
     grid-template-columns: 1fr;
@@ -1866,161 +1854,12 @@ button.danger:disabled {
   }
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    color: #e9eae3;
-    background: #161a17;
-  }
-
-  body {
-    background:
-      radial-gradient(circle at 15% 5%, rgba(201, 121, 58, 0.12), transparent 32rem),
-      radial-gradient(circle at 92% 18%, rgba(71, 131, 105, 0.12), transparent 28rem), #161a17;
-  }
-
-  .subtitle,
-  .card p,
-  .checklist li {
-    color: #aab2aa;
-  }
-
-  .card,
-  .panel,
-  .status {
-    border-color: rgba(233, 234, 227, 0.1);
-    background: rgba(255, 255, 255, 0.04);
-  }
-
-  .card.muted {
-    background: rgba(255, 255, 255, 0.02);
-  }
-
-  .wizard-steps,
-  .wizard-panel,
-  .desktop-strip,
-  .host-check,
-  .credential-box,
-  .validation-box,
-  .migration-box,
-  .usage-list li,
-  .credential-status li,
-  .field input,
-  .field select,
-  .radio,
-  .toggle {
-    border-color: rgba(233, 234, 227, 0.1);
-    background: rgba(255, 255, 255, 0.04);
-  }
-
-  .wizard-steps li {
-    color: #8f978f;
-  }
-
-  .wizard-steps li.active,
-  .wizard-actions {
-    color: #e9eae3;
-  }
-
-  .wizard-note {
-    border-color: rgba(233, 234, 227, 0.1);
-    color: #8f978f;
-  }
-
-  button.secondary {
-    background: rgba(255, 255, 255, 0.08);
-    color: #e9eae3;
-  }
-
-  .badge,
-  .pill.ok,
-  .mini-checks li.ok {
-    background: rgba(71, 161, 116, 0.16);
-    color: #8fd4ac;
-  }
-
-  .pill.warn,
-  .mini-checks li.warning {
-    background: rgba(212, 154, 61, 0.16);
-    color: #e0b56b;
-  }
-
-  .mini-checks li.error {
-    background: rgba(212, 96, 78, 0.16);
-    color: #e59b8d;
-  }
-
-  .project-tabs button,
-  .binding-card,
-  .create-box,
-  .task-detail,
-  .task-table-wrap,
-  .field textarea,
-  .priority-editor input,
-  .result-box,
-  .json-view {
-    border-color: rgba(233, 234, 227, 0.1);
-    background: rgba(255, 255, 255, 0.04);
-  }
-
-  .project-tabs button.selected {
-    background: rgba(71, 161, 116, 0.12);
-  }
-
-  .task-table th {
-    background: rgba(255, 255, 255, 0.05);
-  }
-
-  .task-status {
-    background: rgba(255, 255, 255, 0.08);
-    color: #c1c8c1;
-  }
-
-  .task-status.running,
-  .task-status.completed {
-    background: rgba(71, 161, 116, 0.16);
-    color: #8fd4ac;
-  }
-
-  .task-status.waiting_approval,
-  .task-status.waiting_resources,
-  .task-status.waiting_vm,
-  .task-status.blocked {
-    background: rgba(212, 154, 61, 0.16);
-    color: #e0b56b;
-  }
-
-  .task-status.failed {
-    background: rgba(212, 96, 78, 0.16);
-    color: #e59b8d;
-  }
-
-  .shared-warning {
-    background: rgba(201, 121, 58, 0.12);
-    color: #d8c4ac;
-  }
-
-  .meter,
-  .command {
-    background: rgba(255, 255, 255, 0.08);
-  }
-
-  .muted,
-  .small,
-  .wizard-heading p,
-  .radio small,
-  .toggle small,
-  .host-check small,
-  .layout-preview span {
-    color: #aab2aa;
-  }
-}
-
 /* Phase 6: Worker conversation and Model Broker status. */
 .worker-panel {
   display: grid;
   gap: 0.8rem;
   padding-top: 1rem;
-  border-top: 1px solid rgba(24, 32, 28, 0.09);
+  border-top: 1px solid color-mix(in srgb, var(--text) 9%, transparent);
 }
 
 .worker-layout {
@@ -2040,15 +1879,15 @@ button.danger:disabled {
   gap: 0.3rem;
   padding: 0.7rem 0.8rem;
   text-align: left;
-  border: 1px solid rgba(24, 32, 28, 0.12);
+  border: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.45);
+  background: var(--surface);
   color: inherit;
 }
 
 .worker-card.selected {
-  border-color: rgba(47, 122, 86, 0.45);
-  background: rgba(47, 122, 86, 0.1);
+  border-color: color-mix(in srgb, var(--ok) 45%, transparent);
+  background: color-mix(in srgb, var(--ok) 10%, transparent);
 }
 
 .worker-conversation {
@@ -2063,7 +1902,7 @@ button.danger:disabled {
   justify-content: space-between;
   gap: 0.4rem;
   font-size: 0.78rem;
-  color: #626b64;
+  color: var(--text-2);
 }
 
 .worker-messages {
@@ -2072,9 +1911,9 @@ button.danger:disabled {
   max-height: 24rem;
   overflow-y: auto;
   padding: 0.7rem;
-  border: 1px solid rgba(24, 32, 28, 0.1);
+  border: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.4);
+  background: var(--surface);
 }
 
 .chat-message {
@@ -2082,22 +1921,22 @@ button.danger:disabled {
   gap: 0.25rem;
   padding: 0.55rem 0.7rem;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.55);
+  background: var(--surface);
 }
 
 .chat-message.user {
-  border-left: 3px solid #2f7a56;
+  border-left: 3px solid var(--ok);
 }
 
 .chat-message.assistant {
-  border-left: 3px solid #c9793a;
+  border-left: 3px solid var(--warn);
 }
 
 .chat-role {
   font-size: 0.68rem;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: #6f786f;
+  color: var(--text-2);
 }
 
 .chat-message p {
@@ -2116,9 +1955,9 @@ button.danger:disabled {
 
 .provider-config {
   padding: 0.7rem 0.8rem;
-  border: 1px solid rgba(24, 32, 28, 0.1);
+  border: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.35);
+  background: var(--surface);
 }
 
 .provider-config summary {
@@ -2146,7 +1985,7 @@ button.danger:disabled {
   gap: 0.6rem;
   padding: 0.45rem 0.6rem;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.45);
+  background: var(--surface);
   font-size: 0.78rem;
 }
 
@@ -2158,8 +1997,8 @@ button.danger:disabled {
 }
 
 .pill.live {
-  background: rgba(47, 122, 86, 0.16);
-  color: #236241;
+  background: color-mix(in srgb, var(--ok) 16%, transparent);
+  color: var(--ok);
 }
 
 .router-panel,
@@ -2175,7 +2014,7 @@ button.danger:disabled {
   justify-content: space-between;
   gap: 0.5rem;
   font-size: 0.8rem;
-  color: #626b64;
+  color: var(--text-2);
 }
 
 .router-layout,
@@ -2214,15 +2053,15 @@ button.danger:disabled {
   gap: 0.3rem;
   padding: 0.7rem 0.8rem;
   text-align: left;
-  border: 1px solid rgba(24, 32, 28, 0.12);
+  border: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.45);
+  background: var(--surface);
   color: inherit;
 }
 
 .registry-card.selected {
-  border-color: rgba(47, 122, 86, 0.45);
-  background: rgba(47, 122, 86, 0.1);
+  border-color: color-mix(in srgb, var(--ok) 45%, transparent);
+  background: color-mix(in srgb, var(--ok) 10%, transparent);
 }
 
 .archive-card p {
@@ -2256,9 +2095,9 @@ button.danger:disabled {
 .trace-screenshots a {
   display: block;
   overflow: hidden;
-  border: 1px solid rgba(24, 32, 28, 0.12);
+  border: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.45);
+  background: var(--surface);
 }
 
 .trace-screenshots img {
@@ -2269,9 +2108,9 @@ button.danger:disabled {
 
 .human-verification-panel {
   padding: 0.85rem 1rem;
-  border: 1px solid rgba(170, 102, 20, 0.35);
+  border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
   border-radius: 10px;
-  background: rgba(255, 244, 224, 0.65);
+  background: var(--warn-bg);
 }
 
 .human-verification-screenshot {
@@ -2279,9 +2118,9 @@ button.danger:disabled {
   max-width: 100%;
   max-height: 28rem;
   margin: 0.55rem 0;
-  border: 1px solid rgba(24, 32, 28, 0.16);
+  border: 1px solid color-mix(in srgb, var(--text) 16%, transparent);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.6);
+  background: var(--surface);
 }
 
 /* Phase 9: resource scheduling, shared VM impact and project backups. */
@@ -2290,19 +2129,19 @@ button.danger:disabled {
   gap: 0.45rem;
   margin: 0.75rem 0;
   padding: 0.85rem 1rem;
-  border: 1px solid rgba(24, 32, 28, 0.14);
+  border: 1px solid color-mix(in srgb, var(--text) 14%, transparent);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.55);
+  background: var(--surface);
 }
 
 .resource-banner.pressure-warning {
-  border-color: rgba(186, 122, 22, 0.45);
-  background: rgba(255, 244, 219, 0.62);
+  border-color: color-mix(in srgb, var(--warn) 45%, transparent);
+  background: var(--warn-bg);
 }
 
 .resource-banner.pressure-critical {
-  border-color: rgba(168, 46, 46, 0.5);
-  background: rgba(255, 233, 233, 0.66);
+  border-color: color-mix(in srgb, var(--bad) 50%, transparent);
+  background: var(--bad-bg);
 }
 
 .resource-badges {
@@ -2314,7 +2153,7 @@ button.danger:disabled {
 .vm-subsection {
   margin-top: 0.85rem;
   padding-top: 0.75rem;
-  border-top: 1px dashed rgba(24, 32, 28, 0.16);
+  border-top: 1px dashed color-mix(in srgb, var(--text) 16%, transparent);
 }
 
 .vm-subsection h5 {
@@ -2335,8 +2174,8 @@ button.danger:disabled {
 }
 
 .snapshot-impact {
-  border: 1px solid rgba(168, 46, 46, 0.4);
-  background: rgba(255, 246, 246, 0.8);
+  border: 1px solid color-mix(in srgb, var(--bad) 40%, transparent);
+  background: var(--bad-bg);
 }
 
 .project-workers {
@@ -2364,7 +2203,7 @@ button.danger:disabled {
 .bot-subheading {
   margin-top: 1.1rem;
   padding-top: 0.8rem;
-  border-top: 1px dashed rgba(24, 32, 28, 0.16);
+  border-top: 1px dashed color-mix(in srgb, var(--text) 16%, transparent);
 }
 
 .bot-subheading h3 {
@@ -2401,9 +2240,9 @@ button.danger:disabled {
   flex: 1 1 170px;
   min-width: 140px;
   padding: 0.45rem 0.6rem;
-  border: 1px solid rgba(24, 32, 28, 0.18);
+  border: 1px solid color-mix(in srgb, var(--text) 18%, transparent);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--surface);
 }
 
 .bot-list {
@@ -2420,9 +2259,9 @@ button.danger:disabled {
   justify-content: space-between;
   gap: 0.6rem;
   padding: 0.45rem 0.55rem;
-  border: 1px solid rgba(24, 32, 28, 0.09);
+  border: 1px solid color-mix(in srgb, var(--text) 9%, transparent);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.4);
+  background: var(--surface);
 }
 
 .bot-list.compact li {
@@ -2439,7 +2278,7 @@ button.danger:disabled {
 .bot-notes {
   margin: 0.5rem 0 0;
   padding-left: 1.05rem;
-  color: #5c665f;
+  color: var(--text-2);
   font-size: 0.76rem;
   line-height: 1.5;
 }
@@ -2449,9 +2288,9 @@ button.danger:disabled {
   gap: 0.35rem;
   margin: 0.55rem 0;
   padding: 0.65rem 0.75rem;
-  border: 1px solid rgba(47, 122, 86, 0.35);
+  border: 1px solid color-mix(in srgb, var(--ok) 35%, transparent);
   border-radius: 10px;
-  background: rgba(231, 247, 238, 0.7);
+  background: var(--ok-bg);
 }
 
 .access-code code {
@@ -2463,13 +2302,13 @@ button.danger:disabled {
 .bot-diagnostics {
   margin-top: 1rem;
   padding-top: 0.75rem;
-  border-top: 1px dashed rgba(24, 32, 28, 0.16);
+  border-top: 1px dashed color-mix(in srgb, var(--text) 16%, transparent);
 }
 
 .bot-diagnostics summary {
   cursor: pointer;
   font-weight: 700;
-  color: #404a43;
+  color: var(--text-2);
 }
 
 .bot-diagnostics h4 {
@@ -2501,8 +2340,8 @@ button.danger:disabled {
   z-index: 100;
   padding: 0.6rem 0.9rem;
   border-radius: 0 0 10px 10px;
-  background: #18201c;
-  color: #fff;
+  background: var(--text);
+  color: var(--on-accent);
   font-size: 0.82rem;
   text-decoration: none;
 }
@@ -2512,7 +2351,7 @@ button.danger:disabled {
 }
 
 :focus-visible {
-  outline: 3px solid rgba(47, 122, 86, 0.55);
+  outline: 3px solid color-mix(in srgb, var(--ok) 55%, transparent);
   outline-offset: 2px;
 }
 
@@ -2542,9 +2381,9 @@ button.danger:disabled {
   gap: 0.4rem;
   margin-bottom: 1.2rem;
   padding: 0.35rem;
-  border: 1px solid rgba(24, 32, 28, 0.11);
+  border: 1px solid color-mix(in srgb, var(--text) 11%, transparent);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--surface);
   overflow-x: auto;
 }
 
@@ -2558,7 +2397,7 @@ button.danger:disabled {
   border: none;
   border-radius: 999px;
   background: transparent;
-  color: #48534b;
+  color: var(--text-2);
   font: inherit;
   font-size: 0.82rem;
   font-weight: 600;
@@ -2567,12 +2406,12 @@ button.danger:disabled {
 }
 
 .nav-item:hover {
-  background: rgba(47, 122, 86, 0.08);
+  background: color-mix(in srgb, var(--ok) 8%, transparent);
 }
 
 .nav-item.active {
-  background: #2f5e4b;
-  color: #fff;
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
 .nav-count,
@@ -2584,8 +2423,8 @@ button.danger:disabled {
   justify-content: center;
   padding: 0 0.28rem;
   border-radius: 999px;
-  background: #c9793a;
-  color: #fff;
+  background: var(--warn);
+  color: var(--on-accent);
   font-size: 0.66rem;
   font-weight: 700;
 }
@@ -2597,9 +2436,9 @@ button.danger:disabled {
   height: 2.5rem;
   align-items: center;
   justify-content: center;
-  border: 1px solid rgba(24, 32, 28, 0.12);
+  border: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.7);
+  background: var(--surface);
   font-size: 1rem;
   cursor: pointer;
 }
@@ -2647,22 +2486,22 @@ button.danger:disabled {
 
 .notification-item {
   padding: 0.9rem 1rem;
-  border: 1px solid rgba(24, 32, 28, 0.1);
-  border-left: 4px solid #4b7f68;
+  border: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
+  border-left: 4px solid var(--ok);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.55);
+  background: var(--surface);
 }
 
 .notification-item.warning {
-  border-left-color: #c9793a;
+  border-left-color: var(--warn);
 }
 
 .notification-item.danger {
-  border-left-color: #a34032;
+  border-left-color: var(--bad);
 }
 
 .notification-item.success {
-  border-left-color: #2f7a56;
+  border-left-color: var(--ok);
 }
 
 .notification-item.read {
@@ -2678,7 +2517,7 @@ button.danger:disabled {
 
 .notification-item p {
   margin: 0.45rem 0 0.55rem;
-  color: #4d5751;
+  color: var(--text-2);
   font-size: 0.86rem;
   line-height: 1.55;
 }
@@ -2695,7 +2534,7 @@ button.danger:disabled {
   padding: 0;
   border: none;
   background: none;
-  color: #2f6e52;
+  color: var(--ok);
   font: inherit;
   font-size: 0.78rem;
   font-weight: 600;
@@ -2704,7 +2543,7 @@ button.danger:disabled {
 }
 
 .link-button:disabled {
-  color: #9aa29c;
+  color: var(--muted);
   cursor: default;
 }
 
@@ -2715,9 +2554,9 @@ button.danger:disabled {
   gap: 0.5rem;
   margin: 0.8rem 0;
   padding: 1.6rem;
-  border: 2px dashed rgba(47, 94, 75, 0.35);
+  border: 2px dashed color-mix(in srgb, var(--accent) 35%, transparent);
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.35);
+  background: var(--surface);
   text-align: center;
   transition:
     border-color 120ms ease,
@@ -2725,13 +2564,13 @@ button.danger:disabled {
 }
 
 .drop-zone.dragging {
-  border-color: #2f7a56;
-  background: rgba(219, 242, 229, 0.6);
+  border-color: var(--ok);
+  background: var(--ok-bg);
 }
 
 .drop-icon {
   font-size: 1.6rem;
-  color: #2f5e4b;
+  color: var(--accent);
 }
 
 .file-list {
@@ -2748,9 +2587,9 @@ button.danger:disabled {
   justify-content: space-between;
   gap: 0.8rem;
   padding: 0.65rem 0.8rem;
-  border: 1px solid rgba(24, 32, 28, 0.09);
+  border: 1px solid color-mix(in srgb, var(--text) 9%, transparent);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.45);
+  background: var(--surface);
 }
 
 .file-list li > div:first-child {
@@ -2879,8 +2718,8 @@ a.secondary,
   height: 100vh;
   overflow-y: auto;
   padding: 1.2rem 0.9rem;
-  border-right: 1px solid rgba(24, 32, 28, 0.12);
-  background: rgba(255, 255, 255, 0.62);
+  border-right: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
+  background: var(--surface);
   backdrop-filter: blur(12px);
 }
 
@@ -2910,7 +2749,7 @@ a.secondary,
   border: none;
   border-radius: 10px;
   background: transparent;
-  color: #2c3731;
+  color: var(--text);
   font: inherit;
   font-size: 0.84rem;
   text-align: left;
@@ -2928,8 +2767,8 @@ a.secondary,
 .workspace-session.active,
 .workspace-nav-row button.active,
 .workspace-footer button.active {
-  background: rgba(47, 94, 75, 0.12);
-  color: #1d4635;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
 }
 
 .workspace-primary:hover,
@@ -2937,7 +2776,7 @@ a.secondary,
 .workspace-session:hover,
 .workspace-footer button:hover,
 .workspace-nav-row button:hover {
-  background: rgba(47, 94, 75, 0.07);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
 }
 
 .workspace-nav-row {
@@ -2957,22 +2796,22 @@ a.secondary,
   width: 0.55rem;
   height: 0.55rem;
   border-radius: 999px;
-  background: #a8b0aa;
+  background: var(--muted);
   flex: 0 0 auto;
 }
 
 .workspace-dot.router,
 .workspace-dot.idle {
-  background: #479b70;
+  background: var(--ok);
 }
 
 .workspace-dot.running {
-  background: #c9793a;
+  background: var(--warn);
 }
 
 .workspace-dot.failed,
 .workspace-dot.blocked {
-  background: #bb4b43;
+  background: var(--bad);
 }
 
 .workspace-projects {
@@ -2986,7 +2825,7 @@ a.secondary,
   gap: 0.5rem;
   padding: 0 0.4rem;
   margin-bottom: 0.35rem;
-  color: #6b7670;
+  color: var(--muted);
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.1em;
@@ -3002,7 +2841,7 @@ a.secondary,
 
 .workspace-session-list {
   margin: 0.1rem 0 0.4rem 1.35rem;
-  border-left: 1px solid rgba(24, 32, 28, 0.12);
+  border-left: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
   padding-left: 0.35rem;
 }
 
@@ -3016,13 +2855,13 @@ a.secondary,
 
 .workspace-count,
 .workspace-status {
-  color: #7a857e;
+  color: var(--muted);
   font-size: 0.69rem;
 }
 
 .workspace-chevron {
   width: 0.8rem;
-  color: #7a857e;
+  color: var(--muted);
 }
 
 .workspace-session span:nth-child(2) {
@@ -3038,7 +2877,7 @@ a.secondary,
   gap: 0.1rem;
   margin-top: 1.2rem;
   padding-top: 0.8rem;
-  border-top: 1px solid rgba(24, 32, 28, 0.1);
+  border-top: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
 }
 
 .observer-sidebar {
@@ -3046,8 +2885,8 @@ a.secondary,
   height: 100vh;
   overflow-y: auto;
   padding: 1.2rem 1rem;
-  border-left: 1px solid rgba(24, 32, 28, 0.12);
-  background: rgba(255, 255, 255, 0.76);
+  border-left: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
+  background: var(--surface);
   backdrop-filter: blur(14px);
 }
 
@@ -3069,7 +2908,7 @@ a.secondary,
   padding: 0.25rem;
   margin: 0.8rem 0;
   border-radius: 999px;
-  background: rgba(47, 94, 75, 0.08);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
 .observer-tabs button {
@@ -3077,7 +2916,7 @@ a.secondary,
   border: none;
   border-radius: 999px;
   background: transparent;
-  color: #4b5a52;
+  color: var(--text-2);
   font: inherit;
   font-size: 0.78rem;
   font-weight: 600;
@@ -3086,8 +2925,8 @@ a.secondary,
 }
 
 .observer-tabs button.active {
-  background: #2f5e4b;
-  color: #fff;
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
 .observer-body {
@@ -3158,7 +2997,7 @@ a.secondary,
 .model-selection {
   margin-top: 1.2rem;
   padding-top: 0.9rem;
-  border-top: 1px solid rgba(24, 32, 28, 0.1);
+  border-top: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
 }
 
 .selection-grid {
@@ -3172,7 +3011,7 @@ a.secondary,
   align-items: center;
   gap: 0.35rem;
   font-size: 0.8rem;
-  color: #4b5a52;
+  color: var(--text-2);
 }
 
 .link-button {
@@ -3205,7 +3044,7 @@ a.secondary,
     top: 0;
     right: 0;
     width: min(460px, 100vw);
-    box-shadow: -16px 0 40px rgba(20, 30, 24, 0.16);
+    box-shadow: -16px 0 40px color-mix(in srgb, #000000 16%, transparent);
   }
 }
 
@@ -3223,7 +3062,7 @@ a.secondary,
     top: 0;
     left: 0;
     width: min(300px, 88vw);
-    box-shadow: 16px 0 40px rgba(20, 30, 24, 0.16);
+    box-shadow: 16px 0 40px color-mix(in srgb, #000000 16%, transparent);
   }
 
   .app-workspace {
@@ -3250,13 +3089,13 @@ a.secondary,
 .runtime-facts div {
   min-width: 0;
   padding: 0.5rem 0.6rem;
-  border: 1px solid rgba(24, 32, 28, 0.09);
+  border: 1px solid color-mix(in srgb, var(--text) 9%, transparent);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.45);
+  background: var(--surface);
 }
 
 .runtime-facts dt {
-  color: #7a857e;
+  color: var(--muted);
   font-size: 0.72rem;
 }
 
@@ -3277,11 +3116,9 @@ a.secondary,
   gap: 0.7rem;
   margin: 0.9rem 0 1.1rem;
   padding: 0.9rem 1rem;
-  border: 1px solid rgba(47, 94, 75, 0.2);
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
   border-radius: 14px;
-  background:
-    linear-gradient(135deg, rgba(47, 94, 75, 0.09), rgba(201, 121, 58, 0.07)),
-    rgba(255, 255, 255, 0.55);
+  background: var(--surface-2);
 }
 
 .quick-start-card h3 {
@@ -3299,18 +3136,18 @@ a.secondary,
   gap: 0.5rem;
   padding: 0.55rem 0.65rem;
   border-radius: 9px;
-  background: rgba(255, 255, 255, 0.62);
+  background: var(--surface);
   font-size: 0.82rem;
 }
 
 .quick-start-status.failed {
-  background: rgba(187, 75, 67, 0.12);
-  color: #7c2d28;
+  background: color-mix(in srgb, var(--bad) 12%, transparent);
+  color: var(--bad);
 }
 
 .quick-start-status.ready {
-  background: rgba(47, 122, 86, 0.14);
-  color: #1d4635;
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+  color: var(--accent);
 }
 
 .app-shell.workspace-hidden,
@@ -3318,4 +3155,131 @@ a.secondary,
 .app-shell.workspace-hidden.sidebar-collapsed,
 .app-shell.workspace-hidden.sidebar-collapsed.observer-open {
   grid-template-columns: minmax(0, 1fr);
+}
+
+/* Global form controls: every input/select/textarea gets the same treatment,
+   not only those wrapped in .field. */
+input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+select,
+textarea {
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--border-2);
+  border-radius: 9px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.82rem;
+}
+
+input:not([type="checkbox"]):not([type="radio"]):focus,
+select:focus,
+textarea:focus {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+  border-color: var(--text-2);
+}
+
+select {
+  appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+    linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position:
+    calc(100% - 1.05rem) 50%,
+    calc(100% - 0.8rem) 50%;
+  background-size:
+    0.28rem 0.28rem,
+    0.28rem 0.28rem;
+  background-repeat: no-repeat;
+  padding-right: 1.9rem;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--muted);
+}
+
+/* Flatten the legacy translucent panels onto the new surface tokens. */
+.panel,
+.card,
+.wizard-steps,
+.wizard-panel {
+  background: var(--surface);
+  border-color: var(--border);
+  box-shadow: none;
+}
+
+.eyebrow {
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+button.secondary {
+  background: var(--surface);
+  border: 1px solid var(--border-2);
+  color: var(--text);
+}
+
+button.secondary:hover:not(:disabled) {
+  border-color: var(--text-2);
+}
+
+button.primary {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+button.primary:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+button.link-button,
+.link-button {
+  color: var(--text-2);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.link-button:hover:not(:disabled) {
+  color: var(--text);
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.workspace-sidebar,
+.observer-sidebar {
+  background: var(--surface);
+  backdrop-filter: none;
+}
+
+/* VM console stays a dark terminal surface in both themes. */
+.novnc-console {
+  background: #101012;
+  color: #f2f2f4;
+  border-color: var(--border-2);
+}
+
+.novnc-screen {
+  background: #000000;
+  border-color: var(--border-2);
+}
+
+/* Brand lockup: logo + wordmark. */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.brand h1 {
+  font-size: 1.3rem;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+.brand .subtitle {
+  margin-top: 0.4rem;
 }

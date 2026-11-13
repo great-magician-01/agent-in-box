@@ -445,22 +445,12 @@ export function Dashboard({
             </div>
             <dl>
               <div>
-                <dt>协议版本</dt>
-                <dd>{health.protocolVersion}</dd>
-              </div>
-              <div>
                 <dt>启动时间</dt>
                 <dd>{formatDate(health.startedAt)}</dd>
               </div>
               <div>
-                <dt>数据目录来源</dt>
+                <dt>数据目录</dt>
                 <dd>{DATA_ROOT_SOURCE_LABELS[runtime.dataRootSource]}</dd>
-              </div>
-              <div>
-                <dt>数据库</dt>
-                <dd className="truncate" title={runtime.databasePath}>
-                  {runtime.databasePath}
-                </dd>
               </div>
             </dl>
           </article>
@@ -489,10 +479,6 @@ export function Dashboard({
                     <dt>存储可用</dt>
                     <dd>{formatBytes(host.freeDiskBytes)}</dd>
                   </div>
-                  <div>
-                    <dt>建议 Provider</dt>
-                    <dd>{host.recommendedProvider ?? "—"}</dd>
-                  </div>
                 </dl>
                 <ul className="mini-checks">
                   {host.checks.map((check) => (
@@ -506,39 +492,6 @@ export function Dashboard({
             ) : (
               <p className="muted">正在读取宿主机信息…</p>
             )}
-          </article>
-
-          <article className="card">
-            <div className="card-title">
-              <h2>本机身份与安全</h2>
-              <span className="pill ok">管理员</span>
-            </div>
-            <dl>
-              <div>
-                <dt>显示名称</dt>
-                <dd>
-                  {settings?.onboarding.localUser?.displayName ??
-                    onboarding.localUser?.displayName ??
-                    "—"}
-                </dd>
-              </div>
-              <div>
-                <dt>敏感操作审批</dt>
-                <dd>{approval ? "开启" : "关闭"}</dd>
-              </div>
-              <div>
-                <dt>模型凭据</dt>
-                <dd>
-                  {onboarding.credentialsConfigured
-                    ? (onboarding.preferredModelProvider ?? "已配置")
-                    : "未配置"}
-                </dd>
-              </div>
-              <div>
-                <dt>凭据存储</dt>
-                <dd>{bridge ? "系统安全存储" : "仅桌面应用可用"}</dd>
-              </div>
-            </dl>
           </article>
         </section>
       )}
@@ -556,7 +509,6 @@ export function Dashboard({
         />
       )}
 
-      {view === "overview" && <VmRuntimeSettings bridge={bridge} />}
       {view === "settings" && <ModelSettings bridge={bridge} />}
       {view === "settings" && <VmRuntimeSettings bridge={bridge} />}
       {view === "settings" && <BotManager bridge={bridge} />}

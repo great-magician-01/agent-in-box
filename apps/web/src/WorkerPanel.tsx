@@ -241,7 +241,6 @@ export function WorkerPanel({
     <section id="worker-panel" className="worker-panel" aria-labelledby="worker-panel-title">
       <div className="panel-heading">
         <div>
-          <p className="eyebrow">PI WORKER / MODEL BROKER</p>
           <h3 id="worker-panel-title">项目 Worker 会话</h3>
         </div>
         <span className="muted small">

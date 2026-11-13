@@ -370,7 +370,6 @@ export function TaskBoard({
             <>
               <div className="section-heading">
                 <div>
-                  <p className="eyebrow">TASK TIMELINE</p>
                   <h3>{detail.task.objective}</h3>
                 </div>
                 <button type="button" className="secondary" onClick={() => onSelectTask(null)}>

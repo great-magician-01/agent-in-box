@@ -25,29 +25,11 @@ interface WorkManagerProps {
   focusProjectId?: string;
 }
 
-const VIEW_COPY: Record<WorkView, { eyebrow: string; title: string; description: string }> = {
-  session: {
-    eyebrow: "MAIN ROUTER SESSION",
-    title: "主会话",
-    description:
-      "Router 只持有项目、任务、Worker、看板和归档等结构化工具；所有任务事实仍由持久任务内核维护。",
-  },
-  projects: {
-    eyebrow: "PROJECTS & WORKERS",
-    title: "项目会话",
-    description:
-      "项目与 VM 是多对多关系。共享 VM 的桌面、软件和系统状态由所有绑定项目共同影响，所有项目任务进入同一串行队列。",
-  },
-  tasks: {
-    eyebrow: "DURABLE TASK BOARD",
-    title: "任务看板",
-    description: "任务状态只由任务状态机和执行证据改变；看板拖拽或刷新不会伪造完成。",
-  },
-  archive: {
-    eyebrow: "WORKER ARCHIVE REGISTRY",
-    title: "归档",
-    description: "归档停止 Worker 会话但不停 VM；搜索范围包含摘要、项目和恢复点。",
-  },
+const VIEW_TITLES: Record<WorkView, string> = {
+  session: "主会话",
+  projects: "项目",
+  tasks: "任务看板",
+  archive: "归档",
 };
 
 export function WorkManager({
@@ -205,21 +187,18 @@ export function WorkManager({
     document.getElementById("worker-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [focusedWorkerId, selectedDetail]);
 
-  const copy = VIEW_COPY[view];
+  const title = VIEW_TITLES[view];
   return (
     <section className="panel work-manager" aria-labelledby="work-manager-title">
       <div className="panel-heading">
         <div>
-          <p className="eyebrow">{copy.eyebrow}</p>
-          <h2 id="work-manager-title">{copy.title}</h2>
+          <h2 id="work-manager-title">{title}</h2>
         </div>
         <div className="stream-status" role="status">
           <span className={`dot ${streamState === "live" ? "live" : ""}`} aria-hidden="true" />
-          {streamState === "live" ? "实时更新已连接" : "正在重连；恢复后完整同步"}
-          {board && <span> · 快照 {new Date(board.snapshotAt).toLocaleTimeString("zh-CN")}</span>}
+          {streamState === "live" ? "实时更新已连接" : "正在重连"}
         </div>
       </div>
-      <p className="muted small">{copy.description}</p>
       {error && (
         <div className="notice" role="alert">
           {error}

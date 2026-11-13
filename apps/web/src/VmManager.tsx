@@ -844,7 +844,6 @@ export function VmManager({
 
       <section className="quick-start-card" aria-labelledby="quick-start-title">
         <div>
-          <p className="eyebrow">ONE-CLICK LINUX WORK VM</p>
           <h3 id="quick-start-title">一键创建 Linux 工作 VM</h3>
           <p className="muted small">
             下载并校验 Ubuntu 24.04 官方镜像，创建 4 vCPU / 8 GiB / 40 GiB VM，首次启动通过

@@ -85,7 +85,6 @@ export function WorkspaceSidebar({
     <aside className="workspace-sidebar" aria-label="项目与会话导航">
       <div className="workspace-brand">
         <div>
-          <p className="eyebrow">AGENT IN BOX</p>
           <h1>工作区</h1>
         </div>
         <button

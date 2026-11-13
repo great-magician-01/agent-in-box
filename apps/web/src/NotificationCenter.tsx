@@ -186,7 +186,6 @@ export function NotificationCenter({
     <section className="panel notifications-panel" aria-labelledby="notifications-title">
       <div className="panel-heading">
         <div>
-          <p className="eyebrow">UNIFIED NOTIFICATIONS</p>
           <h2 id="notifications-title">通知中心</h2>
         </div>
         <div className="action-row">

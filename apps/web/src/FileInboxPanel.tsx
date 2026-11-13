@@ -84,7 +84,6 @@ export function FileInboxPanel({
     <section className="panel inbox-panel" aria-labelledby="inbox-title">
       <div className="panel-heading">
         <div>
-          <p className="eyebrow">LOCAL FILE DROP</p>
           <h2 id="inbox-title">文件投递</h2>
         </div>
         <span className="muted small">{files.length} 个文件</span>

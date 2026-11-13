@@ -67,6 +67,8 @@ import type {
   CuaApprovalRecord,
   CuaPolicyUpdateRequest,
   CuaPolicyView,
+  HumanVerificationRecord,
+  HumanVerificationResolveResult,
   VmConsole,
   VmConsoleSession,
   VmControlView,
@@ -603,6 +605,15 @@ export const api = {
       method: "POST",
       body: JSON.stringify(note ? { note } : {}),
     }),
+  humanVerifications: (taskId?: string) =>
+    apiFetch<HumanVerificationRecord[]>(
+      `/api/v1/human-verifications${taskId ? `?taskId=${encodeURIComponent(taskId)}` : ""}`,
+    ),
+  resolveHumanVerification: (id: string, note?: string) =>
+    apiFetch<HumanVerificationResolveResult>(
+      `/api/v1/human-verifications/${encodeURIComponent(id)}/resolve`,
+      { method: "POST", body: JSON.stringify(note ? { note } : {}) },
+    ),
   projectPolicy: (projectId: string) =>
     apiFetch<CuaPolicyView>(`/api/v1/projects/${encodeURIComponent(projectId)}/policy`),
   updateProjectPolicy: (projectId: string, body: CuaPolicyUpdateRequest) =>

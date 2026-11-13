@@ -458,10 +458,21 @@ export function TaskBoard({
               {detail.task.latestSummary && (
                 <p className="result-box">{detail.task.latestSummary}</p>
               )}
-              {detail.task.errorMessage && (
+              {detail.task.errorMessage && detail.task.status !== "waiting_human" && (
                 <p className="notice">
                   {detail.task.errorCode}: {detail.task.errorMessage}
                 </p>
+              )}
+              {detail.task.status === "waiting_human" && trace && (
+                <HumanVerificationPanel
+                  taskId={detail.task.id}
+                  verification={trace.humanVerifications.find((item) => item.status === "pending")}
+                  busy={busy}
+                  onOpenVmConsole={() => onOpenVmConsole?.(detail.task.vmId)}
+                  onResolve={(verificationId) =>
+                    run(() => api.resolveHumanVerification(verificationId, "界面确认人工处理完成"))
+                  }
+                />
               )}
               {detail.task.result !== null && (
                 <pre className="json-view">{JSON.stringify(detail.task.result, null, 2)}</pre>
@@ -580,6 +591,19 @@ export function TaskBoard({
                               </button>
                             </div>
                           )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {trace.humanVerifications.length > 0 && (
+                    <ul className="plain-list">
+                      {trace.humanVerifications.map((verification) => (
+                        <li key={verification.id}>
+                          <div>
+                            <strong>人工处理</strong>{" "}
+                            <span className="muted small">{verification.status}</span>
+                            <p>{verification.reason}</p>
+                          </div>
                         </li>
                       ))}
                     </ul>
@@ -790,6 +814,61 @@ function PriorityEditor({
   );
 }
 
+function HumanVerificationPanel({
+  taskId,
+  verification,
+  busy,
+  onOpenVmConsole,
+  onResolve,
+}: {
+  taskId: string;
+  verification: TaskTraceView["humanVerifications"][number] | undefined;
+  busy: boolean;
+  onOpenVmConsole(): void;
+  onResolve(verificationId: string): void;
+}): React.JSX.Element {
+  return (
+    <section className="subsection human-verification-panel">
+      <h4>需要人工处理</h4>
+      {verification ? (
+        <>
+          <p className="result-box">{verification.reason}</p>
+          <a
+            href={`/api/v1/tasks/${encodeURIComponent(taskId)}/screenshots/${encodeURIComponent(verification.screenshotId)}`}
+            target="_blank"
+            rel="noreferrer"
+            title="打开 Worker 看到的验证截图"
+          >
+            <img
+              className="human-verification-screenshot"
+              src={`/api/v1/tasks/${encodeURIComponent(taskId)}/screenshots/${encodeURIComponent(verification.screenshotId)}`}
+              alt="等待人工处理的 VM 截图"
+            />
+          </a>
+          <p className="muted small">
+            二维码请用手机扫描截图或打开观察栏查看实时画面。需要输入验证码或操作桌面时，请先连接实时控制台并「人工接管」。
+          </p>
+          <div className="button-row">
+            <button type="button" className="secondary" onClick={onOpenVmConsole}>
+              打开实时控制台
+            </button>
+            <button
+              type="button"
+              className="primary"
+              disabled={busy}
+              onClick={() => onResolve(verification.id)}
+            >
+              人工已处理，恢复任务
+            </button>
+          </div>
+        </>
+      ) : (
+        <p className="muted small">人工处理请求正在加载…</p>
+      )}
+    </section>
+  );
+}
+
 function TaskStatusBadge({ status }: { status: TaskStatus }): React.JSX.Element {
   const icons: Record<TaskStatus, string> = {
     created: "○",
@@ -798,6 +877,7 @@ function TaskStatusBadge({ status }: { status: TaskStatus }): React.JSX.Element 
     queued: "→",
     running: "▶",
     waiting_approval: "!",
+    waiting_human: "手",
     blocked: "!",
     completed: "✓",
     failed: "×",

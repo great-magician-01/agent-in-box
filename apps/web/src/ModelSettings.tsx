@@ -440,7 +440,11 @@ export function ModelSettings({
             <>
               <div className="action-row">
                 <label className="field grow">
-                  <span>{draft.credentialProviderId || draft.id} 的 API Key</span>
+                  <span>
+                    {draft.credentialProviderId || draft.id
+                      ? `${draft.credentialProviderId || draft.id} 的 API Key`
+                      : "API Key"}
+                  </span>
                   <input
                     type="password"
                     value={secret}

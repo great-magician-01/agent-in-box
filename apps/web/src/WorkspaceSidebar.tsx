@@ -3,6 +3,14 @@ import { useCallback, useEffect, useState } from "react";
 import type { ProjectView, WorkerView } from "@agent-in-box/protocol";
 import type { AppView } from "./App";
 import { api, subscribeTaskEvents } from "./api";
+import {
+  THEME_LABELS,
+  applyThemePreference,
+  cycleThemePreference,
+  getThemePreference,
+  saveThemePreference,
+  type ThemePreference,
+} from "./theme";
 
 interface WorkspaceSidebarProps {
   view: AppView;
@@ -42,6 +50,8 @@ export function WorkspaceSidebar({
   const [workers, setWorkers] = useState<WorkerView[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
+  const [creatingFor, setCreatingFor] = useState<string | null>(null);
+  const [theme, setTheme] = useState<ThemePreference>(() => getThemePreference());
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -79,6 +89,32 @@ export function WorkspaceSidebar({
       else next.add(projectId);
       return next;
     });
+  }
+
+  function cycleTheme(): void {
+    const next = cycleThemePreference(theme);
+    setTheme(next);
+    saveThemePreference(next);
+    applyThemePreference(next);
+  }
+
+  async function createWorkerFor(project: ProjectView): Promise<void> {
+    const vmId = project.bindings[0]?.binding.vmId ?? null;
+    if (!vmId) {
+      setError("该项目尚未绑定 VM，请先在「项目」页绑定虚拟机。");
+      return;
+    }
+    setCreatingFor(project.project.id);
+    setError(null);
+    try {
+      const created = await api.createWorker({ projectId: project.project.id, vmId });
+      setExpanded((current) => new Set(current).add(project.project.id));
+      onSelectWorker(created.worker.id, project.project.id, vmId);
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setCreatingFor(null);
+    }
   }
 
   return (
@@ -151,20 +187,35 @@ export function WorkspaceSidebar({
               const isExpanded = expanded.has(item.project.id);
               return (
                 <li key={item.project.id}>
-                  <button
-                    type="button"
-                    className={`workspace-project ${view === "projects" ? "active" : ""}`}
-                    onClick={() => {
-                      toggleProject(item.project.id);
-                      onSelectProject(item.project.id);
-                    }}
-                  >
-                    <span className="workspace-chevron" aria-hidden="true">
-                      {isExpanded ? "▾" : "▸"}
-                    </span>
-                    <span className="workspace-project-name">{item.project.name}</span>
-                    <span className="workspace-count">{projectWorkers.length}</span>
-                  </button>
+                  <div className="workspace-project-row">
+                    <button
+                      type="button"
+                      className={`workspace-project ${view === "projects" ? "active" : ""}`}
+                      onClick={() => {
+                        toggleProject(item.project.id);
+                        onSelectProject(item.project.id);
+                      }}
+                    >
+                      <span className="workspace-chevron" aria-hidden="true">
+                        {isExpanded ? "▾" : "▸"}
+                      </span>
+                      <span className="workspace-project-name">{item.project.name}</span>
+                      <span className="workspace-count">{projectWorkers.length}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="workspace-add-session"
+                      title={
+                        item.bindings.length > 0
+                          ? "新建 Worker 会话"
+                          : "新建 Worker 会话（需先在「项目」页绑定虚拟机）"
+                      }
+                      disabled={creatingFor === item.project.id}
+                      onClick={() => void createWorkerFor(item)}
+                    >
+                      ＋
+                    </button>
+                  </div>
                   {isExpanded && (
                     <ul className="workspace-session-list">
                       {projectWorkers.length === 0 ? (
@@ -203,6 +254,13 @@ export function WorkspaceSidebar({
             })}
           </ul>
         )}
+      </div>
+
+      <div className="workspace-theme">
+        <span>主题</span>
+        <button type="button" className="link-button" onClick={cycleTheme}>
+          {THEME_LABELS[theme]}
+        </button>
       </div>
 
       <nav className="workspace-footer" aria-label="其他视图">

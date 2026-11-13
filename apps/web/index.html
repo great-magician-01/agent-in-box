@@ -7,6 +7,19 @@
     <link rel="icon" type="image/svg+xml" href="/logo.svg" sizes="any" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
     <title>Agent-in-Box</title>
+    <script>
+      // Apply the persisted theme before first paint to avoid a flash.
+      (function () {
+        try {
+          var theme = window.localStorage.getItem("agent-in-box:theme");
+          if (theme === "light" || theme === "dark") {
+            document.documentElement.dataset.theme = theme;
+          }
+        } catch (error) {
+          // Storage unavailable; fall back to the system preference.
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

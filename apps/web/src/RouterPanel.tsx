@@ -138,49 +138,54 @@ export function RouterPanel({ revision, onChanged }: RouterPanelProps): React.JS
                 ? "设置选择"
                 : "默认 Provider"}
           </span>
-          {!view.selectionLockedByEnv && (
-            <div className="worker-switch-model">
-              <label className="field">
-                <span>Router Provider</span>
-                <select
-                  value={switchProvider}
-                  onChange={(event) => {
-                    setSwitchProvider(event.target.value);
-                    setSwitchModel(modelsFor(event.target.value)[0]?.id ?? "");
-                  }}
-                  disabled={busy || running}
+          {!view.selectionLockedByEnv &&
+            (enabledProviders.length === 0 ? (
+              <span className="muted small">
+                尚未配置模型 Provider，请先到「设置 → 模型与 API 配置」添加。
+              </span>
+            ) : (
+              <div className="worker-switch-model">
+                <label className="field">
+                  <span>Router Provider</span>
+                  <select
+                    value={switchProvider}
+                    onChange={(event) => {
+                      setSwitchProvider(event.target.value);
+                      setSwitchModel(modelsFor(event.target.value)[0]?.id ?? "");
+                    }}
+                    disabled={busy || running}
+                  >
+                    {enabledProviders.map((provider) => (
+                      <option key={provider.id} value={provider.id}>
+                        {provider.id}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  <span>Router 模型</span>
+                  <select
+                    value={switchModel}
+                    onChange={(event) => setSwitchModel(event.target.value)}
+                    disabled={busy || running}
+                  >
+                    {modelsFor(switchProvider).map((model) => (
+                      <option key={model.id} value={model.id}>
+                        {model.id}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={busy || running || !switchProvider || !switchModel}
+                  onClick={() => void applyModel()}
                 >
-                  {enabledProviders.map((provider) => (
-                    <option key={provider.id} value={provider.id}>
-                      {provider.id}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="field">
-                <span>Router 模型</span>
-                <select
-                  value={switchModel}
-                  onChange={(event) => setSwitchModel(event.target.value)}
-                  disabled={busy || running}
-                >
-                  {modelsFor(switchProvider).map((model) => (
-                    <option key={model.id} value={model.id}>
-                      {model.id}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <button
-                type="button"
-                className="secondary"
-                disabled={busy || running || !switchProvider || !switchModel}
-                onClick={() => void applyModel()}
-              >
-                应用并重启会话
-              </button>
-            </div>
-          )}
+                  应用并重启会话
+                </button>
+              </div>
+            ))}
           <span className="muted small">{tools.length} 个结构化工具</span>
         </div>
       )}
@@ -188,27 +193,16 @@ export function RouterPanel({ revision, onChanged }: RouterPanelProps): React.JS
       {error && <div className="notice">{error}</div>}
       {notice && <div className="validation-box ok">{notice}</div>}
 
-      <div className="router-layout">
-        <div className="router-conversation">
-          <div className="worker-messages" aria-live="polite">
-            {messages.length === 0 ? (
-              <p className="muted small">
-                尚无 Router 消息。描述目标，Router 会先查询项目与已有 Worker，再创建或复用任务。
-              </p>
-            ) : (
-              messages.map((message) => (
-                <article key={message.id} className={`chat-message ${message.role}`}>
-                  <span className="chat-role">
-                    {message.role === "user" ? "用户" : "Router"} ·{" "}
-                    {new Date(message.createdAt).toLocaleTimeString("zh-CN")}
-                  </span>
-                  <p>{message.content}</p>
-                </article>
-              ))
-            )}
-          </div>
+      {messages.length === 0 ? (
+        <div className="chat-empty">
+          <img src="/logo.svg" alt="" width={44} height={44} />
+          <h3>开始一个任务</h3>
+          <p className="muted">
+            描述目标，Agent 会检索项目与既有 Worker，创建或复用任务并跟进执行；也可以先到
+            <strong> 项目 </strong>页创建项目并绑定虚拟机。
+          </p>
           <label className="field">
-            <span>Router 消息</span>
+            <span>任务目标</span>
             <textarea
               rows={3}
               value={text}
@@ -225,7 +219,7 @@ export function RouterPanel({ revision, onChanged }: RouterPanelProps): React.JS
               disabled={busy || running || !text.trim()}
               onClick={() => void send()}
             >
-              {running ? "Router 处理中" : "发送给 Router"}
+              {running ? "处理中" : "发送"}
             </button>
             <button
               type="button"
@@ -233,51 +227,103 @@ export function RouterPanel({ revision, onChanged }: RouterPanelProps): React.JS
               disabled={busy || !running}
               onClick={() => void abort()}
             >
-              中止 Router 回合
-            </button>
-            <button type="button" className="secondary" disabled={busy} onClick={() => void load()}>
-              刷新
+              中止
             </button>
           </div>
         </div>
-
-        <aside className="router-side">
-          <details className="provider-config" open>
-            <summary>Router 工具面（{tools.length}）</summary>
-            <ul className="provider-list">
-              {tools.map((tool) => (
-                <li key={tool.name}>
-                  <strong>{tool.name}</strong>
-                  <span className="muted small">{tool.description}</span>
-                </li>
+      ) : (
+        <div className="router-layout">
+          <div className="router-conversation">
+            <div className="worker-messages" aria-live="polite">
+              {messages.map((message) => (
+                <article key={message.id} className={`chat-message ${message.role}`}>
+                  <span className="chat-role">
+                    {message.role === "user" ? "用户" : "Router"} ·{" "}
+                    {new Date(message.createdAt).toLocaleTimeString("zh-CN")}
+                  </span>
+                  <p>{message.content}</p>
+                </article>
               ))}
-            </ul>
-          </details>
-          <details className="provider-config">
-            <summary>最近工具调用（{toolCalls.length}）</summary>
-            {toolCalls.length === 0 ? (
-              <p className="muted small">尚无工具调用。</p>
-            ) : (
+            </div>
+            <label className="field">
+              <span>Router 消息</span>
+              <textarea
+                rows={3}
+                value={text}
+                maxLength={20000}
+                onChange={(event) => setText(event.target.value)}
+                placeholder="例如：在项目 X 中整理本周发票并输出报表"
+                disabled={busy}
+              />
+            </label>
+            <div className="action-row">
+              <button
+                type="button"
+                className="primary"
+                disabled={busy || running || !text.trim()}
+                onClick={() => void send()}
+              >
+                {running ? "Router 处理中" : "发送给 Router"}
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                disabled={busy || !running}
+                onClick={() => void abort()}
+              >
+                中止 Router 回合
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                disabled={busy}
+                onClick={() => void load()}
+              >
+                刷新
+              </button>
+            </div>
+          </div>
+
+          <aside className="router-side">
+            <details className="provider-config" open>
+              <summary>Router 工具面（{tools.length}）</summary>
               <ul className="provider-list">
-                {toolCalls
-                  .slice()
-                  .reverse()
-                  .map((call) => (
-                    <li key={call.id}>
-                      <strong>
-                        {call.toolName} · {call.status} · {call.durationMs}ms
-                      </strong>
-                      <span className="muted small">
-                        {new Date(call.createdAt).toLocaleTimeString("zh-CN")}
-                      </span>
-                      {call.errorMessage && <span className="error-line">{call.errorMessage}</span>}
-                    </li>
-                  ))}
+                {tools.map((tool) => (
+                  <li key={tool.name}>
+                    <strong>{tool.name}</strong>
+                    <span className="muted small">{tool.description}</span>
+                  </li>
+                ))}
               </ul>
-            )}
-          </details>
-        </aside>
-      </div>
+            </details>
+            <details className="provider-config">
+              <summary>最近工具调用（{toolCalls.length}）</summary>
+              {toolCalls.length === 0 ? (
+                <p className="muted small">尚无工具调用。</p>
+              ) : (
+                <ul className="provider-list">
+                  {toolCalls
+                    .slice()
+                    .reverse()
+                    .map((call) => (
+                      <li key={call.id}>
+                        <strong>
+                          {call.toolName} · {call.status} · {call.durationMs}ms
+                        </strong>
+                        <span className="muted small">
+                          {new Date(call.createdAt).toLocaleTimeString("zh-CN")}
+                        </span>
+                        {call.errorMessage && (
+                          <span className="error-line">{call.errorMessage}</span>
+                        )}
+                      </li>
+                    ))}
+                </ul>
+              )}
+            </details>
+          </aside>
+        </div>
+      )}
     </section>
   );
 }

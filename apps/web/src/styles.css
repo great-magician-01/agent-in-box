@@ -3286,3 +3286,197 @@ button.link-button,
 .brand .subtitle {
   margin-top: 0.4rem;
 }
+
+/* Explicit theme override (data-theme on <html> beats prefers-color-scheme). */
+:root[data-theme="light"] {
+  --bg: #fbfbfc;
+  --surface: #ffffff;
+  --surface-2: #f3f3f5;
+  --surface-3: #eaeaed;
+  --border: #e4e4e8;
+  --border-2: #d2d2d8;
+  --text: #19191c;
+  --text-2: #55555c;
+  --muted: #8d8d97;
+  --accent: #19191c;
+  --on-accent: #ffffff;
+  --ok: #177a47;
+  --warn: #a16207;
+  --bad: #b3261e;
+}
+
+:root[data-theme="dark"] {
+  --bg: #101012;
+  --surface: #17171a;
+  --surface-2: #1e1e22;
+  --surface-3: #26262b;
+  --border: #28282e;
+  --border-2: #34343b;
+  --text: #f2f2f4;
+  --text-2: #c2c2ca;
+  --muted: #8f8f99;
+  --accent: #f2f2f4;
+  --on-accent: #17171a;
+  --ok: #4ade80;
+  --warn: #fbbf24;
+  --bad: #f87171;
+}
+
+/* Consistent heading rhythm inside panels (Codex-style calm hierarchy). */
+.panel h3,
+.card h3 {
+  margin: 1.3rem 0 0.65rem;
+  font-size: 0.95rem;
+  letter-spacing: -0.01em;
+}
+
+.panel h4 {
+  margin: 1rem 0 0.5rem;
+  font-size: 0.82rem;
+}
+
+.panel h3:first-child,
+.panel-heading + h3 {
+  margin-top: 0;
+}
+
+/* Chat composer: rounded container focus state. */
+.router-conversation > .field textarea,
+.worker-conversation > .field textarea,
+.chat-empty .field textarea {
+  border-radius: 14px;
+  line-height: 1.55;
+}
+
+.router-conversation > .field:focus-within textarea,
+.worker-conversation > .field:focus-within textarea,
+.chat-empty .field:focus-within textarea {
+  border-color: var(--text-2);
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+/* Empty conversation state: centered hero + composer, like Codex/ChatGPT. */
+.chat-empty {
+  display: grid;
+  justify-items: center;
+  gap: 0.55rem;
+  max-width: 42rem;
+  margin: 2.5rem auto 1rem;
+  padding: 1rem;
+  text-align: center;
+}
+
+.chat-empty img {
+  border-radius: 12px;
+}
+
+.chat-empty h3 {
+  margin: 0.4rem 0 0;
+  font-size: 1.25rem;
+  letter-spacing: -0.02em;
+}
+
+.chat-empty p {
+  max-width: 30rem;
+  margin: 0 0 0.8rem;
+  font-size: 0.86rem;
+  line-height: 1.65;
+}
+
+.chat-empty .field {
+  width: 100%;
+  text-align: left;
+}
+
+.chat-empty .action-row {
+  justify-content: center;
+  width: 100%;
+}
+
+/* Sidebar project row: room for the new-session action. */
+.workspace-project-row {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+.workspace-project-row .workspace-project {
+  flex: 1;
+  min-width: 0;
+}
+
+.workspace-add-session {
+  flex: 0 0 auto;
+  width: 1.85rem;
+  height: 1.85rem;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.05rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.workspace-add-session:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  color: var(--text);
+}
+
+.workspace-add-session:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Sidebar footer theme switch. */
+.workspace-theme {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  padding: 0.15rem 0.4rem 0;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+/* Model settings: bottom section follows the same rhythm as the top grid. */
+.model-settings .model-selection {
+  margin-top: 1.3rem;
+  padding-top: 1.1rem;
+  border-top: 1px solid var(--border);
+}
+
+.model-settings .model-selection h3 {
+  margin-top: 0;
+}
+
+/* Model whitelist rows wrap as a unit instead of orphaning the delete button. */
+.model-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.model-row input[type="text"],
+.model-row input:not([type]) {
+  flex: 1 1 11rem;
+  min-width: 0;
+}
+
+.model-row .checkbox-row {
+  flex: 0 0 auto;
+}
+
+/* Overview cards do not need a fixed tall frame. */
+.card {
+  min-height: 0;
+}
+
+/* Login shell: subtitle drops below the brand lockup. */
+.login-shell .brand {
+  flex-wrap: wrap;
+  row-gap: 0.5rem;
+}

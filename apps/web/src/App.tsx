@@ -283,6 +283,18 @@ function AuthenticatedApp({
 
   useEffect(() => {
     if (!bridge) return;
+    // The desktop app always opens on the session view; a hash left over from
+    // a previous run must not resurrect an old page.
+    if (window.location.hash !== "#/session") {
+      window.history.replaceState(null, "", "#/session");
+      setView("session");
+      setSelectedWorker(null);
+      setSelectedProjectId(null);
+    }
+  }, [bridge]);
+
+  useEffect(() => {
+    if (!bridge) return;
     return bridge.app.onNavigate((next) => navigate(next));
   }, [bridge, navigate]);
 

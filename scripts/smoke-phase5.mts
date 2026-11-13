@@ -438,12 +438,28 @@ try {
   });
   await stopChild(children.at(-1));
   await startControlPlane();
-  worker = await openWorker();
-  assert.equal(await worker.service.claimNext(runningVm.id), null);
   const afterRestart = await api<TaskBoardSnapshot>("/api/v1/tasks/board");
-  assert.equal(afterRestart.tasks.find((task) => task.id === high.task.id).status, "running");
-  assert.equal(afterRestart.tasks.find((task) => task.id === high.task.id).attemptCount, 1);
-  passed("控制平面真实重启后运行中任务不重复认领，且浏览器无完成路由");
+  const restartedHigh = afterRestart.tasks.find((task) => task.id === high.task.id);
+  assert.equal(restartedHigh?.status, "failed");
+  assert.equal(restartedHigh?.errorCode, "worker_runtime_restarted");
+  assert.equal(restartedHigh?.attemptCount, 1);
+  const restartedDetail = await api<TaskDetail>(`/api/v1/tasks/${high.task.id}`);
+  assert.ok(
+    restartedDetail.events.some((event) => event.type === "worker.runtime_restarted"),
+    "restart recovery event missing",
+  );
+  worker = await openWorker();
+  const retriedHigh = await api<TaskRecord>(`/api/v1/tasks/${high.task.id}/retry`, {
+    method: "POST",
+  });
+  assert.equal(retriedHigh.status, "queued");
+  assert.equal(retriedHigh.errorCode, null);
+  const reclaimed = await worker.service.claimNext(runningVm.id);
+  assert.equal(reclaimed?.id, high.task.id);
+  assert.equal(reclaimed?.attemptCount, 2);
+  passed(
+    "控制平面真实重启后运行中任务安全失败、不盲目重放，重试后按优先级重新认领，且浏览器无完成路由",
+  );
 
   const artifactBytes = Buffer.from("phase 5 verified evidence\n");
   await writeFile(path.join(temporary, "artifacts", "evidence", "result.txt"), artifactBytes);

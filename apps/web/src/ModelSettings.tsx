@@ -12,6 +12,7 @@ import type {
 } from "@agent-in-box/protocol";
 import { api } from "./api";
 import { credentialStatus } from "./desktop";
+import { CUSTOM_PRESET_ID, PROVIDER_PRESETS } from "./provider-presets";
 
 interface ModelSettingsProps {
   bridge: DesktopBridge | null;
@@ -33,9 +34,9 @@ interface ProviderDraft {
 function emptyDraft(): ProviderDraft {
   return {
     id: "",
-    baseUrl: "https://api.anthropic.com/v1",
-    api: "anthropic-messages",
-    credentialProviderId: "anthropic",
+    baseUrl: "",
+    api: "openai-completions",
+    credentialProviderId: "",
     models: [...EMPTY_MODELS],
     enabled: true,
   };
@@ -105,7 +106,31 @@ export function ModelSettings({
   }, [load, revision]);
 
   function updateDraft(patch: Partial<ProviderDraft>): void {
-    setDraft((current) => ({ ...current, ...patch }));
+    setDraft((current) => {
+      const next = { ...current, ...patch };
+      // Keep the credential slot in sync with the provider id unless the user
+      // deliberately pointed it somewhere else.
+      if (
+        patch.id !== undefined &&
+        (current.credentialProviderId === "" || current.credentialProviderId === current.id)
+      ) {
+        next.credentialProviderId = patch.id;
+      }
+      return next;
+    });
+  }
+
+  function applyPreset(presetId: string): void {
+    const preset = PROVIDER_PRESETS.find((candidate) => candidate.id === presetId);
+    if (!preset) return;
+    setDraft({
+      id: preset.id,
+      baseUrl: preset.baseUrl,
+      api: preset.api,
+      credentialProviderId: preset.id,
+      models: preset.models.map((model) => ({ ...model })),
+      enabled: true,
+    });
   }
 
   function updateModel(index: number, patch: Partial<ModelDefinition>): void {
@@ -130,14 +155,15 @@ export function ModelSettings({
           ...(model.input ? { input: model.input } : {}),
         }))
         .filter((model) => model.id.length > 0);
-      if (!draft.id.trim() || !draft.baseUrl.trim() || !draft.credentialProviderId.trim()) {
+      const credentialProviderId = draft.credentialProviderId.trim() || draft.id.trim();
+      if (!draft.id.trim() || !draft.baseUrl.trim() || !credentialProviderId) {
         throw new Error("Provider ID、Base URL 和凭据 Provider ID 不能为空");
       }
       if (models.length === 0) throw new Error("至少配置一个模型");
       await api.upsertModelProvider(draft.id.trim(), {
         baseUrl: draft.baseUrl.trim(),
         api: draft.api,
-        credentialProviderId: draft.credentialProviderId.trim(),
+        credentialProviderId,
         models,
         enabled: draft.enabled,
       });
@@ -237,15 +263,10 @@ export function ModelSettings({
     <section className="panel model-settings" aria-labelledby="model-settings-title">
       <div className="panel-heading">
         <div>
-          <p className="eyebrow">MODEL PROFILES / CREDENTIALS</p>
           <h2 id="model-settings-title">模型与 API 配置</h2>
         </div>
         <span className="muted small">{configuration?.providers.length ?? 0} 套配置</span>
       </div>
-      <p className="muted small">
-        可以保存多套 Provider/Base URL/模型组合并切换。长期 API Key 只保存在桌面应用的系统安全存储，
-        Guest 只会收到短期 Broker Token，不会拿到这里的密钥。
-      </p>
       {error && <div className="notice">{error}</div>}
       {message && <div className="validation-box ok">{message}</div>}
 
@@ -282,6 +303,22 @@ export function ModelSettings({
 
         <div className="model-provider-editor">
           <h3>{selectedProvider ? `编辑 ${selectedProvider.id}` : "新增配置"}</h3>
+          {!selectedProvider && (
+            <label className="field">
+              <span>从预设创建（仍可修改）</span>
+              <select
+                value={CUSTOM_PRESET_ID}
+                onChange={(event) => applyPreset(event.target.value)}
+              >
+                <option value={CUSTOM_PRESET_ID}>选择服务商预设…</option>
+                {PROVIDER_PRESETS.map((preset) => (
+                  <option key={preset.id} value={preset.id}>
+                    {preset.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <div className="provider-form">
             <label className="field">
               <span>Provider ID（配置名）</span>

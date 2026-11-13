@@ -19,6 +19,7 @@ import {
   formatGb,
   parseGb,
 } from "./format";
+import { CUSTOM_PRESET_ID, DEFAULT_PRESET_ID, PROVIDER_PRESETS } from "./provider-presets";
 
 const STEPS = [
   { id: "host", title: "环境检查", hint: "确认这台电脑可以运行 Linux VM" },
@@ -35,12 +36,10 @@ interface OnboardingWizardProps {
   onCompleted(result: OnboardingCompleteResult): void;
 }
 
-const PROVIDERS = [
-  { id: "anthropic", label: "Anthropic" },
-  { id: "openai", label: "OpenAI" },
-  { id: "google", label: "Google" },
-  { id: "custom", label: "其他（自定义）" },
-] as const;
+const PROVIDER_OPTIONS = [
+  ...PROVIDER_PRESETS.map((preset) => ({ id: preset.id, label: preset.label })),
+  { id: CUSTOM_PRESET_ID, label: "完全自定义" },
+];
 
 export function OnboardingWizard({
   initialState,
@@ -72,15 +71,15 @@ export function OnboardingWizard({
   const [closeBehaviorSaved, setCloseBehaviorSaved] = useState(false);
 
   const [credentials, setCredentials] = useState<DesktopCredentialStatus | null>(null);
-  const knownProvider = PROVIDERS.some(
+  const knownProvider = PROVIDER_PRESETS.some(
     (provider) => provider.id === initialState.preferredModelProvider,
   );
   const [credentialProvider, setCredentialProvider] = useState<string>(
     knownProvider
-      ? (initialState.preferredModelProvider ?? "anthropic")
+      ? (initialState.preferredModelProvider ?? DEFAULT_PRESET_ID)
       : initialState.preferredModelProvider
-        ? "custom"
-        : "anthropic",
+        ? CUSTOM_PRESET_ID
+        : DEFAULT_PRESET_ID,
   );
   const [customProvider, setCustomProvider] = useState(
     knownProvider ? "" : (initialState.preferredModelProvider ?? ""),
@@ -184,7 +183,7 @@ export function OnboardingWizard({
   }, [step.id, bridge, credentialsLoading, credentials, savedProvider]);
 
   const effectiveProvider =
-    credentialProvider === "custom" ? customProvider.trim() : credentialProvider;
+    credentialProvider === CUSTOM_PRESET_ID ? customProvider.trim() : credentialProvider;
 
   const credentialsConfigured = Boolean(
     (credentials?.providers.length ?? 0) > 0 || initialState.credentialsConfigured,
@@ -233,6 +232,7 @@ export function OnboardingWizard({
       setCredentialError("Provider 标识必须是小写字母、数字、下划线或短横线");
       return;
     }
+    const preset = PROVIDER_PRESETS.find((candidate) => candidate.id === credentialProvider);
     setCredentialsLoading(true);
     setCredentialError(null);
     try {
@@ -240,6 +240,19 @@ export function OnboardingWizard({
         providerId: effectiveProvider,
         secret,
       });
+      // Selecting a built-in preset also registers the provider (base URL,
+      // wire protocol and model whitelist) so the first conversation works
+      // right after onboarding; fully-custom providers are completed later
+      // in settings.
+      if (preset) {
+        await api.upsertModelProvider(preset.id, {
+          baseUrl: preset.baseUrl,
+          api: preset.api,
+          credentialProviderId: preset.id,
+          models: preset.models,
+          enabled: true,
+        });
+      }
       setCredentials(status);
       setSavedProvider(effectiveProvider);
       setSecret("");
@@ -320,7 +333,6 @@ export function OnboardingWizard({
   return (
     <div className="wizard">
       <aside className="wizard-steps">
-        <p className="eyebrow">FIRST RUN</p>
         <h1>首次启动向导</h1>
         <ol>
           {STEPS.map((item, index) => (
@@ -554,19 +566,19 @@ export function OnboardingWizard({
               <>
                 <div className="credential-box">
                   <label className="field">
-                    <span>Provider</span>
+                    <span>服务商</span>
                     <select
                       value={credentialProvider}
                       onChange={(event) => setCredentialProvider(event.target.value)}
                     >
-                      {PROVIDERS.map((provider) => (
+                      {PROVIDER_OPTIONS.map((provider) => (
                         <option key={provider.id} value={provider.id}>
                           {provider.label}
                         </option>
                       ))}
                     </select>
                   </label>
-                  {credentialProvider === "custom" && (
+                  {credentialProvider === CUSTOM_PRESET_ID && (
                     <label className="field">
                       <span>自定义 Provider 标识</span>
                       <input
@@ -595,6 +607,10 @@ export function OnboardingWizard({
                   >
                     {credentialsLoading ? "保存中…" : "保存到系统安全存储"}
                   </button>
+                  <p className="muted small">
+                    选择内置服务商会自动填好接入地址与模型清单，保存后即可直接对话；自定义 Provider
+                    可稍后在「设置 → 模型」中补全。
+                  </p>
                 </div>
                 {credentialError && <div className="notice">{credentialError}</div>}
                 {credentials && !credentials.secureStorageAvailable && (

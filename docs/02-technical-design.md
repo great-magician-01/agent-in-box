@@ -291,7 +291,7 @@ created_at, started_at, completed_at
 
 ### 5.7 阶段 5 持久化与接口实现（2026-11-11）
 
-Migration `004_phase5_projects_tasks` 增加 `task_dependencies`、`task_artifacts`、`project_activities`，并为项目工作区和任务结果、错误详情、尝试次数、更新时间补充字段。`tasks_single_execution_idx` 是 SQLite 部分唯一索引：同一 `vm_id` 最多存在一个 `running` 或 `waiting_approval` 任务。等待审批仍视为占用当前执行位置。Migration `006_phase7_computer_use` 增加 `project_policies`、`task_execution_state`、`cua_screenshots`、`cua_actions`、`cua_approvals` 和 `cua_tokens`，为动作审计、截图引用、审批、执行限制计数和短期 Broker 令牌提供持久化。
+Migration `004_phase5_projects_tasks` 增加 `task_dependencies`、`task_artifacts`、`project_activities`，并为项目工作区和任务结果、错误详情、尝试次数、更新时间补充字段。`tasks_single_execution_idx` 是 SQLite 部分唯一索引：同一 `vm_id` 最多存在一个 `running`、`waiting_approval` 或 `waiting_human` 任务。等待审批和等待人工处理仍视为占用当前执行位置。Migration `006_phase7_computer_use` 增加 `project_policies`、`task_execution_state`、`cua_screenshots`、`cua_actions`、`cua_approvals` 和 `cua_tokens`，为动作审计、截图引用、审批、执行限制计数和短期 Broker 令牌提供持久化。Migration `014_human_verification` 增加 `human_verifications`，并重建执行位索引以包含 `waiting_human`。
 
 `TaskService.claimNext(vmId)` 在事务中检查活动执行、依赖状态和 `priority DESC, created_at ASC, id ASC` 队列顺序，并在最后复核 VM 必须运行、项目未归档且绑定仍存在。认领成功后持久化 `running` 和 `attempt_count`；控制平面重启不会把该记录重置为新任务，也不会自动再次认领。不同 VM 可以独立认领。VM 停止时依赖就绪的 `queued` 会退回 `waiting_vm`；重试根据依赖和 VM 状态进入 `created`、`waiting_vm` 或 `queued`，并重新检查项目/绑定。项目 Worker 遇到其他项目的队首任务返回空，不抢走该任务。阶段 6 的 Worker Runtime 必须在此基础上补充进程对账、Abort 和 Lease 生命周期，不能把持久化 `running` 误认为 Pi 进程仍健康。
 
@@ -369,11 +369,15 @@ created
   → running
   → completed | failed | cancelled
 
-running / waiting_approval → blocked
+running / waiting_approval → waiting_human（需要扫码/验证码/CAPTCHA 等人工验证）
+waiting_human → queued | waiting_vm（人类确认处理完成）
+running / waiting_approval / waiting_human → blocked
 blocked → queued（用户明确恢复或重试）
 ```
 
 任何状态迁移都通过事务和合法迁移表完成。不能由前端拖拽直接写成 `completed`。
+
+`waiting_human` 仍占用该 VM 的执行位（`tasks_single_execution_idx` 包含该状态），但 Worker 回合结束并释放 Execution Lease，人工可以通过只读观察栏扫码，或通过“人工接管”控制台输入验证码。主机不做服务端图像识别：Worker 的多模态模型自己判断截图，并调用 `vm_request_human_verification` 上报 `reason` 与最新 `screenshotId`；主机只校验令牌、任务、Lease 和截图新鲜度，写入 `human_verifications`，暂停任务并通知。恢复时任务重新入队，Worker 重新观察后再继续；恢复前必须确认没有活动的 human Lease。
 
 ### 6.2 Per-VM Execution Lease
 

@@ -45,7 +45,7 @@
 | 📁 **项目与任务** | 多项目、项目与 Linux / Windows VM 多对多绑定、持久任务队列、依赖与优先级、跨项目串行、任务看板、Trace / 截图 / 审批 / 产物 |
 | 📦 **虚拟机** | Ubuntu 24.04 一键创建、Windows Golden Image、QEMU / WHPX 生命周期、快照、项目目录备份、共享 VM 影响确认、资源预算与空闲休眠 |
 | 🤖 **Agent** | 宿主 Router + Guest Worker、Pi 运行时、原生 / 摘要恢复、自动归档、Active Roster、可搜索 Archive Registry、按项目开启 MCP / 默认 Subagent |
-| 🖱️ **Computer Use** | 截图、点击 / 双击、移动、输入、按键、滚动、拖拽、等待、完成；每一步动作与前后截图入库，受步数 / 时长 / 无进展保护 |
+| 🖱️ **Computer Use** | 截图、点击 / 双击、移动、输入、按键、滚动、拖拽、等待、完成；每一步动作与前后截图入库，受步数 / 时长 / 无进展保护；遇到扫码 / CAPTCHA / 手机验证码会暂停并通知人工处理 |
 | 🔐 **安全** | 只监听回环、本机访问密钥、HttpOnly 会话、CSRF / Origin 校验、Per-VM Lease、人工审批、Guest 证据校验、日志与诊断脱敏 |
 | 🧠 **模型** | 多 Provider 配置、Worker 默认模型与 Router 模型、OpenAI-compatible / Anthropic Messages 流式转发、用量记录、短期令牌 |
 | 💬 **机器人** | 飞书官方 SDK 长连接、QQ Bot API v2、身份 / 群白名单、绑定码、任务 / 审批通知、敏感操作二次确认 |
@@ -117,7 +117,7 @@ Electron + NestJS + React + Go + QEMU，没有隐藏云服务。数据目录、�
 
 ## 🧠 模型与入口
 
-设置页可以维护多套 Provider：配置名、Base URL、API 类型、模型白名单和凭据引用。Worker 默认模型和 Router 模型分开选择；Router 空闲时应用新模型并重建会话，已有 Worker 切换模型会归档旧会话再新建。长期 API Key 只显示「已保存 / 未保存」，不在接口或页面回显。
+设置页可以维护多套 Provider：配置名、Base URL、API 类型、模型白名单和凭据引用。模型白名单可声明是否支持图片输入；Computer Use Worker 必须使用支持图片的多模态模型，否则创建/恢复 Worker 会被拒绝。Worker 默认模型和 Router 模型分开选择；Router 空闲时应用新模型并重建会话，已有 Worker 切换模型会归档旧会话再新建。长期 API Key 只显示「已保存 / 未保存」，不在接口或页面回显。
 
 飞书和 QQ 都从本机出站：
 

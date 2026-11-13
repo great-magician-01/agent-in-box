@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Agent-in-Box · 项目图标「盒中智能体」
+  风格：延续「时间线」图标的纯黑白、粗记号笔手绘：一只微微歪斜的粗黑方框。
+  内容：方框就是 VM 的盒子，盒子里探出一个带天线的智能体面孔；手绘的不规则
+        笔触与实心圆点保留印章感，小尺寸下仍能读成「框里有个 Agent」。
+  说明：本 SVG 为唯一源文件；站点图标直接使用，桌面图标由它导出 PNG/ICO。
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Agent-in-Box">
+  <rect width="64" height="64" rx="14" fill="#fff"/>
+  <path d="M9.4 12.3C17.7 9.8 46.6 10 53.6 12.9C55.8 20.2 55.9 43.1 53.8 50.6C46.2 53.6 18 53.5 10.7 50.3C8.5 43.1 8.6 20.3 9.4 12.3Z" fill="none" stroke="#111" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <g transform="rotate(-2 32 34)">
+    <path d="M32 24C31.8 21.6 31.9 19.8 32 18.4" fill="none" stroke="#111" stroke-width="3" stroke-linecap="round"/>
+    <circle cx="32" cy="16.2" r="2.25" fill="#111"/>
+    <path d="M20.6 25.2C25.6 23.4 38.4 23.4 43.4 25.3C45.2 30 45.1 39.2 43.3 43.9C38.2 45.7 25.8 45.6 20.7 43.8C18.9 39.1 19 30 20.6 25.2Z" fill="#fff" stroke="#111" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="27" cy="33.1" r="2.3" fill="#111"/>
+    <circle cx="37" cy="33.1" r="2.3" fill="#111"/>
+    <path d="M27.9 38.5C30.3 40.3 33.7 40.3 36.1 38.4" fill="none" stroke="#111" stroke-width="2.6" stroke-linecap="round"/>
+  </g>
+</svg>

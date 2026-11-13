@@ -18,6 +18,8 @@ export interface WorkerModelBrokerSpec {
   model: string;
   api: WorkerModelApi;
   reasoning?: boolean;
+  /** Declared Pi model input modalities; text+image when omitted. */
+  input?: readonly ("text" | "image")[];
 }
 
 /**

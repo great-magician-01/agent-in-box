@@ -247,7 +247,7 @@ export class PiWorkerEngine implements WorkerEngine {
             {
               id: broker.model,
               name: broker.model,
-              input: ["text", "image"],
+              input: broker.input ?? ["text", "image"],
               reasoning: broker.reasoning === true,
             },
           ],

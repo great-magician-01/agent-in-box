@@ -127,6 +127,7 @@ export function ModelSettings({
           id: model.id.trim(),
           ...(model.name?.trim() ? { name: model.name.trim() } : {}),
           ...(model.reasoning === true ? { reasoning: true } : {}),
+          ...(model.input ? { input: model.input } : {}),
         }))
         .filter((model) => model.id.length > 0);
       if (!draft.id.trim() || !draft.baseUrl.trim() || !draft.credentialProviderId.trim()) {
@@ -346,6 +347,18 @@ export function ModelSettings({
                   />
                   <span>Reasoning</span>
                 </label>
+                <label className="checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={model.input ? model.input.includes("image") : true}
+                    onChange={(event) =>
+                      updateModel(index, {
+                        input: event.target.checked ? ["text", "image"] : ["text"],
+                      })
+                    }
+                  />
+                  <span>支持图片</span>
+                </label>
                 <button
                   type="button"
                   className="secondary"
@@ -359,6 +372,9 @@ export function ModelSettings({
               </div>
             ))}
           </div>
+          <p className="muted small">
+            Computer Use Worker 必须使用支持图片输入的模型；未勾选“支持图片”的模型只能用于 Router。
+          </p>
           <div className="action-row">
             <button
               type="button"

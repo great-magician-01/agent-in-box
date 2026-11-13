@@ -82,4 +82,27 @@ describe("ModelProviderService", () => {
       providers.validateSelection({ providerId: "first", model: "missing" }),
     ).rejects.toBeInstanceOf(PersistenceError);
   });
+
+  it("stores model input modalities and rejects invalid declarations", async () => {
+    await providers.upsert("multi", {
+      baseUrl: "https://multi.example.com/v1",
+      api: "openai-completions",
+      credentialProviderId: "multi-key",
+      models: [
+        { id: "text-only", input: ["text"] },
+        { id: "vision", input: ["text", "image"] },
+      ],
+    });
+    await expect(providers.resolve("multi", "text-only", "worker")).resolves.toMatchObject({
+      model: { id: "text-only", input: ["text"] },
+    });
+    await expect(
+      providers.upsert("bad", {
+        baseUrl: "https://bad.example.com/v1",
+        api: "openai-completions",
+        credentialProviderId: "bad-key",
+        models: [{ id: "image-only", input: ["image"] }],
+      }),
+    ).rejects.toMatchObject({ code: "validation_failed" });
+  });
 });

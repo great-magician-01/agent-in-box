@@ -2,6 +2,7 @@ import { Inject, Injectable, Optional } from "@nestjs/common";
 import type { Kysely } from "kysely";
 import type {
   ModelDefinition,
+  ModelInputModality,
   ModelProviderUpsert,
   ModelProviderView,
   WorkerModelApi,
@@ -216,10 +217,31 @@ function normalizeModels(value: unknown): ModelDefinition[] {
     ) {
       throw new PersistenceError("validation_failed", "模型名称或 reasoning 配置无效");
     }
+    const input = normalizeModelInput(model.input);
     return {
       id: model.id,
       ...(typeof model.name === "string" ? { name: model.name } : {}),
       ...(typeof model.reasoning === "boolean" ? { reasoning: model.reasoning } : {}),
+      ...(input ? { input } : {}),
     };
   });
+}
+
+function normalizeModelInput(value: unknown): ModelInputModality[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length < 1 || value.length > 2) {
+    throw new PersistenceError("validation_failed", "模型 input 必须包含 text 或 image");
+  }
+  const allowed = new Set<ModelInputModality>(["text", "image"]);
+  const seen = new Set<ModelInputModality>();
+  for (const item of value) {
+    if (typeof item !== "string" || !allowed.has(item as ModelInputModality)) {
+      throw new PersistenceError("validation_failed", "模型 input 只支持 text 和 image");
+    }
+    seen.add(item as ModelInputModality);
+  }
+  if (!seen.has("text")) {
+    throw new PersistenceError("validation_failed", "模型 input 必须包含 text");
+  }
+  return [...seen];
 }

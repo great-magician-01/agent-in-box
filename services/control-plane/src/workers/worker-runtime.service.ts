@@ -23,6 +23,7 @@ import type {
   ActiveTaskCard,
   ConversationMessageRecord,
   GuestHealthState,
+  TaskRecord,
   VmPowerState,
   WorkerArchiveArtifactRef,
   WorkerArchiveRecord,
@@ -54,7 +55,7 @@ import type { DatabaseSchema } from "../persistence/schema";
 import { nowIso } from "../persistence/time";
 import { KYSELY } from "../persistence/tokens";
 import { ModelBrokerService } from "../models/model-broker.service";
-import { ModelProviderService } from "../models/model-provider.service";
+import { ModelProviderService, type ResolvedModel } from "../models/model-provider.service";
 import { ModelTokenService } from "../models/model-token.service";
 import { CuaBrokerService } from "../computer-use/cua-broker.service";
 import { CuaExecutionService } from "../computer-use/cua-execution.service";
@@ -144,6 +145,10 @@ const DEFAULT_SYSTEM_PROMPT = [
   "You are an Agent-in-Box Worker running inside the guest VM.",
   "Operate the guest desktop with the vm_* Computer Use tools when the task requires it.",
   "The current task is provided by the host. Use the guest workspace for files.",
+  "You can see the VM screenshots returned by vm_screenshot and vm_* action tools; judge verification screens yourself.",
+  "Handle ordinary verification directly: password/login forms, credentials or codes already provided in the task, and normal confirm/verify buttons or links.",
+  "Stop and call vm_request_human_verification when the screen needs the human's identity or device: a QR code to scan with the user's phone or account, an image CAPTCHA or puzzle, an SMS/email/authenticator code delivered to the user outside the task, a passkey, biometric or hardware key, or a 'confirm on your phone' prompt.",
+  "Never guess verification codes, solve CAPTCHAs, or bypass MFA. After calling vm_request_human_verification, do not perform more desktop actions; the host pauses the task and notifies the human.",
   "Never request or expose host credentials, the VM Supervisor, the Model Broker key, or host filesystem paths.",
   "If the guest is locked or shows a UAC/secure desktop, stop and report that human takeover is required.",
   "If the task cannot be completed safely, explain the blocker in your final message.",
@@ -154,6 +159,23 @@ function systemPromptForOs(base: string, osFamily: string): string {
   return base.includes("inside the guest VM")
     ? base.replace("inside the guest VM", `inside the ${name} VM`)
     : base;
+}
+
+/**
+ * A Computer Use Worker must see screenshots. The default preserves the legacy
+ * text+image behavior for models saved before input modalities were exposed.
+ */
+function modelInputs(model: ResolvedModel): readonly ("text" | "image")[] {
+  return model.model.input ?? ["text", "image"];
+}
+
+function assertImageCapableWorkerModel(model: ResolvedModel): void {
+  if (!modelInputs(model).includes("image")) {
+    throw new PersistenceError(
+      "validation_failed",
+      `Worker 模型 ${model.provider.id}/${model.model.id} 未声明 image 输入；Computer Use Worker 需要多模态模型`,
+    );
+  }
 }
 
 @Injectable()
@@ -277,6 +299,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
       }
     }
     const model = await this.providers.resolve(input.providerId, input.model);
+    assertImageCapableWorkerModel(model);
     const runtime = await this.supervisor.get(input.vmId);
     if (!runtime.workerHostPort) {
       throw new PersistenceError("unavailable", "该 VM 没有分配 Guest Worker RPC 回环端口");
@@ -354,6 +377,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
           model: model.model.id,
           api: model.provider.api,
           reasoning: model.model.reasoning === true,
+          input: [...modelInputs(model)],
         },
         computerUse: {
           baseUrl: this.cuaBrokerBaseUrl(),
@@ -607,6 +631,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
       input.model.trim(),
       "worker",
     );
+    assertImageCapableWorkerModel(model);
     await this.archive(workerId, { source: "manual", reason: "model_switch" });
     try {
       return await this.create({
@@ -682,6 +707,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
         .executeTakeFirstOrThrow(),
     ]);
     if (!binding) throw new PersistenceError("conflict", "目标 VM 已解绑，不能恢复 Worker");
+    assertImageCapableWorkerModel(model);
     if (vm.powerState !== "running") throw new PersistenceError("conflict", "目标 VM 未运行");
     const runtime = await this.supervisor.get(worker.vmId);
     if (!runtime.workerHostPort) {
@@ -728,6 +754,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
           ? summarySystemPrompt(this.systemPrompt, summaryText)
           : undefined,
         toProjectRecord(project).agentConfig.mcpEnabled,
+        modelInputs(model),
       );
       let handle: WorkerSessionHandle;
       if (restoreMode === "native" && nativeRef) {
@@ -988,7 +1015,9 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
         .execute(),
     ]);
     const activeTaskIds = tasks
-      .filter((task) => ["running", "waiting_approval", "blocked"].includes(task.status))
+      .filter((task) =>
+        ["running", "waiting_approval", "waiting_human", "blocked"].includes(task.status),
+      )
       .map((task) => task.id);
     const sharedProjectIds = sharedBindings.map((project) => project.id);
     const [sharedTasks, ownActivities, sharedActivities] = await Promise.all([
@@ -1004,6 +1033,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
           "queued",
           "running",
           "waiting_approval",
+          "waiting_human",
           "blocked",
         ])
         .execute(),
@@ -1358,6 +1388,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     reasoning = false,
     systemPrompt?: string,
     mcpEnabled = false,
+    inputModalities: readonly ("text" | "image")[] = ["text", "image"],
   ): WorkerSessionSpec {
     return {
       workerId: worker.id,
@@ -1379,6 +1410,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
         model: modelId,
         api: providerApi,
         reasoning,
+        input: [...inputModalities],
       },
       computerUse: { baseUrl: this.cuaBrokerBaseUrl(), token: cuaToken },
     };
@@ -1739,6 +1771,17 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
           );
           return;
         }
+      } else if (task?.status === "waiting_human") {
+        // The verification request already persisted the task state. Stop the
+        // Worker turn and release its lease so a human can take over the VM.
+        await this.abortTurn(
+          worker,
+          active,
+          "waiting_human",
+          "任务等待人工处理，Worker 已停止桌面操作",
+          true,
+        );
+        return;
       } else {
         const reason =
           task?.status === "cancelled"
@@ -1847,7 +1890,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
       await this.tasks.recordWorkerEvent(claimed.id, "worker.turn_started", {
         workerId: worker.id,
       });
-      await active.connection.prompt(active.sessionId, { text: claimed.objective });
+      await active.connection.prompt(active.sessionId, { text: await this.claimPrompt(claimed) });
     } catch (error) {
       if (active.leaseId) {
         await this.leases.release(worker.vmId, active.leaseId);
@@ -1875,6 +1918,29 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
         currentTaskId: null,
       });
     }
+  }
+
+  /**
+   * A task resumed after human verification starts a fresh Worker turn. Tell
+   * the model to observe again instead of replaying pre-verification actions.
+   */
+  private async claimPrompt(task: TaskRecord): Promise<string> {
+    const resolved = await this.db
+      .selectFrom("task_events")
+      .select("id")
+      .where("task_id", "=", task.id)
+      .where("type", "=", "task.human_verification_resolved")
+      .orderBy("id", "desc")
+      .limit(1)
+      .executeTakeFirst();
+    if (!resolved) return task.objective;
+    return [
+      "[Host] 人工已完成此前的扫码/验证码处理，任务已恢复。",
+      "请先调用 vm_screenshot 重新观察当前 VM 屏幕，确认人工处理后的状态，再继续原任务。",
+      "不要重放人工处理前的桌面动作。",
+      "",
+      task.objective,
+    ].join("\n");
   }
 
   private async ensureUserMessage(worker: WorkerRecord, taskId: string): Promise<void> {

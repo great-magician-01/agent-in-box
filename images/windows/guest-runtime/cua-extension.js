@@ -253,6 +253,37 @@ export default function registerComputerUse(pi) {
   );
 
   pi.registerTool({
+    name: "vm_request_human_verification",
+    label: "Request Human Verification",
+    description:
+      "Pause the task because the current VM screen needs the human's identity or device. Use this for QR codes to scan with the user's phone, image CAPTCHAs, SMS/email/authenticator codes delivered to the user, passkeys/biometrics/hardware keys, or 'confirm on your phone' prompts. Do not use it for ordinary login/password forms or codes already provided in the task. Never guess codes or solve CAPTCHAs. Describe exactly what the human must do in reason. After this tool returns, do not perform more desktop actions; end your turn.",
+    parameters: Type.Object({
+      reason: Type.String({
+        description: "What you see and exactly what the human must do (1-1000 characters)",
+      }),
+      screenshotId: Type.String({
+        description: "The latest screenshotId from vm_screenshot or the last action result",
+      }),
+    }),
+    async execute(_id, params, signal) {
+      const result = await broker(
+        "/v1/human-verifications",
+        { reason: params.reason, screenshotId: params.screenshotId },
+        signal,
+      );
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Human verification requested (id=${result.verification?.id ?? "unknown"}). The task is paused and the human has been notified. Do not perform more desktop actions; end your turn and wait for the host to resume the task.`,
+          },
+        ],
+        details: result,
+      };
+    },
+  });
+
+  pi.registerTool({
     name: "vm_task_complete",
     label: "Complete Task",
     description:

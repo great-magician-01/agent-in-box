@@ -458,6 +458,39 @@ describe("WorkerRuntimeService", () => {
     expect(worker?.status).toBe("idle");
   });
 
+  it("stops the Worker turn and releases the lease when a task waits for human verification", async () => {
+    const harness = await createHarness();
+    active = harness;
+    const created = await harness.service.create({
+      projectId: harness.ctx.projectId,
+      vmId: harness.ctx.vmId,
+    });
+    const prompted = await harness.service.prompt(created.worker.id, {
+      text: "[hold] Human verification task",
+    });
+    await waitFor(
+      async () => (await harness.tasks.get(prompted.taskId))?.status === "running",
+      "running task",
+    );
+    const record = await harness.tasks.beginHumanVerification({
+      taskId: prompted.taskId,
+      workerId: created.worker.id,
+      vmId: harness.ctx.vmId,
+      reason: "屏幕出现登录二维码，需要用户手机扫码",
+      screenshotId: "observation-test",
+    });
+    expect(record.status).toBe("pending");
+    await waitFor(() => harness.connection.abortCalls === 1, "worker abort");
+    const task = await harness.tasks.get(prompted.taskId);
+    expect(task).toMatchObject({
+      status: "waiting_human",
+      errorCode: "human_verification_required",
+    });
+    await expect(harness.leases.getActive(harness.ctx.vmId)).resolves.toBeUndefined();
+    const worker = await harness.workers.getWorker(created.worker.id);
+    expect(worker?.status).toBe("idle");
+  });
+
   it("fails the task and revokes the broker token on RPC disconnect", async () => {
     const harness = await createHarness();
     active = harness;

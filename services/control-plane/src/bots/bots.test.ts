@@ -10,6 +10,7 @@ import { ApprovalService } from "../computer-use/approval.service";
 import { nowIso } from "../persistence/time";
 import { OutboxRepository } from "../persistence/repositories/outbox-repository";
 import { TaskRepository } from "../persistence/repositories/task-repository";
+import { WorkerRepository } from "../persistence/repositories/worker-repository";
 import { TaskService } from "../persistence/services/task-service";
 import { createTestContext, type TestContext } from "../persistence/testing/fixtures";
 import { ProjectService } from "../projects/project.service";
@@ -539,6 +540,74 @@ describe("bot commands and notifications", () => {
     await h.notifications.consume();
     outbound = await ctx.app.db.selectFrom("bot_outbound").selectAll().execute();
     expect(outbound.some((row) => row.text.includes("已批准"))).toBe(true);
+  });
+
+  it("notifies bot chats about human verification requests and confirmations", async () => {
+    const h = await createHarness({ bindUser: "user-1" });
+    const created = await h.tasks.create({
+      projectId: ctx.projectId,
+      vmId: ctx.vmId,
+      originConversationId: ctx.conversationId,
+      objective: "Scan the login QR code",
+      idempotencyKey: "bot-human-verification-1",
+    });
+    await h.tasks.transition(created.task.id, "queued");
+    await h.tasks.transition(created.task.id, "running");
+    const worker = await new WorkerRepository(ctx.app.db).createWorker({
+      projectId: ctx.projectId,
+      vmId: ctx.vmId,
+      conversationId: ctx.conversationId,
+      engineType: "pi-rpc",
+      engineVersion: "1.5.1",
+      capabilitySet: ["computer_use"],
+    });
+    await ctx.app.db
+      .insertInto("bot_turns")
+      .values({
+        id: "bot-turn-human",
+        account_id: h.account.id,
+        platform: "qq",
+        platform_conversation_id: "c2c:user-1",
+        local_conversation_id: ctx.conversationId,
+        user_text: "scan it",
+        status: "completed",
+        assistant_text: null,
+        error_message: null,
+        created_at: nowIso(),
+        updated_at: nowIso(),
+        completed_at: nowIso(),
+      })
+      .execute();
+    await ctx.app.db
+      .insertInto("bot_task_links")
+      .values({
+        task_id: created.task.id,
+        turn_id: "bot-turn-human",
+        account_id: h.account.id,
+        platform: "qq",
+        platform_conversation_id: "c2c:user-1",
+        created_at: nowIso(),
+      })
+      .execute();
+    await h.notifications.consume();
+    const record = await h.tasks.beginHumanVerification({
+      taskId: created.task.id,
+      workerId: worker.id,
+      vmId: ctx.vmId,
+      reason: "屏幕显示登录二维码，需要手机扫码",
+      screenshotId: "observation-bot",
+    });
+    await h.notifications.consume();
+    let outbound = await ctx.app.db.selectFrom("bot_outbound").selectAll().execute();
+    expect(
+      outbound.some((row) => row.text.includes("需要人工处理") && row.text.includes(record.id)),
+    ).toBe(true);
+
+    await h.tasks.resumeHumanVerification(record.id, "local-user", "已扫码");
+    await h.notifications.consume();
+    outbound = await ctx.app.db.selectFrom("bot_outbound").selectAll().execute();
+    expect(outbound.some((row) => row.text.includes("已确认"))).toBe(true);
+    expect(["queued", "waiting_vm"]).toContain((await h.tasks.get(created.task.id))?.status);
   });
 
   it("requires an explicit confirmation before cancelling a task", async () => {

@@ -108,6 +108,27 @@ describe("notificationForEvent", () => {
     expect(resource?.body).toContain("2 个任务");
   });
 
+  it("maps human verification requests and resolutions", () => {
+    const requested = notificationForEvent("task.human_verification_requested", {
+      taskId: "task-1",
+      verificationId: "verification-1",
+      reason: "屏幕显示登录二维码，需要手机扫码",
+    });
+    expect(requested?.kind).toBe("task");
+    expect(requested?.severity).toBe("warning");
+    expect(requested?.title).toContain("人工处理");
+    expect(requested?.body).toContain("二维码");
+
+    const resolved = notificationForEvent("task.human_verification_resolved", {
+      taskId: "task-1",
+      verificationId: "verification-1",
+      resolvedBy: "local-user",
+      note: "已扫码",
+    });
+    expect(resolved?.title).toContain("人工处理已完成");
+    expect(resolved?.body).toContain("已扫码");
+  });
+
   it("ignores noisy progress and unknown topics", () => {
     expect(
       notificationForEvent(

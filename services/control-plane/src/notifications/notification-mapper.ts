@@ -27,6 +27,7 @@ const TASK_STATUS_LABELS: Partial<Record<TaskStatus, string>> = {
   queued: "排队中",
   running: "执行中",
   waiting_approval: "等待审批",
+  waiting_human: "等待人工处理",
   blocked: "已阻塞",
   completed: "已完成",
   failed: "失败",
@@ -131,6 +132,33 @@ export function notificationForEvent(
         severity: "warning",
         title: `需要审批：${actionType}`,
         body: truncate(summary, 400),
+        projectId,
+        taskId,
+        vmId,
+        workerId,
+      };
+    }
+    case "task.human_verification_requested": {
+      const reason = text(input.reason) ?? "Worker 请求人工完成当前验证。";
+      return {
+        kind: "task",
+        severity: "warning",
+        title: "任务需要人工处理",
+        body: truncate(reason, 400),
+        projectId,
+        taskId,
+        vmId,
+        workerId,
+      };
+    }
+    case "task.human_verification_resolved": {
+      const note = text(input.note);
+      const resolvedBy = text(input.resolvedBy) ?? "local-user";
+      return {
+        kind: "task",
+        severity: "info",
+        title: "人工处理已完成",
+        body: `任务 ${taskId ?? ""} 的人工处理已由 ${resolvedBy} 确认${note ? `：${truncate(note, 300)}` : "。"}`,
         projectId,
         taskId,
         vmId,

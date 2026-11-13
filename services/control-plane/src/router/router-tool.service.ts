@@ -67,6 +67,7 @@ export class RouterToolService {
         this.steerTask(),
         this.followUpTask(),
         this.reprioritizeTask(),
+        this.listHumanVerifications(),
         this.cancelTask(),
         this.retryTask(),
         this.resumeWorker(),
@@ -183,6 +184,7 @@ export class RouterToolService {
                   "queued",
                   "running",
                   "waiting_approval",
+                  "waiting_human",
                   "blocked",
                   "completed",
                   "failed",
@@ -249,6 +251,41 @@ export class RouterToolService {
             verifiedAt: artifact.verifiedAt,
           })),
         };
+      },
+    };
+  }
+
+  private listHumanVerifications(): RouterToolSpec {
+    return {
+      definition: {
+        name: "list_human_verifications",
+        description:
+          "List Worker-reported human verification requests (QR scan, CAPTCHA, out-of-band code). These tasks are waiting_human and hold their VM until the human resolves them locally.",
+        parameters: {
+          type: "object",
+          properties: {
+            status: {
+              type: "string",
+              enum: ["pending", "completed", "cancelled"],
+            },
+            taskId: { type: "string" },
+            limit: { type: "number" },
+          },
+          additionalProperties: false,
+        },
+      },
+      handler: async (args) => {
+        const status = optionalString(args, "status");
+        if (status && !["pending", "completed", "cancelled"].includes(status)) {
+          throw new PersistenceError("validation_failed", `人工处理状态无效：${status}`);
+        }
+        const taskId = optionalString(args, "taskId");
+        const limit = optionalNumber(args, "limit");
+        return this.tasks.listHumanVerifications({
+          ...(status ? { status: status as "pending" | "completed" | "cancelled" } : {}),
+          ...(taskId ? { taskId } : {}),
+          ...(limit !== undefined ? { limit } : {}),
+        });
       },
     };
   }
@@ -738,7 +775,10 @@ export class RouterToolService {
     if (running && task.status !== "running") {
       throw new PersistenceError("conflict", "只有运行中的任务可以 Steer");
     }
-    if (!running && !["running", "waiting_approval", "blocked", "queued"].includes(task.status)) {
+    if (
+      !running &&
+      !["running", "waiting_approval", "waiting_human", "blocked", "queued"].includes(task.status)
+    ) {
       throw new PersistenceError("conflict", `任务状态 ${task.status} 不能 Follow-up`);
     }
     return task;

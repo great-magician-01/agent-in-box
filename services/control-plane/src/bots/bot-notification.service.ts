@@ -32,6 +32,8 @@ const RELEVANT_TOPICS = [
   "task.status_changed",
   "task.approval_requested",
   "task.approval_resolved",
+  "task.human_verification_requested",
+  "task.human_verification_resolved",
   "router.message",
   "router.status_changed",
 ];
@@ -198,6 +200,12 @@ export class BotNotificationService implements OnModuleInit, OnModuleDestroy {
       case "task.approval_resolved":
         await this.handleApprovalResolved(payload);
         return;
+      case "task.human_verification_requested":
+        await this.handleHumanVerificationRequested(payload);
+        return;
+      case "task.human_verification_resolved":
+        await this.handleHumanVerificationResolved(payload);
+        return;
       case "router.message":
         await this.handleRouterMessage(payload);
         return;
@@ -339,6 +347,43 @@ export class BotNotificationService implements OnModuleInit, OnModuleDestroy {
         dedupeKey: `approval-resolved:${approvalId}:${status}`,
       },
     );
+  }
+
+  private async handleHumanVerificationRequested(payload: Record<string, unknown>): Promise<void> {
+    const taskId = stringValue(payload.taskId);
+    const verificationId = stringValue(payload.verificationId);
+    if (!taskId || !verificationId) return;
+    const link = await this.taskLink(taskId);
+    if (!link) return;
+    const reason = stringValue(payload.reason) ?? "Worker 请求人工完成当前验证。";
+    await this.sendToLink(link, {
+      text: [
+        `任务 ${taskId} 需要人工处理。`,
+        `说明：${truncate(reason, 400)}`,
+        "请在 Web 观察栏查看 VM 画面并完成扫码/验证码等操作；需要输入时使用「人工接管」。",
+        `人工处理 ID：${verificationId}`,
+        "处理完成后，在任务详情点击「人工已处理，恢复任务」。",
+      ].join("\n"),
+      kind: "human-verification-requested",
+      refId: verificationId,
+      dedupeKey: `human-verification-requested:${verificationId}`,
+    });
+  }
+
+  private async handleHumanVerificationResolved(payload: Record<string, unknown>): Promise<void> {
+    const taskId = stringValue(payload.taskId);
+    const verificationId = stringValue(payload.verificationId);
+    if (!taskId || !verificationId) return;
+    const link = await this.taskLink(taskId);
+    if (!link) return;
+    const resolvedBy = stringValue(payload.resolvedBy) ?? "local-user";
+    const note = stringValue(payload.note);
+    await this.sendToLink(link, {
+      text: `任务 ${taskId} 的人工处理已确认（${resolvedBy}）${note ? `：${truncate(note, 300)}` : "。"}任务已重新排队。`,
+      kind: "human-verification-resolved",
+      refId: verificationId,
+      dedupeKey: `human-verification-resolved:${verificationId}`,
+    });
   }
 
   private async handleRouterMessage(payload: Record<string, unknown>): Promise<void> {

@@ -449,6 +449,7 @@ export class BotCommandService {
           "queued",
           "running",
           "waiting_approval",
+          "waiting_human",
           "waiting_vm",
           "waiting_resources",
         ])
@@ -503,6 +504,7 @@ export class BotCommandService {
       "queued",
       "running",
       "waiting_approval",
+      "waiting_human",
       "blocked",
       "completed",
       "failed",

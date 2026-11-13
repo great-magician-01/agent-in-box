@@ -28,6 +28,7 @@ const COUNTED_TABLES = [
   "worker_archives",
   "cua_actions",
   "cua_screenshots",
+  "human_verifications",
   "notifications",
   "inbox_files",
   "bot_events",

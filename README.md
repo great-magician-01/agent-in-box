@@ -1,299 +1,265 @@
-# Agent-in-Box
+<h1 align="center">
+  <img src="apps/web/public/logo.svg" alt="Agent-in-Box 图标" width="64" style="vertical-align: middle;">
+  &nbsp;Agent-in-Box
+</h1>
 
-面向个人用户的本地 AI 虚拟机工作平台。当前仓库已完成 **开发计划阶段 1（工程骨架、协议和本地持久化）**、**阶段 2（Electron、本地服务与自定义存储）**、**阶段 3（镜像服务、VM 生命周期与管理 UI）**、**阶段 4（Guest Agent、noVNC 实时控制台与统一 Execution Lease）**、**阶段 5（项目、多 VM 绑定、持久任务队列与任务看板）**、**阶段 6（Pi Worker Runtime、Model Broker 与 Worker Engine Adapter）**、**阶段 7（完整 Computer Use 执行器、执行保护、Policy/Approval 与完成校验）**、**阶段 8（Router、Worker Registry 与归档）**、**阶段 9（多 VM 资源调度、共享环境与多端状态同步）**、**阶段 10（飞书和 QQ 本地机器人）**、**阶段 11（Web、Electron 和安装体验）**、**阶段 12（Linux 安全、故障、升级与全链路验收）** 和 **阶段 13（Windows VM、混合 OS 调度与本期联合验收代码）**。包含无特权 Electron 壳、控制平面进程监管、首次启动向导、自定义数据目录、可续传镜像服务、受 ACL 保护的 Go VM Supervisor、QEMU/WHPX Linux/Windows Guest 生命周期、认证 Guest 管理通道、Windows GDI/SendInput Guest Agent、锁屏/UAC 安全桌面人工接管、AI/人工互斥桌面输入、跨项目串行的 VM 任务内核、认证 Guest Worker RPC、Windows Pi 启动适配、短期模型令牌、流式 Broker、Worker 心跳/归档/恢复、Host 侧 Computer Use Broker、动作/截图 Trace、人工审批、独立完成证据校验、可重建 Active Roster、可搜索 Archive Registry、自动空闲归档、原生/摘要恢复、只持有结构化工具的本地 Router、宿主内存软预算与 VM 自动启动/空闲休眠、共享 VM 整机快照影响确认、独立项目目录备份/恢复、看板/VM/项目页统一状态快照、飞书/QQ 本机出站长连接、持久化事件去重、身份/群白名单、敏感操作二次确认和任务/审批通知，本机访问密钥认证、CSRF/Origin 防护、统一导航与通知中心、文件拖放投递、桌面原生通知/开机启动、后台服务启动停止、更新检查/校验/回滚和保留用户数据的卸载选择，以及迁移前数据库备份、本机诊断报告、日志/诊断凭据脱敏和阶段 12/13 查询与混合 OS 展示。远程 Relay 未实现。真实 QEMU/WHPX Windows Guest、Windows ISO/Golden Image、真实 Windows 截图/输入/UAC/DPI、真实 Pi/模型任务评测、真实飞书/QQ 应用凭据、真实更新源、Windows NSIS 干净安装和浏览器/Electron 人工交互验收仍按各阶段记录单独执行。
+<p align="center">
+  <strong>让 Agent 住进虚拟机，虚拟机住进你自己的电脑 🤖</strong><br>
+  Router 分派任务，Worker 在 Linux / Windows 盒子里看屏幕、点鼠标、敲键盘；每个动作都能被观察、审批、接管和停止。
+</p>
 
-完整方案见：
+<p align="center">
+  <img src="https://img.shields.io/badge/Electron-45-47848F?style=for-the-badge&logo=electron&logoColor=white" alt="Electron 45">
+  <img src="https://img.shields.io/badge/Go-1.26+-00ADD8?style=for-the-badge&logo=go&logoColor=white" alt="Go 1.26+">
+  <img src="https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=black" alt="React 19">
+  <img src="https://img.shields.io/badge/TypeScript-5.9-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript 5.9">
+  <img src="https://img.shields.io/badge/QEMU-WHPX%20%2F%20KVM-FF6600?style=for-the-badge" alt="QEMU WHPX / KVM">
+  <img src="https://img.shields.io/badge/SQLite-WAL-003B57?style=for-the-badge&logo=sqlite&logoColor=white" alt="SQLite WAL">
+  <img src="https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge" alt="License MIT">
+</p>
 
-- [产品方案](docs/01-product-solution.md)
-- [技术设计](docs/02-technical-design.md)
-- [开发计划](docs/03-development-plan.md)
-- [阶段 2 验收记录](tests/phase2/summary.md)
-- [阶段 3 验收记录](tests/phase3/summary.md)
-- [阶段 4 验收记录](tests/phase4/summary.md)
-- [阶段 5 验收记录](tests/phase5/summary.md)
-- [阶段 6 验收记录](tests/phase6/summary.md)
-- [阶段 7 验收记录](tests/phase7/summary.md)
-- [阶段 8 验收记录](tests/phase8/summary.md)
-- [阶段 9 验收记录](tests/phase9/summary.md)
-- [阶段 10 验收记录](tests/phase10/summary.md)
-- [阶段 11 验收记录](tests/phase11/summary.md)
-- [阶段 12 验收记录](tests/phase12/summary.md)
-- [阶段 12 安全测试矩阵](tests/phase12/security-matrix.md)
-- [阶段 12 Linux 全链路验收任务集](tests/phase12/full-chain-tasks.json)
-- [阶段 13 验收记录](tests/phase13/summary.md)
-- [阶段 13 真实 Windows 宿主 + Linux Guest 验收记录（2026-11-12）](tests/phase13/real-verification-2026-11-12.md)
-- [阶段 13 Linux/Windows 混合验收任务集](tests/phase13/mixed-tasks.json)
-- [阶段 14 模型多配置、只读观察与一键 Linux VM](tests/phase14/summary.md)
-- [Windows Guest 镜像与运行时资产](images/windows/README.md)
-- [用户指南](docs/04-user-guide.md)
-- [飞书与 QQ 机器人配置指南](docs/05-bot-guide.md)
-- [存储与备份指南](docs/06-storage-guide.md)
-- [隐私与数据处理说明](docs/07-privacy.md)
-- [Linux Guest Worker 安装资产](images/linux/README.md)
+**Agent-in-Box** 是一个面向个人用户的本地 AI 虚拟机工作平台。你通过 Electron、本机网页、飞书或 QQ 与主会话 Router 对话；Router 把工作拆成持久任务，分派给完整的 Worker Agent；Worker 在你电脑上的 Linux 或 Windows 虚拟机里，用截图、鼠标和键盘把任务做完。
 
-## Agent 扩展配置
+它不把聊天记录搬到桌面，也不是一次性远程桌面。项目、Worker、会话、任务、虚拟机、快照和归档都长期保存、停止、恢复和追溯；AI 与人工共用同一套执行锁，谁在操作桌面始终是确定的。
 
-- **Subagent**：随 Worker Runtime 默认安装并加载，不需要按项目开启；Host Router 不加载该扩展。
-- **MCP**：默认关闭。可在“项目 → 项目设置 → Agent 扩展”中按项目开启；设置持久化在 `projects.agent_config_json`，不会影响其他项目或 Router。
-- **生效时机与边界**：MCP 设置在新建或恢复 Worker 会话时生效，不热改运行中的 Pi 进程。开启只启用 Pi 的 MCP 配置加载，不会自动安装 MCP Server 或注入凭据；Server 与凭据仍需在对应 Guest 的受控环境中单独配置。
+它也没有产品方服务器：长期 API Key、机器人凭据、数据库和虚拟机都在本机；模型请求经宿主 Model Broker 转发，VM 内拿不到长期密钥；飞书和 QQ 由本地客户端通过官方长连接直接接入，不经过中转。
 
-## 产品化补强（2026-11-12）
+---
 
-本轮在不修改数据根/存储迁移实现的前提下，补齐了以下产品能力：
+## 🤔 为什么是「Agent-in-Box」？
 
-- **模型多配置**：设置页可维护多套 Provider/Base URL/模型白名单，分别选择 Worker 默认模型和 Router 模型；Router 可在空闲时应用新模型并重建会话，Worker 可归档旧会话后切换模型。长期 API Key 仍只保存在 Electron `safeStorage`，Preload 只暴露白名单方法。
-- **Codex 式工作区**：左侧项目/Worker 会话/设置栏，中间主会话或 Worker 会话；右侧观察栏默认隐藏，可查看 Worker 文本会话或 **只读** VM 实时画面。只读观察不获取 Execution Lease，也不转发键盘、鼠标和剪贴板输入；人工接管仍需显式确认。
-- **Windows 桌面托管**：Electron 托管 Go VM Supervisor；QEMU 可按 `runtime-assets.json` 从固定来源下载、校验 SHA-256、安全解压到 `<data-root>/tools/qemu/`。设置页和总览页显示运行组件状态，支持自定义 QEMU 路径。
-- **一键 Linux 工作 VM**：默认镜像改为版本化 Ubuntu 24.04 Cloud Image；创建时通过 QEMU SMBIOS NoCloud-net 引导 cloud-init，在 Guest 内安装 XFCE、Guest Agent、Node/Pi 与 Worker。VM 页提供下载、创建、启动、初始化和就绪状态的单按钮流程。
-- **新增发布与验收资产**：`pnpm package:vm-supervisor`、`pnpm package:guest-runtime`、`scripts/package-qemu-windows.ps1`、`.github/workflows/release-assets.yml` 和 `pnpm smoke:phase14`。
+聊天机器人可以告诉你「怎么做」，但很多事得有人真的坐到电脑前。Agent-in-Box 想把这个「电脑前」变成一台可停止、可恢复、可被看见的虚拟机。
 
-**边界**：当前 WSL 开发环境已完成 TypeScript/Go 测试、构建和阶段 Smoke，但不能替代 Windows 11 + WHPX 的真实 QEMU、cloud-init、Electron 人工 UI 和 NSIS 安装验收。QEMU 托管下载在发布资产尚未发布时会明确报错，开发环境可用 `AGENT_IN_BOX_RUNTIME_MANIFEST` 指向本地或自建 Manifest。
+- 🖥️ **Agent 要真的动手**：Worker 通过 Computer Use 观察屏幕、点击、输入、滚动和拖拽；任务不是一段回答，而是一串可回放的桌面动作和证据。
+- 📦 **盒子是隔离边界**：Worker 和文件工具天然活在 Guest 里；Router 与控制平面没有宿主 Shell，也不向模型开放任意 Hypervisor 指令。
+- 🔐 **长期秘密留在盒子外**：Provider Key 只经 Electron `safeStorage` 解密；Guest 只拿绑定 Worker / VM / 任务的短期 Broker 令牌；机器人 Secret 不进入 VM。
+- 🧾 **完成要有证据**：模型说「做完了」不算完成；Guest 文件 / 进程证据或重新截图通过独立校验，任务才会置为完成。
+- 🕹️ **人始终能接管**：AI 与人工共用 Per-VM Execution Lease；只读观察不抢锁，人工接管显式抢占，旧 AI 动作会被拒绝。
+- 🏠 **本地优先**：数据库、镜像、VM、产物和备份全在数据根目录；没有产品方服务器，远程 Relay 不是本地核心依赖。
 
-## 阶段 13 已落地
+## ✨ 一眼看懂
 
-- **Windows Guest 主链路**：`VmSpec`/`VmInstanceRecord` 的 `osFamily` 贯穿控制平面、Supervisor 和 QEMU Provider；Windows 使用 IDE 磁盘、e1000 网卡、标准 VGA、xHCI + USB tablet，不依赖 stock Windows 缺少的 VirtIO 驱动。
-- **Windows Guest Agent**：Go 原生 GDI 截图、`SetCursorPos`/`SendInput` 鼠标键盘、中文 Unicode、滚轮、拖拽、DPI/虚拟桌面坐标和 Toolhelp32 进程证据；锁屏或 UAC 安全桌面返回 `session_locked`/`secure_desktop`，Heartbeat 标记降级，Computer Use 任务转为 `blocked` 等待人工接管，不绕过系统安全机制。
-- **Windows 路径与策略**：项目工作目录、文件证据根目录、workspace 归档/恢复接受 Windows 盘符绝对路径；拒绝 `..`、UNC、NTFS 数据流和文件系统根目录。Web/Electron 可选择 Windows 镜像、显示 Guest OS 并按 OS 预填工作目录。
-- **Windows Worker Runtime**：`AGENT_IN_BOX_PI_SCRIPT` 通过 Node 启动 Pi CLI，避免 Windows `.cmd` shim 无法直接 `spawn`；安装资产固定 Node 24.18.0/Pi 1.5.1，并包含防火墙、登录任务和每 VM token 注入脚本。
-- **混合项目与调度**：一个项目可同时绑定 Linux/Windows VM；看板任务带 `vmOsFamily`；Router 的项目/看板摘要暴露 OS 与每 VM 队列；同 VM 串行、跨 VM 并行继续由统一 TaskService 保证。
-- **构建与发布资产**：新增合法 ISO 的 Windows Golden Image 构建脚本、无人值守模板、内部 Manifest 示例、`pnpm package:guest-agent` 和 Windows Guest Runtime 安装资产；Linux/Windows CUA 扩展字节一致。
-- **验证边界**：`pnpm smoke:phase13` 12 项通过（真实 Guest Agent 进程/认证/进程证据/workspace 往返、控制平面、双 OS 绑定与调度）；真实 Windows ISO 安装、WHPX Windows Guest、截图/中文输入/UAC/DPI、真实 Pi/模型、NSIS 干净安装和长时 soak 仍未验收。详见 [`tests/phase13/summary.md`](tests/phase13/summary.md)。
+| 模块 | 你能得到什么 |
+| --- | --- |
+| 🖥️ **工作区** | Codex 式三栏：左侧项目 / Worker 会话，中间 Router 或 Worker 主会话，右侧可展开只读观察栏；通知中心、文件投递和原生桌面通知 |
+| 📁 **项目与任务** | 多项目、项目与 Linux / Windows VM 多对多绑定、持久任务队列、依赖与优先级、跨项目串行、任务看板、Trace / 截图 / 审批 / 产物 |
+| 📦 **虚拟机** | Ubuntu 24.04 一键创建、Windows Golden Image、QEMU / WHPX 生命周期、快照、项目目录备份、共享 VM 影响确认、资源预算与空闲休眠 |
+| 🤖 **Agent** | 宿主 Router + Guest Worker、Pi 运行时、原生 / 摘要恢复、自动归档、Active Roster、可搜索 Archive Registry、按项目开启 MCP / 默认 Subagent |
+| 🖱️ **Computer Use** | 截图、点击 / 双击、移动、输入、按键、滚动、拖拽、等待、完成；每一步动作与前后截图入库，受步数 / 时长 / 无进展保护 |
+| 🔐 **安全** | 只监听回环、本机访问密钥、HttpOnly 会话、CSRF / Origin 校验、Per-VM Lease、人工审批、Guest 证据校验、日志与诊断脱敏 |
+| 🧠 **模型** | 多 Provider 配置、Worker 默认模型与 Router 模型、OpenAI-compatible / Anthropic Messages 流式转发、用量记录、短期令牌 |
+| 💬 **机器人** | 飞书官方 SDK 长连接、QQ Bot API v2、身份 / 群白名单、绑定码、任务 / 审批通知、敏感操作二次确认 |
+| 🚀 **运维** | 首次启动向导、自定义数据根、存储迁移与备份、诊断报告、托盘 / 开机启动、更新检查 / 校验 / 回滚、Windows NSIS 与 Linux AppImage 打包 |
 
-## 阶段 12 已落地
+<table>
+<tr>
+<td width="33%">
 
-- **迁移前备份**：存在待应用 Schema Migration 时，先创建 SQLite 在线备份、执行 `integrity_check`、写入 SHA-256，默认保留 5 份；备份失败会停止启动而非无备份迁移。
-- **本机诊断**：`GET /api/v1/diagnostics` 返回版本、迁移、数据库计数、迁移备份、资源、设置和日志尾部；设置页可导出 JSON 并明确提示敏感内容。诊断和桌面日志对访问密钥、Bearer、Provider Key、机器人 Secret、会话 Cookie 做结构化与文本脱敏。
-- **安全加固**：未知控制平面异常不再向 HTTP 客户端返回原始堆栈；日志行在写入桌面日志前脱敏；新增状态/Worker/项目查询索引；`smoke:phase12` 验证 Host/Origin/Sec-Fetch-Site、CSRF、无宽松 CORS、诊断认证和 Router 工具面。
-- **故障与恢复**：`smoke:phase12` 在任务运行状态下 SIGKILL 真实控制平面后重启，验证运行任务安全失败、Worker 对账、Lease 释放、不重复执行，并用迁移前备份恢复 2001 条任务历史。
-- **性能基线**：当前开发机上述 2001 条任务看板 64 ms、100 条 Router 消息 4 ms；该数字是本机回归阈值，不是容量承诺。
-- **验收资产**：新增 Linux 全链路任务集、安全测试矩阵、用户指南、机器人配置指南、存储指南和隐私说明；`pnpm release:checksums` 生成 `release/SHA256SUMS` 与 `release/build-manifest.json`（不代替外部签名）。
-- **验证边界**：`pnpm smoke:phase12` 12 项通过；真实 QEMU/WHPX Linux Guest、真实 Pi/模型、真实飞书/QQ、Windows NSIS 安装、真实更新源、真实 Guest 网络边界和长时稳定性仍未验收。详见 [`tests/phase12/summary.md`](tests/phase12/summary.md)。
+### 🧑‍💻 想把活交出去的人
 
-## 阶段 11 已落地
+建一个项目，绑定一台或几台 VM，写清目标，然后让 Router 排队、分派、等待审批。任务跨重启还在，Worker 可以归档再恢复，长活不必一口气盯完。
 
-- **本地 Web 认证**：控制平面在配置目录生成 0600 访问密钥，浏览器在解锁页输入；Electron Main 读取密钥并自动注入会话 Cookie，Renderer 不接触密钥。SQLite 持久会话、HttpOnly + SameSite=Strict Cookie、30 天 TTL 和访问密钥轮换。
-- **本机 Web 防护**：移除宽松 CORS；写操作要求会话绑定的 CSRF 头；严格校验 Host、Origin 和 Sec-Fetch-Site，其他本机端口或跨站页面不能调用 API。事件 WebSocket 同样要求会话和同源 Origin。非回环监听直接拒绝启动。
-- **完整 Web UI**：总览、主会话、项目、任务、虚拟机、归档、通知和设置导航；统一通知中心汇总任务、审批、Worker、VM、资源、Router 和机器人事件；项目页支持文件拖放上传、列表、下载和删除；基础键盘/屏幕阅读器语义、焦点样式和响应式布局。
-- **Electron 体验**：托盘状态与启动/停止/重启、原生通知、开机启动、关闭到托盘、后台服务管理；更新源检查、流式下载、SHA-256 校验、安装前数据库/资源备份和回滚快照。
-- **安装与卸载**：NSIS 保持 per-user 安装，安装后提示首次启动向导；卸载默认保留 VM 与数据库，只有用户明确选择删除且目录带有数据根标记时才调用清理工具。
-- **远程边界**：阶段 11 只支持本机回环 Web；没有实现 Relay，也不把 Relay 作为本地核心、机器人或通知的依赖。
-- **验证边界**：`pnpm smoke:phase11` 12 项通过，阶段 2～10 Smoke 在认证改造后全部重跑通过；真实浏览器/Electron 人工可用性、Windows NSIS 干净安装、真实 HTTPS 更新源和远程 Relay 仍未验收。
+</td>
+<td width="33%">
 
-详见 [`tests/phase11/summary.md`](tests/phase11/summary.md)。
+### 🛡️ 在意边界的人
 
-## 阶段 10 已落地
+API Key、机器人 Secret、SQLite 和 VM 都留在本机。AI 在 Guest 里动手，宿主只给短期令牌；锁屏、UAC 和 Ctrl+Alt+Del 不绕过，交给人工。
 
-- **Bot Connector 框架**：复用阶段 0 的 `@agent-in-box/bot-connector` 长连接、心跳、重连和协议适配；新增可持久化的整事件 Ingress Store，事件 ID 与完整消息在同一 SQLite 事务中落库后才 ACK 平台。控制平面重启后继续消费未处理事件，重复推送和旧消息不会重复执行。
-- **身份与白名单**：平台用户通过一次性绑定码绑定到本地管理员，或由本机 Web 显式加入白名单；支持管理员/只读成员。单聊按绑定授权，群聊必须显式加入白名单；飞书群聊必须 @ 配置的机器人 Open ID，QQ 群聊只处理 @ 机器人的事件。未授权用户不能创建任务、取消任务或操作 VM。
-- **活跃执行电脑**：机器人账号绑定一台活跃执行电脑；非活跃设备不会启动连接，避免多实例随机消费事件。连接状态、最近事件、错误、入站/出站队列在 Web 机器人面板可见。
-- **飞书与 QQ**：飞书使用官方 `@larksuiteoapi/node-sdk` WebSocket + Open API；QQ 使用 Bot API v2 WebSocket Intents + REST。两者都支持文本任务、进度/结果通知、审批通知和群聊；首版不发送附件，QQ 被动回复窗口外发送失败会显示明确错误。
-- **机器人 → Router**：自然语言消息进入同一个主 Router 会话，由 Router 的持久工具创建任务、选择项目并分派 Worker，不建立独立任务事实源；`/status`、`/projects`、`/tasks`、`/task` 查询本机与持久任务。取消、重试、批准/拒绝和 Abort 等敏感操作需要管理员二次确认。
-- **通知回传**：任务创建、排队、运行、等待审批、完成、失败、取消以及审批请求/本地处理结果会回到来源机器人会话；Router 回合的文字回复按 Outbox 事件回传。
-- **验证边界**：`pnpm smoke:phase10` 使用真实控制平面、SQLite、真实 QQ/飞书协议服务替身和真实 Router Tool Broker，13 项检查通过；真实飞书/QQ 测试应用凭据、平台权限矩阵、真实网络重推和长时连接稳定性仍未验收。
+</td>
+<td width="33%">
 
-详见 [`tests/phase10/summary.md`](tests/phase10/summary.md)。
+### 🧰 愿意折腾的人
 
-## 阶段 9 已落地
+Electron + NestJS + React + Go + QEMU，没有隐藏云服务。数据目录、迁移、备份、诊断、阶段 Smoke 和打包脚本都在仓库里。
 
-- **Resource Manager**：Host Reserve、Soft Memory Budget、运行 VM 分配和宿主可用内存统一报告；`when_needed` 策略自动启动/恢复 VM，资源不足时任务进入 `waiting_resources` 并写入 `resource.waiting_for_memory` 通知；手动启动允许超预算但界面提示。空闲休眠只作用于无活动任务、无活动 Worker、无 Execution Lease 的 VM，绝不自动停止有任务的 VM。
-- **共享 VM 保护**：项目绑定、VM 页和项目页明确展示共享的桌面/软件/系统状态；整机快照创建/恢复只允许 stopped VM，恢复前列出当前全部受影响项目并要求显式确认；项目级工作目录备份独立于整机快照，使用 Guest SHA-256 tar.gz 归档和原子目录替换，共享目录路径冲突会阻止恢复，避免静默覆盖其他项目。
-- **依赖检查**：项目删除检查任务、Worker 与归档历史；VM 删除检查项目绑定、任务、Worker/归档历史、项目备份引用和 Execution Lease，只删除无依赖的 stopped VM。
-- **恢复环境增量**：Worker 恢复上下文新增共享 VM 项目列表和离开期间的项目活动/任务变化摘要，首回合继续注入最新截图。
-- **多端状态同步**：任务看板包含资源预算、等待资源/VM 和每任务 VM 电源状态；VM 页显示队列、活跃 Worker、共享提示、调度阻塞和快照；项目页显示全部绑定、活跃 Worker 和队列深度；任务详情可跳转实时控制台和 Worker 会话。所有页面通过 WebSocket 失效通知或重连后的完整快照从数据库对账。
+</td>
+</tr>
+</table>
 
-详见 [`tests/phase9/summary.md`](tests/phase9/summary.md)。
+## 🤖 Agent 不是住在聊天窗口里
 
-## 阶段 8 已落地
+主会话（Router）和 Worker 是两个不同的 Pi 运行时。Router 在宿主，只拿结构化工具：查项目、查看板、建任务、分派 Worker、归档和检索归档；它没有 Shell、宿主文件系统、VM 输入或 Supervisor 接口。Worker 在 Guest，拥有自己的 HOME、Pi 会话、工具和生命周期；它通过 Computer Use Broker 操作桌面，每个动作都要先确认 Lease 和最新截图。
 
-- **Worker Registry**：持久化 Worker/Agent Session/项目/VM/来源会话绑定；Active Roster 从数据库实时重建，包含当前/最近任务、VM 队列深度、待审批和排队消息计数；Archive Registry 保存归档引用、恢复点、摘要和产物引用，支持按项目与关键词检索。
-- **Router Runtime**：Host 侧独立 Pi Router 会话（模型请求经宿主短期 Router 令牌走 Model Broker），只在回环 Router Tool Broker 暴露项目、任务、Worker、看板与归档工具；每次工具调用持久化审计；没有任何 VM 输入、Shell 或 Supervisor 工具。
-- **Worker 自动归档**：空闲超时、自动/手动归档、运行任务/待审批/排队消息/Lease 阻塞条件；归档停止 Worker 会话但不停 VM。归档事件进入 Outbox，看板和 Roster 自动更新。
-- **Worker 恢复**：同版本 Native Resume；版本不兼容或恢复失败时显式降级为新的摘要 Agent Session；恢复前捕获最新截图和离开期间项目/VM 变化并注入首回合，后续桌面动作仍必须先重新观察。
-- **验证边界**：`pnpm smoke:phase8` 使用真实控制平面、SQLite、Router Tool Broker HTTP、Worker RPC 和伪造 Guest Agent/Router Pi 验证 10 项主链路；未执行真实 QEMU/WHPX、真实 Pi/模型 Router 决策质量评估和浏览器/Electron 人工 UI 验收。
+| 角色 | 住在哪里 | 主要职责 |
+| --- | --- | --- |
+| 🧭 **Router** | 宿主 Pi 进程 | 主会话、项目 / 看板 / 归档查询、任务创建与 Worker 分派；不接触 Shell 和 VM 输入 |
+| 🛠️ **Worker** | Guest 内的 Pi + Worker Runtime | 认领任务、观察桌面、调用 Computer Use、提交产物；独立会话，可归档 / 恢复 |
+| 🖱️ **Guest Agent** | Linux / Windows Guest | 认证管理通道、GDI / X11 截图、鼠标键盘、心跳、workspace 归档 / 恢复 |
+| 📦 **VM Supervisor** | 宿主 Go 服务 | ACL、QEMU / WHPX 生命周期、QMP 对账、快照；不向模型开放任意指令 |
+| 🧠 **Control Plane** | 宿主 NestJS | 项目、任务、Worker、Lease、审批、Model Broker、机器人、通知和持久化 |
 
-详见 [`tests/phase8/summary.md`](tests/phase8/summary.md)。
+> 一次任务长这样：你说目标 → Router 建持久任务 → 队列按 VM 认领 → Worker 在 Guest 里观察 / 操作 → 每步写入 Trace 与截图 → Guest 证据或 completion 截图通过校验 → 任务完成。模型自述和「看起来像完成了」都不算数。
 
-## 阶段 7 已落地
+## 🛡️ 盒子里的安全边界
 
-- **Computer Use 工具集**：Host 侧回环 Computer Use Broker、短期 `cua_tokens` 和 Guest Pi `cua-extension.js`；截图、点击/双击、移动、输入、按键、滚动、拖拽、等待和完成工具。Guest 不持有 Guest Agent 令牌，Broker 每次请求校验 VM、Worker、任务和 Per-VM Execution Lease。
-- **动作审计与 Trace**：每个动作记录任务、Worker、VM、Lease、来源截图、屏幕宽高/DPI/缩放、前后截图、结果和错误；`GET /api/v1/tasks/:id/trace` 与看板 Trace/截图/审批视图。
-- **执行闭环保护**：最大步数、最长执行时间、无进展/重复动作检测、最新截图与分辨率变化校验、人工接管、任务取消和完成后的回合收敛；VM 重启/断线不重放旧动作。
-- **Policy/Approval**：项目级步数/时长、审批动作、文件证据根目录、网络白名单基础与 Guest 凭据策略；等待审批占用 VM 执行位，批准后只执行原存储动作，拒绝/超时/任务取消均不执行并记录工具结果和任务事件。
-- **独立完成校验**：Guest 只读文件/进程证据（大小、SHA-256、PID）或重新捕获的 completion 截图；连续失败会阻塞任务，模型自述不能直接把任务置为完成。
-- **验证边界**：`pnpm smoke:phase7` 使用真实控制平面/SQLite/HTTP Broker/Worker RPC 和伪造 Guest Agent 验证主链路；未执行真实 QEMU/WHPX、真实 Pi/模型任务集和真实 X11 中文/滚动/拖拽/DPI 回归。
+| 边界 | 做法 |
+| --- | --- |
+| 🔑 **长期秘密** | Provider Key 只经 Electron `safeStorage` 解密，由宿主 Model Broker 持有；机器人 Secret 只在宿主；Guest 拿不到长期凭据 |
+| 🎫 **短期令牌** | Worker RPC、Model Broker、Computer Use Broker、noVNC 各自使用绑定 VM / Worker / 任务 / 会话的短期令牌，可轮换、可撤销 |
+| 🕹️ **执行锁** | Per-VM Execution Lease 让 AI 与人工互斥；只读观察不取锁、不转发输入；人工接管显式抢占 |
+| ✅ **审批与保护** | 项目级审批动作、步数 / 时长上限、无进展与重复动作检测、最新截图 / 分辨率校验；等待审批时占用该 VM 执行位 |
+| 🧾 **完成校验** | Guest 文件 / 进程证据（大小、SHA-256、PID）或重新截图；连续失败会阻塞任务 |
+| 🚫 **系统安全桌面** | Windows 锁屏 / UAC 返回 `session_locked` / `secure_desktop`，任务转 `blocked`；不绕过系统机制 |
+| 🌐 **本机 Web** | 只允许回环监听；访问密钥 0600；HttpOnly + SameSite=Strict 会话；CSRF、Host、Origin、Sec-Fetch-Site 校验；无宽松 CORS |
+| 🧹 **可观测与脱敏** | 动作 / 截图 Trace、任务事件、诊断报告；访问密钥、Bearer、Provider Key、机器人 Secret、Cookie 在日志和诊断中脱敏 |
 
-详见 [`tests/phase7/summary.md`](tests/phase7/summary.md)。
+## 📦 一台电脑，几个盒子
 
-## 阶段 6 已落地
+| 能力 | 说明 |
+| --- | --- |
+| 🐧 **一键 Linux VM** | 版本化 Ubuntu 24.04 Cloud Image，默认 4 vCPU / 8 GiB / 40 GiB；QEMU NoCloud + cloud-init 自动装 XFCE、Guest Agent、Node / Pi 与 Worker，首次初始化通常 5～20 分钟 |
+| 🪟 **Windows VM** | 合法 ISO 或内部 Golden Image；IDE 磁盘、e1000、标准 VGA、xHCI + USB tablet，不依赖 stock Windows 缺少的 VirtIO；最低建议 4 GiB / 32 GiB |
+| 🧩 **混合项目** | 一个项目可同时绑定 Linux 和 Windows VM；同 VM 串行、跨 VM 并发，看板显示 `vmOsFamily` |
+| ⚖️ **资源调度** | Host Reserve、Soft Memory Budget、按需自动启动 / 恢复、`waiting_resources`；空闲休眠只作用于无任务、无 Worker、无 Lease 的 VM |
+| 🧷 **共享与快照** | 多项目共享 VM 时明确展示桌面 / 软件 / 系统状态；整机快照只允许 stopped VM，恢复前列出受影响项目并二次确认；项目目录备份独立校验 |
+| 💾 **存储与迁移** | 应用配置与数据根分离；迁移在存储锁下复制、校验哈希、在线备份 SQLite；失败保留旧目录；旧目录不自动删除 |
 
-- **Worker Runtime**：Guest 内认证 Worker RPC（Bearer 令牌轮换、SSE 事件重连回放、版本握手、命令超时和大小限制）、每 Worker 独立 Pi 进程/HOME/session、非 root `aib-worker` 安装资产与固定 Node 24.18.0 / Pi 1.5.1。
-- **会话归档与恢复**：JSONL 备份、大小/SHA-256 manifest、版本校验、只接受运行时根内普通文件；Native Resume 失败明确报错，不伪造无损恢复。
-- **Model Broker**：Provider/模型白名单、短期令牌绑定 Worker/VM/session/任务、TTL 续期、撤销即中断流、OpenAI-compatible 与 Anthropic Messages 流式透传、用量/错误记录、上游重试；长期 Provider Key 由 Electron `safeStorage` 解密，经 0600 描述文件的进程内凭据桥提供，不进入 Guest。
-- **Worker Engine Adapter**：接入 TaskService 认领、统一 Execution Lease、Worker Registry、心跳、事件→TaskEvent/会话消息映射、取消→Pi Abort、RPC 断线→失败对账、控制平面重启保留绑定并显式 Resume。
-- **任务状态边界**：Pi 回合结束后任务进入 Blocked（`awaiting_verification`），阶段 7 实现独立完成校验前不以模型自称完成作为成功标准。
-- **验证边界**：`pnpm smoke:phase6` 使用真实控制平面/SQLite/HTTP Broker/Worker RPC 和测试 Pi 进程验证 11 项主链路；未启动真实 QEMU/WHPX、Linux Golden Image、真实 Pi 或真实模型，真实浏览器/Electron 人工验收仍未执行。
+## 🧠 模型与入口
 
-详见 [`tests/phase6/summary.md`](tests/phase6/summary.md)。
+设置页可以维护多套 Provider：配置名、Base URL、API 类型、模型白名单和凭据引用。Worker 默认模型和 Router 模型分开选择；Router 空闲时应用新模型并重建会话，已有 Worker 切换模型会归档旧会话再新建。长期 API Key 只显示「已保存 / 未保存」，不在接口或页面回显。
 
-## 阶段 5 已落地
+飞书和 QQ 都从本机出站：
 
-- **项目与多 VM 绑定**：项目 CRUD、归档/恢复、Guest 工作区配置、主 VM 切换、停止 VM 绑定；项目会话、活动和产物引用。项目与 VM 页面明确列出共享项目、归档状态和串行状态影响，解绑/删除项目不会删除共享 VM。
-- **持久任务内核**：幂等创建、依赖、优先级、合法状态迁移、取消、失败重试和错误记录；TaskEvent、项目活动与 Outbox 同事务写入。SQLite 唯一约束和事务化认领保证同一 VM 只有一个运行中/待审批任务，不同 VM 可独立执行。
-- **结果与产物**：服务端 `TaskService.complete()` 校验非空摘要和产物目录内文件的实际大小/SHA-256，支持重新校验；浏览器没有通用状态覆盖或完成路由。
-- **任务看板**：项目/VM/Worker/状态筛选、排队位置和优先级、取消/重试、依赖/结果/产物/TaskEvent 时间线，以及项目、VM、来源会话跳转。WebSocket 只通知失效，打开和重连后读取完整数据库快照。
-- **验证边界**：真实控制平面 HTTP/WebSocket Smoke 已验证重启不重复认领；Smoke 使用服务端 TaskService 驱动和预置 VM 状态，不代表 Pi Worker、真实 QEMU/WHPX 或浏览器/Electron 人工 UI 验收通过。
+- 飞书：官方 `@larksuiteoapi/node-sdk` WebSocket + Open API。
+- QQ：Bot API v2 WebSocket Intents + REST。
+- 单聊按绑定授权，群聊必须显式加入白名单；飞书群聊必须 @ 机器人，QQ 只处理 @ 机器人的事件。
+- 任务、审批和 Router 回合事件会回到来源会话；取消、重试、批准 / 拒绝等敏感操作需要管理员二次确认。
+- 首版不发附件；QQ 被动回复窗口外发送失败会明确报错。没有产品方机器人中继。
 
-详见 [`tests/phase5/summary.md`](tests/phase5/summary.md)。
+> Agent 扩展：Subagent 随 Worker Runtime 默认安装；MCP 默认关闭，可在项目设置中按项目开启，只影响新建 / 恢复的 Worker 会话，不热改运行中的 Pi，也不会自动安装 Server 或注入凭据。
 
-## 阶段 4 已落地
+## 🏗️ 架构与几条不肯让步的原则
 
-- **Guest Agent 管理通道**：Bearer 令牌文件轮换/撤销、心跳、能力与版本兼容握手；截图、动态分辨率/DPI、输入动作 ID/超时/去重；更新包经大小和 SHA-256 校验后原子暂存，由外部服务管理器激活。
-- **noVNC 实时画面**：Web/Electron 共用控制台组件；回环 WebSocket 代理使用短时一次性票据和 Origin/Host 校验，严格解析 RFB 3.8，不是通用 TCP 隧道。
-- **统一 Execution Lease**：SQLite Per-VM Lease、心跳、过期和释放；AI 与人工输入共用校验和串行锁；人工接管抢占 AI，旧 AI 动作和失效控制台输入均被拒绝。
-- **验证边界**：真实控制平面/Guest Agent 进程 Smoke 已通过；RFB 对端是合成测试服务，真实 QEMU/WHPX、X11 和浏览器/Electron 人工操作仍需显式验收。
+```text
+┌────────────────────────────────────────────────────────────────────────────┐
+│ Electron shell                                                             │
+│  BrowserWindow (sandbox) · preload whitelist IPC · tray · safeStorage      │
+│  native notifications · autostart · update check / rollback                │
+└───────────────────────────────┬────────────────────────────────────────────┘
+                                │ supervise / local HTTP + WebSocket
+┌───────────────────────────────▼────────────────────────────────────────────┐
+│ NestJS control plane + React Web UI (same origin, 127.0.0.1 only)          │
+│  host Router Pi · projects · tasks · workers · models · bots               │
+│  approvals · notifications · storage · diagnostics · SQLite (WAL)          │
+└───────┬─────────────────────────────────────┬──────────────────────────────┘
+        │ ACL token                           │ short-lived broker tokens
+┌───────▼──────────────────────┐      ┌───────▼──────────────────────────────┐
+│ Go VM Supervisor             │      │ Linux / Windows Guest                │
+│ QEMU / WHPX · QMP · snapshots│      │ Guest Agent · Worker · Pi            │
+│ lifecycle · state reconcile  │      │ Computer Use · workspace             │
+└──────────────────────────────┘      └──────────────────────────────────────┘
+```
 
-详见 [`tests/phase4/summary.md`](tests/phase4/summary.md)。
+1. **后端才是权限边界。** 认证、授权、VM 绑定、Lease 和可见性判断都在服务端执行；前端隐藏按钮只是体验，不是安全措施。
+2. **长期秘密不出宿主。** API Key 只经 `safeStorage` 解密，Guest 只拿短期令牌；机器人 Secret 和数据库不进入 VM。
+3. **同一 VM 同时只有一个执行者。** AI 与人工共用 Per-VM Execution Lease；人工接管抢占 AI，旧动作和失效控制台输入一律拒绝。
+4. **数据库是任务事实源。** 任务、Worker、Lease、Outbox 和事件去重都持久化；控制平面重启后对账，不重复执行，也不重放旧动作。
+5. **完成必须由 Guest 证据校验。** 模型的自我总结不能直接把任务置为完成；文件 / 进程证据和重新截图才是闭环。
+6. **Router 只持结构化工具。** 宿主 Shell、VM 输入和 Supervisor 接口不对模型开放；任何桌面动作都要经过 Lease、Broker 和审计。
 
-## 阶段 3 已落地
+> 当前验证栈：Electron 45.2.3 · NestJS 12 · React 19.3.1 · Vite 8.3.7 · better-sqlite3 13 + Kysely 0.29 · Go 1.26 · Vitest 5.1。
 
-- **Image Service**：Manifest 与来源白名单、不可变版本、流式下载、Range 续传、并发去重、取消、失败诊断、SHA-256/大小校验和原子启用；数据库进度、SSE 事件和应用重启后的自动恢复。
-- **VM Supervisor**：回环监听和文件支持的 Bearer ACL；Create/List/Start/Stop/Suspend/Resume/State/Console；QEMU 进程/QMP 对账、按 VM 锁、结构化错误和超时；不开放删除 HTTP 路由。
-- **Linux Guest**：只从 Available 镜像创建独立 qcow2 覆盖盘，配置 VirtIO、回环网络/显示/控制台与 Guest Agent 转发；电源状态和 Guest Health 分开，异常 VM 不误标 Ready。
-- **VM 管理 UI**：镜像下载与进度、VM 创建和资源建议、多 VM 状态、存储路径和实际占用、绑定项目、当前任务、启停/休眠/恢复及控制台入口；强制停止有数据风险说明。
-- **验证边界**：本机服务 Smoke 和全部自动化测试通过；当前环境没有阶段 0 的 QEMU/镜像资产，因此新的真实 WHPX 休眠/恢复回归仍需按验收记录显式执行。
+## 🚀 快速开始
 
-详见 [`tests/phase3/summary.md`](tests/phase3/summary.md)。
+### 环境要求
 
-## 阶段 2 已落地
-
-- **Electron 无特权壳**：`sandbox` + `contextIsolation`，Renderer 没有 `require`、Node `process` 或通用 IPC；只有白名单方法通过 preload 暴露。
-- **本地服务监管**：Electron Main 启动并监管 Control Plane，带健康检查、启动超时、异常退出自动重启上限、结构化日志、崩溃诊断、托盘和“关闭窗口后后台运行/退出”设置。
-- **首次启动向导**：检查操作系统、CPU 虚拟化、内存和磁盘；在首次下载前选择数据目录；设置 Host Reserve、自动启动策略、本机管理员和敏感操作审批。
-- **存储管理**：镜像、下载缓存、VM、快照、产物和归档统一由 Storage Manager 解析；路径可写/空间检查、存储锁、哈希校验迁移、SQLite 在线备份与完整性检查；迁移失败保留旧目录。
-- **模型凭据**：只在 Electron Main 中通过 `safeStorage`（Windows DPAPI、macOS Keychain、Linux Secret Service）加密保存；`basic_text` 等不安全后端会明确拒绝保存；凭据不经过普通配置或日志。
-- **打包**：electron-builder 配置、`pnpm deploy` 生成自包含 Control Plane、`runtime_modules` + `NODE_PATH` 解决 pnpm/extraResources 结构；Linux 打包 Smoke Test 和 Windows portable/win-unpacked 构建已实际执行。
-
-详细验收项、证据和未关闭门槛见 [`tests/phase2/summary.md`](tests/phase2/summary.md)。
-
-## 环境要求
-
-- Node.js 22.19 或更高版本（当前验证环境为 Node.js 24）
-- pnpm 11.22（由根 `packageManager` 固定）
-- Go 1.26 或更高版本
-- Windows 宿主机是首要目标；当前脚手架也可在 Linux/WSL 中开发和测试
+| 依赖 | 版本 / 说明 |
+| --- | --- |
+| 操作系统 | Windows 11 + WHPX 是首要目标；Linux / WSL 可开发、跑测试和 Smoke，真实 Hypervisor 验收需对应环境 |
+| Node.js | 22.19 或更高（当前验证环境为 24） |
+| pnpm | 11.22（由根 `packageManager` 固定） |
+| Go | 1.26 或更高（以 `go.mod` 为准） |
+| QEMU | Electron 可托管下载到数据根，也可在设置中选择已有 QEMU；Windows 用 WHPX，Linux 用 KVM |
+| 模型与机器人 | 至少一套 OpenAI-compatible 或 Anthropic Messages Provider；飞书 / QQ 凭据可选 |
+| Windows Guest | 需要合法 ISO 或内部 Golden Image；建议至少 4 GiB 内存 / 32 GiB 磁盘 |
 
 启用 Corepack 后可自动使用固定 pnpm 版本：
 
 ```bash
 corepack enable
 corepack prepare pnpm@11.22.0 --activate
-```
-
-## 安装与开发
-
-```bash
 pnpm install
-
-# 控制平面 + Web 本地开发
-pnpm dev
-
-# 或分别启动
-pnpm --filter @agent-in-box/control-plane dev
-pnpm --filter @agent-in-box/web dev
 ```
 
-- Web: http://127.0.0.1:5173
-- 控制平面: http://127.0.0.1:3000
-- 健康检查: http://127.0.0.1:3000/api/v1/health
-
-阶段 11 起，浏览器首次访问需要本机访问密钥。控制平面启动后在配置目录创建
-`web-access-key`（Linux 默认 `~/.config/agent-in-box/web-access-key`，Windows
-默认 `%APPDATA%\AgentInBox\web-access-key`，设置了 `AGENT_IN_BOX_CONFIG_DIR`
-时位于该目录）。把文件中的 `aib_...` 粘贴到解锁页即可；Electron 会自动读取并登录。
-本机自动化可使用 `Authorization: Bearer <key>`。控制平面只允许回环监听，远程访问不在阶段 11 范围。
-
-VM 操作另需启动 Go Supervisor（普通用户、仅回环监听）：
-
-```bash
-go run ./services/vm-supervisor/cmd/vm-supervisor
-```
-
-Supervisor 与控制平面读取同一个 `AGENT_IN_BOX_DATA_ROOT` 或首次向导保存的 `app-config.json`，默认 ACL 令牌位于 `<data-root>/supervisor-acl.token`。QEMU 不在 PATH 时通过 `-qemu-system` 和 `-qemu-img` 指定阶段 0 已安装的固定二进制路径。Electron 自动托管/打包 Supervisor 仍是后续安装集成项。
-
-桌面壳开发可以直接使用统一脚本（构建共享包、Web、Control Plane 和 Electron，并由 Control Plane 提供同源页面）：
+### 第一步：把桌面壳跑起来
 
 ```bash
 pnpm dev:desktop
 ```
 
-也可分别启动 Vite 和 Electron；`AGENT_IN_BOX_WEB_URL` 可指向其他本地 Web 地址。Electron 窗口只加载页面，不直接执行系统命令。
+这个脚本会构建共享包、Web、控制平面和 VM Supervisor，然后启动 Electron。Electron 会监管控制平面，并在资源就绪时托管 Go VM Supervisor。
 
-打包与 Smoke Test：
+如果只想开发 Web 与控制平面：
 
 ```bash
-# 构建自包含 Control Plane + Web + Electron 并生成当前平台目录包
-pnpm package:desktop:dir
-
-# 生成 Windows portable exe（Linux/WSL 可构建，无需 wine）
-pnpm package:desktop:win:portable
-
-# 在 Windows 上生成 NSIS 安装包（需要 Windows 或可用的 wine）
-pnpm package:desktop:win
-
-# 控制平面首次启动/迁移/重启对账（不需要 Electron）
-pnpm smoke:phase2
-
-# Image Service + 真实控制平面/Supervisor + ACL + 进程重启续传
-pnpm smoke:phase3
-
-# Guest Agent + 版本/更新握手 + noVNC 代理 + AI/人工 Lease 互斥
-pnpm smoke:phase4
-
-# 项目/绑定 + 任务队列 + 产物校验 + 真实重启 + WebSocket 全量重同步
-pnpm smoke:phase5
-
-# Worker RPC + 短期 Broker 令牌/撤销 + 事件映射/取消 Abort + 归档/重启恢复
-pnpm smoke:phase6
-
-# Computer Use Broker/Lease/截图 Trace + 审批 + 执行保护 + 完成证据校验
-pnpm smoke:phase7
-
-# Router Tool Broker + Worker Registry/Archive + 自动/手动归档 + 原生/摘要恢复 + 重启对账
-pnpm smoke:phase8
-
-# 资源调度 + 共享快照/项目备份 + 多端状态同步
-pnpm smoke:phase9
-
-# 飞书/QQ 持久 Ingress + 身份/群白名单 + Router 任务回传
-pnpm smoke:phase10
-
-# 本机 Web 认证/CSRF/Origin + 通知中心 + 文件投递 + 更新/卸载单元测试
-pnpm smoke:phase11
-
-# 安全边界 + 迁移前备份/恢复 + SIGKILL 对账 + 2000+ 任务性能 + 诊断脱敏
-pnpm smoke:phase12
-
-# 生成 Guest Worker Runtime 自包含 tar.gz 与 SHA-256
-pnpm package:worker-runtime
-
-# 构建 Windows/Linux VM Supervisor 二进制与 SHA-256
-pnpm package:vm-supervisor
-
-# 打包 Linux Guest Runtime（Guest Agent、Worker、Node、Pi、cloud-init 安装资产）
-pnpm package:guest-runtime
-
-# 模型配置、只读观察、cloud-init provisioning 的集成 Smoke
-pnpm smoke:phase14
-
-# 为 release/ 下的安装包/压缩包生成 SHA256SUMS 与 build-manifest.json（不代替签名）
-pnpm release:checksums
-
-# 已打包桌面壳的 Renderer 隔离、preload IPC 和 UI 加载
-# 需先执行 pnpm package:desktop:dir；Linux/WSL 还需要 X/WSLg 和 Electron 系统库
-pnpm smoke:desktop
+pnpm dev
 ```
 
-受限网络下下载 Electron/NSIS 依赖可设置镜像：
+- Web：`http://127.0.0.1:5173`
+- 控制平面：`http://127.0.0.1:3000`
+- 健康检查：`http://127.0.0.1:3000/api/v1/health`
+
+浏览器首次访问需要本机访问密钥。控制平面启动后在配置目录创建 `web-access-key`：
+
+- Windows：`%APPDATA%\AgentInBox\web-access-key`
+- Linux：`~/.config/agent-in-box/web-access-key`
+- 设置了 `AGENT_IN_BOX_CONFIG_DIR` 时位于该目录
+
+把文件中的 `aib_...` 粘贴到解锁页即可；Electron 会自动读取并登录，Renderer 不接触密钥。本机自动化可使用 `Authorization: Bearer <key>`。控制平面只允许回环监听，远程访问不在当前范围。
+
+单独运行 VM Supervisor（例如只用 `pnpm dev`）：
+
+```bash
+go run ./services/vm-supervisor/cmd/vm-supervisor
+```
+
+Supervisor 与控制平面读取同一个 `AGENT_IN_BOX_DATA_ROOT` 或首次向导保存的 `app-config.json`；默认 ACL 令牌位于 `<data-root>/supervisor-acl.token`。QEMU 不在 PATH 时用 `-qemu-system` 和 `-qemu-img` 指定固定二进制路径。端口、Broker 令牌、机器人凭据等高级配置见 [`.env.example`](.env.example) 与 [技术设计](docs/02-technical-design.md)。
+
+### 第二步：走一遍首次启动
+
+1. 在首次启动向导里选择**非系统盘**上的数据根目录，确认 Host Reserve、VM 自动启动策略、本机管理员和敏感操作审批。
+2. 在“设置 → 模型与 API 配置”里保存 Provider 凭据，并选择 Worker 默认模型和 Router 模型。长期 Key 只进系统安全存储。
+3. 在“设置 → 虚拟机运行组件”下载托管 QEMU，或选择已有 QEMU 的 `bin` 目录。托管下载依赖发布 Manifest；开发环境可用 `AGENT_IN_BOX_RUNTIME_MANIFEST` 指向本地或自建 Manifest。
+4. 打开“虚拟机”，使用“一键创建 Linux 工作 VM”；等待下载、创建、cloud-init 初始化和就绪。首次通常需要 5～20 分钟。开发环境首次使用前先执行 `pnpm package:guest-runtime`，发布包已内置这些资产。
+5. 新建项目，绑定一台或多台 VM，设置 Guest 工作目录；然后在项目页创建任务，或直接在 Router 主会话里描述目标。
+
+### 第三步：确认服务真的活了
+
+```bash
+curl -s http://127.0.0.1:3000/api/v1/health
+# {"status":"ok","service":"control-plane","protocolVersion":...}
+```
+
+登录后访问 `/api/v1/runtime` 可以拿到解析后的存储布局和数据库路径。VM Supervisor 与 Guest Agent 也提供 `/healthz` 和 `/readyz`；Guest Agent 的认证管理接口还需要对应 token 文件。更多排障与首次使用细节见 [用户指南](docs/04-user-guide.md)。
+
+### 常用命令
+
+```bash
+pnpm check                    # lint + typecheck + Vitest + Go test + 构建
+pnpm test                     # 前端与 Go 测试
+pnpm build                    # 所有 TypeScript 包 + Go
+pnpm typecheck
+pnpm lint
+go vet ./...
+
+pnpm smoke:phase2             # 阶段 Smoke；phase3～phase14 同理
+pnpm package:desktop:dir      # 当前平台目录包
+pnpm package:desktop:win:portable
+pnpm package:desktop:win      # Windows 或可用的 wine；NSIS 安装包
+pnpm package:guest-runtime    # Linux Guest Agent / Worker / Node / Pi / cloud-init 资产
+pnpm package:vm-supervisor    # Windows / Linux Supervisor 二进制
+pnpm release:checksums        # release/SHA256SUMS 与 build-manifest.json
+```
+
+阶段 Smoke 的完整清单、各项断言和未关闭门槛见 [`tests/`](tests) 与 [`scripts/`](scripts)。CI 在 `.github/workflows/ci.yml` 中运行 `pnpm check`、`go vet`、关键 Go 包 race 测试和阶段 2～11 服务 Smoke；Windows / Linux 双矩阵使用固定 pnpm、Node 和 `go.mod` 中的 Go 版本。
+
+## 📦 打包、更新与卸载
+
+- `pnpm package:desktop:dir` 生成当前平台目录包；`pnpm package:desktop:win:portable` 可在 Linux / WSL 直接构建 Windows portable exe；`pnpm package:desktop:win` 生成 per-user NSIS 安装包，需要 Windows 或可用的 wine。
+- NSIS 不申请管理员权限，安装后提示首次启动向导；卸载默认保留 VM、数据库和用户数据。只有用户明确选择删除且目录带有数据根标记时，才调用清理工具。
+- 更新使用 HTTPS Manifest：流式下载、SHA-256 校验、安装前备份数据库与已安装资源，失败可回滚。Windows 上替换 `app.asar` 等资源可能受文件锁影响，干净安装环境的升级 / 回滚仍需验收。
+- 受限网络下可设置镜像：
 
 ```bash
 ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ \
@@ -301,289 +267,117 @@ ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-
 pnpm package:desktop:win:portable
 ```
 
-## 构建与检查
+- 发布资产清单、SHA-256 和构建 Manifest 由 `pnpm release:checksums` 生成；它不等于外部代码签名。
 
-```bash
-pnpm build        # 所有 TypeScript 包 + Go
-pnpm test         # Vitest + Go test
-pnpm typecheck
-pnpm lint
-pnpm check        # lint + typecheck + test + build
-```
-
-## 持续集成
-
-GitHub Actions 工作流位于 `.github/workflows/ci.yml`，在 `main` 推送、Pull Request 和手动触发时运行。Windows 与 Linux 矩阵使用固定 pnpm、Node.js 24 和 `go.mod` 中的 Go 版本，依次执行：
-
-- `pnpm install --frozen-lockfile`；
-- `pnpm check`、`go vet ./...`、关键 Go 包的 race 测试与自包含 Control Plane 打包；
-- 阶段 2～11 服务 Smoke Test，并上传各阶段机器结果 artifact。
-
-CI 不申请模型或机器人凭据，也不运行真实 QEMU/WHPX；这些仍由对应阶段的显式集成测试和宿主环境验收覆盖。
-
-Go 服务可单独运行：
-
-```bash
-go run ./services/vm-supervisor/cmd/vm-supervisor
-go run ./services/guest-agent/cmd/guest-agent
-```
-
-两者默认只监听回环地址，并提供 `/healthz` 和 `/readyz`。Guest Agent 的认证管理接口还需 `-token-file <guest-token-file>`；宿主控制平面读取 `<vm-storage-root>/guest-agent.token`，或通过 `AGENT_IN_BOX_GUEST_TOKEN_FILE` 使用开发/旧镜像的共享令牌文件。两处令牌必须一致，令牌文件支持轮换，删除后旧凭据立即失效。
-
-Cloud-init provisioning 默认监听 `127.0.0.1:6722`，Guest 通过 QEMU user networking 的 `10.0.2.2:6722` 获取一次性 bootstrap 数据；Guest Runtime 资产目录由 `AGENT_IN_BOX_GUEST_RUNTIME_DIR` 指定，桌面应用会自动传入打包资源路径。QEMU 托管下载的运行时资产 Manifest 可用 `AGENT_IN_BOX_RUNTIME_MANIFEST` 覆盖。
-
-阶段 6 的 Guest Worker RPC 监听 `0.0.0.0:7612`，由 QEMU 仅转发到宿主机回环端口；宿主读取 `<vm-storage-root>/worker-rpc.token`（开发环境可用 `AGENT_IN_BOX_WORKER_TOKEN_FILE`）。该令牌与 Guest Agent token、模型 Broker 短期令牌相互独立。模型 Broker 默认监听 `127.0.0.1:6719`，Guest 通过 QEMU user networking 的 `10.0.2.2:6719` 访问；长期 Provider Key 由 Electron `safeStorage` 解密，经 `credential-bridge.json`（0600）和进程内 Bearer 桥交给控制平面。Worker Runtime 安装与固定版本见 [`images/linux/README.md`](images/linux/README.md)。
-
-阶段 8 的 Router Tool Broker 默认监听 `127.0.0.1:6721`（`AGENT_IN_BOX_ROUTER_BROKER_PORT`），只接受宿主 Router 进程的短期工具令牌。Router 的模型请求使用 `router_model_tokens` 经 Model Broker 转发；Router Pi 进程由 `AGENT_IN_BOX_ROUTER_PI_BINARY` / `AGENT_IN_BOX_ROUTER_PI_ARGS` 配置，扩展文件写入数据目录 `router/`。Router 工具面不包含 VM 输入、Shell 或 Supervisor 接口。
-
-## 目录结构
+## 📂 项目结构
 
 ```text
-apps/
-  desktop/           Electron 无特权桌面壳、Control Plane 监管、托盘与凭据存储
-  web/               React + Vite 本地 Web UI（首次向导、存储和设置页面）
-services/
-  control-plane/     NestJS 本地控制平面（宿主检查、存储、任务、Worker Registry、Router、机器人连接器与持久化）
-  vm-supervisor/     Go 宿主机 VM 管理服务（ACL、QEMU 生命周期与状态对账）
-  guest-agent/       Go Guest Agent（认证管理、桌面输入/截图、心跳与更新暂存）
-scripts/             打包、开发启动与阶段 Smoke Test
-packages/
-  protocol/          跨进程协议与事件类型
-  domain/            任务/Worker 状态机与绑定规则
-  config/            数据目录和本地服务配置
-  agent-runtime/     Worker Engine 抽象、Pi RPC、Guest Worker RPC 与自包含运行时入口
-  computer-use/      Computer Use 动作协议与校验
-  bot-connector/     飞书/QQ 长连接、Ingress/去重、重连与协议适配
-  ui/                状态文案与样式辅助
-internal/health/     共享 Go 健康检查实现
-images/linux/        Worker Runtime 安装脚本、systemd unit、cloud-init 示例
-tests/               阶段验证记录与后续集成/真实 VM 测试
-docs/                产品、技术与开发计划
+agent-in-box/
+├── 🖥️ apps/
+│   ├── desktop/          Electron 无特权壳、控制平面监管、托盘、safeStorage、更新
+│   └── web/              React + Vite 本地 Web UI；public/logo.svg 为品牌图标
+├── 🧩 services/
+│   ├── control-plane/    NestJS 控制平面、SQLite、任务 / Worker / 模型 / 机器人 / 审批
+│   ├── vm-supervisor/    Go 宿主机 VM 管理（ACL、QEMU / WHPX、QMP、快照）
+│   └── guest-agent/      Go Guest Agent（截图 / 输入 / 心跳 / workspace）
+├── 📦 packages/
+│   ├── protocol/         跨进程协议与事件类型
+│   ├── domain/           任务 / Worker 状态机与绑定规则
+│   ├── config/           数据目录和本地服务配置
+│   ├── agent-runtime/    Worker Engine、Pi RPC、Guest Worker RPC
+│   ├── computer-use/     Computer Use 动作协议与校验
+│   ├── bot-connector/    飞书 / QQ 长连接、Ingress / 去重
+│   └── ui/               状态文案与样式辅助
+├── 🧱 internal/          Go 共享实现：QMP、Guest Agent、VM Provider、Supervisor、镜像下载、健康检查
+├── 🧪 scripts/           开发启动、打包、发布校验和阶段 Smoke
+├── 🗂️ images/            Linux Guest Runtime、Windows Golden Image 资产
+├── ✅ tests/             阶段 0～14 验收记录、任务集与安全矩阵
+├── 📚 docs/              产品、技术、计划、用户、机器人、存储、隐私
+├── ⚙️ .github/workflows/ CI 与发布资产
+├── package.json / pnpm-workspace.yaml
+├── go.mod
+├── .env.example
+└── LICENSE（MIT）
 ```
 
-## 数据目录
+## 🎨 界面与视觉
+
+工作区采用 Codex 式三栏：左侧项目 / Worker 会话，中间 Router 或 Worker 主会话，右侧只读观察栏。品牌图标源文件是 [`apps/web/public/logo.svg`](apps/web/public/logo.svg)，浏览器 favicon 与 Electron / NSIS / AppImage 图标都由它导出；桌面图标资产在 `apps/desktop/build/`。
+
+## 💾 数据目录
 
 小体积应用配置保存在 OS 配置目录，大文件全部位于用户选择的数据根目录：
 
-- 配置文件：Windows `%APPDATA%\AgentInBox\app-config.json`；Linux `~/.config/agent-in-box/app-config.json`；macOS `~/Library/Application Support/AgentInBox/app-config.json`
-- 默认数据根目录（首次启动向导会要求确认或改选）：Windows `%LOCALAPPDATA%\AgentInBox`；Linux/macOS 为 OS 数据目录
-- 存储布局：`images/`、`downloads/`、`vms/<vm-id>/`、`snapshots/<vm-id>/`、`artifacts/`、`archives/`、`inbox/`、`backups/`
+- 配置目录：Windows `%APPDATA%\AgentInBox`；Linux `~/.config/agent-in-box`；macOS `~/Library/Application Support/AgentInBox`
+- 默认数据根：Windows `%LOCALAPPDATA%\AgentInBox`；首次向导要求确认或改选；`AGENT_IN_BOX_DATA_ROOT` 可强制锁定
+- 布局：`images/`、`downloads/`、`vms/<vm-id>/`、`snapshots/<vm-id>/`、`artifacts/`、`archives/`、`inbox/`、`backups/`、`tools/qemu/`
+- SQLite：数据根下的 `agent-in-box.sqlite`，WAL 模式 + 外键约束；启动时执行内置 Migration Runner
+- 迁移：存储锁下复制并逐个校验文件哈希，SQLite 在线备份并执行 `integrity_check`，全部成功后原子更新配置；失败保留旧目录
+- 迁移前备份：检测到待应用 Migration 时先写入 `backups/pre-migration-*.sqlite`、校验完整性并保存 SHA-256；默认保留 5 份
 
-`AGENT_IN_BOX_CONFIG_DIR` 可覆盖配置目录（桌面应用会自动传给 Control Plane）；`AGENT_IN_BOX_DATA_ROOT` 可强制指定数据根目录，此时向导和存储迁移会锁定该路径。控制平面的 `/api/v1/runtime` 会返回解析后的存储布局和数据库路径，`/api/v1/storage` 返回分类占用和存储锁状态。
+更完整的存储、备份和恢复步骤见 [存储与备份指南](docs/06-storage-guide.md)。
 
-迁移会在存储锁保护下复制并逐个校验文件哈希，使用 SQLite 在线备份复制数据库并执行 `integrity_check`，全部成功后原子更新配置；失败时旧目录和旧配置保持可用。旧目录不会自动删除。
+## 📚 文档地图
 
-SQLite 数据库位于数据根目录下的 `agent-in-box.sqlite`，使用 WAL 模式并启用外键约束。启动时执行内置 Migration Runner；迁移记录保存在 `schema_migrations` 表中，每条迁移在独立事务中应用。数据库包含：
+所有需求与设计决策以 [`docs/`](docs) 和 [`tests/`](tests) 为准，聊天记录不作为最终依据。
 
-- `projects`、`project_vm_bindings`、`project_activities`、`vm_instances`、`conversations`
-- `tasks`、`task_events`、`task_dependencies`、`task_artifacts`、`workers`、`idempotency_keys`
-- `outbox`、`vm_leases`、`processed_events`
-- `model_providers`、`model_tokens`、`model_requests`、`conversation_messages`
-- `images`
-- `app_settings`、`local_users`、`storage_migrations`
-- `bot_accounts`、`bot_identities`、`bot_chats`、`bot_events`、`bot_outbound`、`bot_turns`、`bot_task_links`、`bot_approval_links`、`bot_access_codes`、`bot_confirmations`
+| 文档 | 它回答什么问题 |
+| --- | --- |
+| [`01-product-solution.md`](docs/01-product-solution.md) | 产品定位、核心原则、概念模型与功能范围 |
+| [`02-technical-design.md`](docs/02-technical-design.md) | 进程、协议、数据、VM、Worker、Computer Use 与安全设计 |
+| [`03-development-plan.md`](docs/03-development-plan.md) | 阶段划分、交付顺序与验收口径 |
+| [`04-user-guide.md`](docs/04-user-guide.md) | 安装、首次启动、VM / 项目 / 任务 / 模型 / 机器人 / 更新排障 |
+| [`05-bot-guide.md`](docs/05-bot-guide.md) | 飞书与 QQ 应用创建、凭据、白名单和绑定流程 |
+| [`06-storage-guide.md`](docs/06-storage-guide.md) | 数据根、迁移、备份、恢复与磁盘空间 |
+| [`07-privacy.md`](docs/07-privacy.md) | 本地数据、模型请求、机器人消息与诊断信息边界 |
+| [`tests/phase0/`](tests/phase0/README.md) | 高风险技术验证：WHPX、QEMU、Pi、真实模型 CUA |
+| [`tests/phase2` ～ `phase14`](tests) | 各阶段验收记录、任务集、安全矩阵与未关闭门槛 |
+| [`images/linux/`](images/linux/README.md) | Guest Worker Runtime 安装、systemd 与 cloud-init 资产 |
+| [`images/windows/`](images/windows/README.md) | Windows Golden Image 构建、Manifest 与 token 注入 |
 
-数据库备份通过 `AppDatabase.backup()` 使用 SQLite 在线备份能力。阶段 12 起，控制平面在检测到待应用 Migration 时会先写入 `backups/pre-migration-*.sqlite`、执行 `integrity_check` 并保存 SHA-256；备份失败会阻止启动。详细恢复步骤见 [存储与备份指南](docs/06-storage-guide.md)。
+阶段 13 的真实 Windows 宿主 + Linux Guest 验收记录见 [`tests/phase13/real-verification-2026-11-12.md`](tests/phase13/real-verification-2026-11-12.md)。
 
-## 当前验证记录（2026-11-10～11）
+## 🧪 验证与已知边界
 
-已在当前开发环境实际执行：
-
-- `pnpm install`：成功；pnpm 11 仅允许 `esbuild`、`electron`、`better-sqlite3` 构建脚本
-- `pnpm check`：lint、typecheck、300 个 Vitest 测试、Go test、全部构建均通过；5 个环境依赖测试显式跳过
-- 控制平面 `GET /api/v1/health`、`GET /api/v1/runtime` 返回正常
-- 控制平面启动时创建 SQLite 数据库并应用 `001_initial_schema`、`002_phase2_settings`、`003_phase3_images`、`004_phase5_projects_tasks`、`005_phase6_workers_models`、`006_phase7_computer_use`、`007_phase8_router_archive`、`008_phase9_resources_sharing`、`009_phase10_bots`、`010_phase11_web_desktop`、`011_phase12_hardening`
-- SQLite 表、WAL 模式和迁移记录在真实运行中验证通过
-- Web 开发服务器可访问，`/api` 代理到控制平面正常
-- VM Supervisor 与 Guest Agent 的 `/healthz`、`/readyz` 正常
-
-### 阶段 14 验证（2026-11-12）
-
-- `pnpm check`、阶段 2～13 Smoke 与新增 `pnpm smoke:phase14` 通过；`pnpm package:vm-supervisor` 生成 Windows/Linux Supervisor 二进制，`pnpm package:guest-runtime` 生成 Linux Guest Agent、Worker、Node、Pi 与 cloud-init 资产。
-- `smoke:phase14` 使用真实控制平面、SQLite 和 Provisioning HTTP 验证：Provider/Worker/Router 选择持久化、Router 空闲切换模型、user-data 不泄漏 Guest Token、ready 后撤销 bootstrap 数据。
-- 真实 WHPX/QEMU、Ubuntu cloud-init 首次启动、Electron UI 与 NSIS 安装仍需 Windows 环境验收。详见 [`tests/phase14/summary.md`](tests/phase14/summary.md)。
-
-### 阶段 12 验证（2026-11-11）
-
-- `pnpm smoke:phase12`：真实控制平面、SQLite、静态 Web 构建、迁移备份/恢复和崩溃对账，12 项检查通过：Host/Origin/Sec-Fetch-Site 与未认证拒绝、CSRF、无宽松 CORS、诊断认证/脱敏、Router 工具面、迁移前备份与 SHA-256、崩溃后任务/Worker/Lease 安全状态、2001 条任务看板 64 ms、100 条 Router 消息 4 ms、备份恢复后 2001 条任务历史可用。
-- 新增 `migration-backup.test.ts`、`diagnostics.service.test.ts`、`redaction.test.ts`、`api-exception.filter.test.ts` 和桌面日志脱敏测试。
-- 阶段 2～11 Smoke 在阶段 12 迁移/存储布局变更后全部重跑通过。
-- 新增 `tests/phase12/full-chain-tasks.json` 与 `security-matrix.md`；真实 QEMU/WHPX、真实 Pi/模型、真实机器人、Windows NSIS、真实更新源、Guest 网络边界和长时稳定性仍待显式验收。详细证据见 [`tests/phase12/summary.md`](tests/phase12/summary.md)。
-
-### 阶段 10 验证（2026-11-11）
-
-- `pnpm smoke:phase10`：真实控制平面/SQLite、真实 QQ Bot API v2 协议服务替身、官方飞书 SDK 对端替身、真实 Router Tool Broker 和伪造 Router Pi，13 项检查通过：迁移与机器人状态、活跃执行电脑绑定、QQ/飞书出站长连接、一次性绑定码、状态查询、未授权拒绝、群聊白名单、飞书 @ 校验、机器人消息进入 Router 并创建持久任务、任务通知回传、重复事件去重、取消任务二次确认、重启后持久去重。
-- 单元测试覆盖持久 Ingress/去重、身份与群白名单、命令授权、审批请求/处理通知、出站队列和连接监管。
-- `realFeishuApp=false`、`realQqBot=false`、`realNetworkRedelivery=false`、`realModel=false`、`browserElectronUi=false`；真实平台凭据、权限矩阵和长时连接稳定性仍待显式验收。详细证据见 [`tests/phase10/summary.md`](tests/phase10/summary.md)。
-
-### 阶段 9 验证（2026-11-11）
-
-- `pnpm smoke:phase9`：真实控制平面/SQLite/宿主内存计数、伪造 Supervisor/Guest Agent，10 项检查通过：阶段 9 迁移与资源报告、资源不足任务进入 waiting_resources、预算恢复后自动启动并回到队列、看板/VM/项目页状态一致、共享 VM 快照影响确认与恢复、项目目录备份校验/恢复且不触碰其他项目、VM/项目删除依赖检查、空闲休眠不停止有任务 VM、全量快照对账。
-- 资源调度、共享快照与项目备份的单元测试覆盖软预算阻塞、自动启动/恢复、空闲休眠阻塞条件、快照共享影响、项目备份共享目录冲突和删除依赖。
-- `realQemuWxpx=false`、`realLinuxGuest=false`、`realWorkerPi=false`、`realRouterPi=false`、`realModel=false`、`browserElectronUi=false`；真实 QEMU 快照、真实 Guest workspace 归档和人工 UI 仍待显式验收。详细证据见 [`tests/phase9/summary.md`](tests/phase9/summary.md)。
-
-### 阶段 8 验证（2026-11-11）
-
-- `pnpm smoke:phase8`：真实控制平面/SQLite、HTTP Router Tool Broker、Worker RPC 和伪造 Guest Agent/Router Pi，10 项检查通过：阶段 8 迁移、Router 工具面、Router 查询已有 Worker 后分派、取消→Abort、归档/Active Roster/Archive Registry、同版本 Native Resume 与截图注入、归档后 Router 检索并创建后续任务、重启后 Router 会话恢复与任务分配查询、Outbox/恢复上下文持久化。
-- Router Pi 与 Guest Agent 是协议测试替身；`realRouterPi=false`、`realGuestAgent=false`、`realPiProcess=false`、`realModel=false`、`realQemuWxpx=false`、`browserElectronUi=false`。
-- 自动归档、阻塞条件、摘要降级恢复和新 Worker 从归档摘要是自动化测试覆盖；真实模型 Router 决策质量与人工 UI 仍需真实环境验收。详细证据见 [`tests/phase8/summary.md`](tests/phase8/summary.md)。
-
-### 阶段 7 验证（2026-11-11）
-
-- `pnpm smoke:phase7`：真实控制平面/SQLite、HTTP Computer Use Broker、Worker RPC 和伪造 Guest Agent，15 项检查通过：短期 CUA 令牌进入 Guest Pi 环境、无令牌/无观察/过期截图/分辨率变化拒绝、动作经 Lease 执行并记录前后截图、审批批准/拒绝/超时/任务取消、重复动作、最大步数、文件/进程完成证据、completion 截图和 Trace。
-- 测试 Pi 进程与 Guest Agent 是协议测试替身；`realGuestAgent=false`、`realPiProcess=false`、`realModel=false`、`realQemuWxpx=false`、`browserElectronUi=false`。
-- 详细证据、7.4 真实任务评测协议和未关闭门槛见 [`tests/phase7/summary.md`](tests/phase7/summary.md)。
-
-### 阶段 6 验证（2026-11-11）
-
-- `pnpm smoke:phase6`：真实控制平面完成 Worker Guest RPC 握手、短期 Broker 令牌、Guest 无长期 Provider Key、TaskEvent/会话消息映射、Steer/Follow-up、任务取消触发 Pi Abort、令牌原子轮换、Broker 流式 usage/撤销、重启对账、Native Resume、归档恢复和恢复后继续接收任务。
-- 测试 Pi 进程是固定 RPC 协议的测试替身；`realModel=false`、`realQemuWxpx=false`、`browserElectronUi=false`。
-- 详细证据和未关闭门槛见 [`tests/phase6/summary.md`](tests/phase6/summary.md)。
-
-### 阶段 5 验证（2026-11-11）
-
-- `pnpm smoke:phase5`：真实控制平面完成项目多对多绑定、共享 VM 删除保护、幂等/依赖/优先级、跨项目串行认领、失败重试、取消和产物 SHA-256 校验。
-- 在任务保持 `running` 时停止并重新启动真实控制平面，新的认领请求返回空且尝试次数保持为 1；浏览器 `POST /complete` 返回 404。
-- WebSocket 事件包含单调 ID、Schema/协议版本和任务上下文；断线后通过 `/api/v1/tasks/board` 重新读取完整快照，不依赖漏收事件重放。
-- `realQemuValidated=false`、`browserInteractionValidated=false`、`workerRuntimeIntegrated=false`；本阶段 Smoke 的 Worker 是服务端 TaskService 驱动，不是 Pi RPC。
-- 详细证据和未关闭门槛见 [`tests/phase5/summary.md`](tests/phase5/summary.md)。
-
-### 阶段 4 验证（2026-11-11）
-
-- `pnpm smoke:phase4`：真实控制平面和 Guest Agent 进程验证认证、心跳/版本握手、更新校验暂存、人工抢占 AI、一次性控制台票据及 Lease 释放后的 RFB 输入阻断
-- 控制平面新增 Lease/Guest/RFB 测试，包含 ServerInit 拆包时早期输入不得绕过 Lease 的回归；Go Guest Agent race 测试通过
-- Smoke 使用合成 RFB/更新对端，`realQemuValidated=false`、`realDesktopInputValidated=false`；真实 noVNC 浏览器/Electron 与 X11 动态分辨率验收尚未执行
-- 详细证据和未关闭门槛见 [`tests/phase4/summary.md`](tests/phase4/summary.md)
-
-### 阶段 3 验证（2026-11-10～11）
-
-- `pnpm smoke:phase3`：在 Windows 上启动真实 Go Supervisor 和控制平面，验证 ACL、Manifest、SSE、校验启用、同镜像去重及强制结束控制平面后的自动续传
-- Image Service 与 VM Service 新增 9 个测试；Go API/ACL/QMP/Provider 包含状态、幂等、并发锁和异常测试
-- `go vet ./...` 和关键 VM/下载包 race 测试通过
-- 当前未重新运行真实 QEMU/WHPX；`realQemuValidated=false` 已写入机器结果，不能用合成镜像 Smoke 替代 Hypervisor 验收
-- 详细证据和未关闭门槛见 [`tests/phase3/summary.md`](tests/phase3/summary.md)
-
-### 阶段 2 验证（2026-11-10）
-
-阶段 2 的验收记录、逐项状态和未关闭门槛见 [`tests/phase2/summary.md`](tests/phase2/summary.md)。当前环境实际执行：
-
-- `pnpm smoke:phase2`：首次启动状态、WSL 宿主机检查、Unicode/空格数据目录校验、首次向导完成、6 类存储目录迁移、SQLite 备份、旧目录保留、重启后数据根目录对账全部通过
-- `pnpm package:desktop:dir`：electron-builder 生成 Linux 目录包，Control Plane 依赖通过 `runtime_modules` + `NODE_PATH` 装入 resources
-- 已打包 Linux 桌面 Smoke Test：Control Plane 在 1 秒内 healthy；Renderer 中 `window.agentInBox` 可用、`require`/`process` 为 `undefined`；IPC 返回 `running`；页面实际渲染首次启动向导和宿主机检查结果
-- Windows 目标：`win-unpacked` 与 portable exe 构建成功；NSIS 安装包在 Linux/WSL 中因缺少 wine 无法完成，需在 Windows 或安装 wine 的构建机执行
-- 存储迁移失败回滚、锁竞争/陈旧锁、只读目录、符号链接、缓存清理不影响 VM/产物、凭据 `basic_text` 拒绝保存均有自动化测试
-- Electron 二进制通过 `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/` 下载；WSL 中运行还需系统提供 X/WSLg 以及 libnspr4/libnss3/libasound2
-
-### 阶段 0 技术验证（2026-11-10）
-
-阶段 0 的高风险主链路已完成验证，完整结果与未关闭门槛见 [`tests/phase0/summary.md`](tests/phase0/summary.md)。首版选型已冻结为 QEMU/WHPX + XFCE/X11 + Pi RPC + 宿主 Model Broker；飞书使用官方 Node SDK，机器人平台可扩展。
-
-已在真实 Windows 11 家庭版宿主机上完成，而非仅在 WSL 中模拟：
-
-- WHPX API 探测：`WHvGetCapability` 返回 `S_OK` 且 `hypervisorPresent=True`
-- MSYS2 UCRT64 QEMU 11.1.3 安装到 `%LOCALAPPDATA%\AgentInBox\tools\msys64`，`-accel help` 包含 `whpx`
-- Ubuntu 24.04 cloud image 从 TUNA 镜像下载并通过 SHA256 校验
-- 使用 qcow2 覆盖盘启动 Linux Guest，冷启动到登录提示约 14 秒
-- cloud-init NoCloud 创建验证用户，SSH 经 `127.0.0.1:10022` 读取启动标记成功
-- QMP `system_powerdown` 优雅关机成功
-- qcow2 快照创建、列出和恢复成功，恢复后快照后写入的标记文件消失
-- XFCE + LightDM 桌面在 WHPX 上自动登录，QMP 截图与 `xdotool` 分辨率一致（1280x800，切换 1024x768 后截图尺寸同步变化）
-- QMP 绝对鼠标归一化坐标和 `send-key` ASCII 输入通过验证：在终端输入命令后，Guest 内生成预期文件
-- Go `vm-supervisor.exe /api/v1/host` 在 Windows 上返回 `ready=true`、`recommendedProvider=qemu-whpx`
-- Go Guest Agent 以非特权用户在 X11 桌面运行：无令牌/错误令牌均返回 401，截图返回可解码 PNG，点击、ASCII 和中文 `你好` 输入通过 Guest 文件 SHA256 验证
-- Go Provider 真实集成测试在 Windows/WHPX 上 31.83 秒通过：创建、启动、登录、Provider 重启对账、重复 Start/Stop、优雅关机、快照恢复和删除
-- Pi 1.5.1 RPC + 脚本化模型 + 真实 Guest Agent 的工具循环通过：截图 PNG 回传、点击、中文输入、活跃工具 Abort、Session Resume
-- **真实模型 `pro` 经本地 Model Broker 完成首个 CUA 任务**：13.37 秒内完成截图、中文输入、回车和复核截图，Guest 文件 SHA256 一致；VM 内不含上游 API Key
-- 真实模型继续通过桌面 Home 双击打开 Thunar（25.14 秒）和 Mousepad 多行编辑保存（27.84 秒）
-- WHPX 在桌面 VM 并行运行时连续通过 3 轮 Go Provider 生命周期回归（33.18/31.73/31.27 秒）
-- Epiphany 页面滚动到底部成功，但 HTML5 drag-and-drop 未完成（已记录为失败）；窗口标题栏拖拽由 Guest Agent 独立验证通过
-
-注意：Pi 验证同时使用本地脚本化模型和真实 `pro` 模型。首个真实任务已通过，但单次任务不能代表 Computer Use 成功率基线。验证中出现过一次 Guest 内核 panic，已记录为 WHPX 长稳风险，需重复复测。
-
-验证中确认的必要配置：桌面 VM 使用 `-vga none -device virtio-gpu-pci -device virtio-tablet-pci`；当前 WHPX 环境暂用 `-cpu qemu64`，`-cpu max` 的启动卡住问题尚未解决。
-
-测试矩阵、验收任务集和结果记录位于 [`tests/phase0/`](tests/phase0/README.md)。阶段 0 的 Linux 高风险主链路已经完成，默认 VmProvider 与 Worker Engine 已冻结；真实飞书/QQ 凭据、更长稳定性、Hyper-V 环境和真实镜像 CDN 等外部门槛仍然保留，详见阶段 0 总结。
-
-## 当前技术栈版本
-
-- Node.js 24（要求 >= 22.19）
-- pnpm 11.22.0
-- TypeScript 5.9.3
-- React 19.3.1 + Vite 8.3.7
-- NestJS 12.4.2
-- SQLite: better-sqlite3 13.0.3 + Kysely 0.29.8
-- Electron 45.2.3
-- noVNC 1.5.0 + WebSocket RFB 代理
-- Vitest 5.1.0
-- Go 1.26
-
-## 当前边界
-
-已具备：
-
-- pnpm Monorepo、共享 TypeScript 严格配置、Go Module
-- 协议类型、分页/错误/幂等契约、Guest RPC 与 VmProvider 接口
-- 任务与 Worker 状态机、VM 多对多绑定校验
-- Computer Use 动作结构校验
-- SQLite Migration、WAL、外键、在线备份
-- 项目、VM、会话、任务、Worker、Lease、Outbox 和事件去重仓储
-- 幂等任务创建、事务化状态迁移、任务事件与 Outbox 同事务写入
-- Per-VM 执行 Lease 与过期替换
-- NestJS 健康检查、运行时信息和持久化模块
-- React 本地页面与 Electron 无特权入口
-- VM Supervisor / Guest Agent 的 Go 健康服务
-- Go QMP 客户端（状态、关机、截图、键盘、绝对鼠标事件）
-- QEMU VmProvider 原型：qcow2 覆盖盘、启动/停止幂等、进程与 QMP 状态对账、快照、控制台地址
-- Windows/Linux Host Inspect：WHPX/KVM、QEMU 加速器、内存和磁盘检查；Windows amd64 版本已在本机实际运行
-- Linux X11 Guest Agent：Bearer 认证、能力/桌面信息、PNG 截图、鼠标/键盘/Unicode 输入和动作日志
-- `PiWorkerEngine`：Pi RPC 子进程、受控工具暴露、事件映射、Prompt/Steer/Follow-up/Abort、会话归档与原生恢复；包含假 Pi 单元测试和真实 Pi 集成测试
-- Guest Agent 心跳/版本/能力/截图/输入/更新暂存，noVNC 实时画面与统一 AI/人工 Execution Lease
-- Electron 无特权壳、Renderer 白名单 IPC、Control Plane 进程监管、健康检查超时、日志轮转和崩溃诊断
-- 首次启动向导、宿主机检查、数据目录选择、Host Reserve/自动启动策略、本机管理员和敏感操作审批
-- Storage Manager：分类路径、可写/空间检查、存储锁、哈希校验迁移、SQLite 在线备份与完整性检查、下载缓存清理
-- `safeStorage` 模型凭据存储（拒绝 Linux `basic_text`）、electron-builder 打包与自包含 Control Plane bundle
-- Linux 打包桌面 Smoke Test；Windows `win-unpacked` 与 portable exe 构建
-- Worker Registry/Active Roster、Archive Registry 检索、自动空闲归档和阻塞条件
-- Router 主会话：宿主 Pi、短期 Router 模型/工具令牌、结构化任务/Worker/看板/归档工具与工具调用审计
-- 原生会话恢复、版本不兼容时的摘要语义恢复、恢复截图/环境变化注入和归档后新建 Worker
-- Resource Manager：宿主内存计数、Soft Memory Budget、自动启动/恢复、`waiting_resources`、空闲休眠和资源通知
-- 共享 VM 整机快照影响预览/确认、独立项目目录 tar.gz 备份与恢复、VM/项目删除依赖检查
-- 看板/VM/项目页统一资源与队列快照、任务跳转实时控制台和 Worker 会话、Worker 恢复环境增量摘要
-- 迁移前 SQLite 备份、完整性校验、SHA-256 与保留策略
-- 本机诊断报告（版本、迁移、计数、备份、资源、设置、日志尾部）与 Web 导出
-- 控制平面 HTTP/桌面日志/诊断报告的凭据形状脱敏和未知异常堆栈隔离
-- 阶段 12 任务/Worker/项目查询索引与 2000+ 任务历史回归
+当前开发环境已通过 `pnpm check`（lint、typecheck、Vitest、Go test、构建）和阶段 2～14 Smoke。真实 Windows 11 + WHPX 宿主 + Ubuntu Guest 主链路、真实 Router / Worker CUA 与证据校验已有单次验收记录；但单次任务不等于 Computer Use 成功率基线。
 
 明确未实现或未在本环境验证：
 
-- Windows 干净环境中的 NSIS 安装、安装包运行和卸载验证；Linux/WSL 缺少 wine，当前只验证了 win-unpacked/portable 构建
-- 迁移后 qcow2 backing file 路径重写；当前会校验镜像并警告旧路径引用，依赖旧目录保留
-- 迁移进度流式事件；当前为单次请求并持有存储锁
-- 远程 Web 访问/Relay、设备授权和端到端加密；阶段 11 只支持本机回环访问，非回环监听会拒绝启动
-- Windows 打包环境的更新替换/回滚实测；当前有 Manifest、SHA-256、数据库和资源备份逻辑，但回滚替换 `app.asar` 可能受 Windows 文件锁影响
-- 真实浏览器与打包 Electron 的人工可访问性/响应式验收；阶段 11 完成了生产构建和 API/WS Smoke
-- 文件投递只保存在宿主数据目录，不自动传输到 Guest，也不直接附加到 Worker 任务
-- 登录失败限速为进程内状态；原生桌面通知依赖渲染进程存活；前端未做路由级代码分割
-- 生产级镜像来源签名与 CDN 长期可用性；当前 Manifest 使用来源白名单、大小和 SHA-256，跨多个控制平面进程的下载文件锁尚未实现
-- Electron 自动托管/打包 VM Supervisor 与 Go 二进制更新；当前 Supervisor 作为独立本机进程启动
-- Guest Agent 更新的服务管理器激活/回滚、发布签名和新镜像令牌自动 provision；当前已实现认证、令牌轮换/撤销与安全暂存
-- 真实 QEMU/WHPX + X11 的动态分辨率/DPI、noVNC 浏览器/Electron 人工接管回归；合成 RFB Smoke 不替代此验收
-- Wayland 与 Windows Guest 的截图/输入路径
-- 真实 Router Pi 模型决策质量、长会话压缩和真实 Provider 工具调用回归；当前 Smoke 使用测试 Router Pi
-- 真实飞书/QQ 应用凭据、实际权限矩阵、平台重推和长时连接稳定性验收；本地长连接框架、官方飞书 SDK 对端和 QQ 协议替身测试已完成
-- 阶段 10 机器人只发送纯文本，不支持图片/文件附件；QQ 被动回复窗口外的进度通知可能失败并显示明确错误
-- 真实 QEMU `qemu-img snapshot`、真实 Guest workspace tar.gz 归档/恢复和真实共享 VM 并发回归；阶段 9 Smoke 使用协议替身
-- 项目工作目录备份遇到符号链接或特殊文件会拒绝而不是静默跳过；多 VM 绑定的项目恢复不是跨 VM 原子操作
-- 资源调度只约束宿主内存软预算，不控制 CPU/磁盘 IO；手动启动允许突破预算
-- Worker 恢复环境增量来自已落库的项目活动/任务，不包含未落库的 Guest 桌面瞬时变化
-- 真实 Guest 对宿主回环（`10.0.2.2`）、内网和云元数据地址的网络出口 ACL 尚未实现；当前依赖回环绑定、Bearer/短期令牌和 Lease，并明确不把同 VM 项目宣传为强安全隔离
-- 阶段 12 未执行真实 Linux 全链路任务集；`full-chain-tasks.json` 的任务、成功率、人工接管率和已知问题清单仍需在验收构建中生成
-- 数据库迁移前备份与手动恢复已验证，但尚未提供产品化的定时备份、备份加密、自动保留期限和多版本升级编排
-- 诊断报告目前是 JSON 文件而非 zip/签名包；没有自动上传、工单或反馈提交通道
-- 截图/日志没有可配置的自动保留期限；卸载默认保留用户数据
-- Windows Guest 代码主链路已实现，但真实 Windows ISO 安装、WHPX Windows Guest、Windows 截图/中文输入/UAC/锁屏/DPI、真实 Pi/模型和每 VM token 自动注入仍未验收
-- Windows profile 面向 Windows 10/Server Desktop Experience；Windows 11 需要额外 OVMF + `swtpm` TPM 2.0 方案，Server Core 没有可用桌面
-- Windows 锁屏、UAC 安全桌面、Ctrl+Alt+Del 和激活界面必须人工处理，产品不绕过这些系统安全机制
-- Windows Golden Image 构建脚本使用 build-only vvfat provisioning 介质；必须在目标 QEMU/Windows 版本上复测介质识别、安装、关机与启动
+- 真实 Windows Guest、Windows ISO Golden Image、WHPX Windows 截图 / 中文输入 / UAC / DPI / 每 VM token 注入仍未验收；Windows 锁屏、UAC、Ctrl+Alt+Del 必须人工处理。
+- Windows 干净环境 NSIS 安装、升级和卸载；当前验证了 `win-unpacked` 与 portable 构建。
+- 真实飞书 / QQ 应用凭据、平台权限矩阵、网络重推与长时连接稳定性。
+- 真实更新源与 Windows 替换 / 回滚实测；回滚替换 `app.asar` 可能受文件锁影响。
+- 远程 Relay / 远程 Web / 设备授权 / 端到端加密未实现；只支持本机回环，非回环监听会拒绝启动。
+- 真实浏览器与打包 Electron 的人工可访问性 / 响应式验收；前端未做路由级代码分割。
+- 存储迁移不重写 qcow2 backing file 路径；迁移进度不流式；下载文件锁只覆盖单控制平面进程。
+- 文件投递只落在宿主 `inbox/`，不自动进 Guest，也不直接附加到 Worker 任务。
+- 共享 VM 不是强安全隔离；同一 VM 上多个项目共享桌面 / 软件 / 系统状态。
+- Wayland、长时 soak、真实 Guest 网络边界和跨多控制平面进程的下载协调未验证。
 
-阶段 0～13 的代码主链路和本机自动化验收已完成。下一步是关闭阶段 13 的真实 Windows 环境发布门槛（合法 ISO/Golden Image、WHPX Windows Guest、真实截图/输入/UAC/DPI、真实 Pi/模型、token 注入、NSIS 干净安装与长时 soak），重跑阶段 12 Linux 全链路确认无回归，并形成本期最终签名构建与联合发布记录。详见 [开发计划](docs/03-development-plan.md) 与 [阶段 13 验收记录](tests/phase13/summary.md)。
+## 🤝 参与与约定
+
+欢迎提 Issue 和 PR。改动前建议先读 [技术设计](docs/02-technical-design.md) 和 [开发计划](docs/03-development-plan.md)，至少跑完：
+
+```bash
+pnpm check
+go vet ./...
+pnpm smoke:phase2     # 或与改动对应的阶段 Smoke
+```
+
+如果改到了部署文件、端口、镜像构建参数或配置变量，请同时更新 [用户指南](docs/04-user-guide.md)、[存储指南](docs/06-storage-guide.md)、[`.env.example`](.env.example) 和本文件，避免文档漂移。
+
+## 📄 License
+
+[MIT](LICENSE) © 2026 great-magician-01
+
+---
+
+<div align="center">
+
+**Agent-in-Box** — *让 Agent 住进虚拟机，虚拟机住进你自己的电脑。*
+
+<img src="apps/web/public/logo.svg" alt="Agent-in-Box 图标" width="56">
+
+<sub>用 Electron、NestJS、React、Go 和 QEMU 慢慢搭起来</sub>
+
+</div>

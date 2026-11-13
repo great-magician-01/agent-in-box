@@ -142,6 +142,15 @@ export class CuaBrokerService implements OnModuleInit, OnModuleDestroy {
       });
       return;
     }
+    if (url.pathname === "/v1/human-verifications") {
+      const body = await this.body(request);
+      const result = await this.execution.requestHumanVerification(token, {
+        reason: typeof body.reason === "string" ? body.reason : "",
+        screenshotId: typeof body.screenshotId === "string" ? body.screenshotId : "",
+      });
+      this.json(response, 200, { ok: true, verification: result, taskStatus: "waiting_human" });
+      return;
+    }
     if (url.pathname === "/v1/complete") {
       const body = await this.body(request);
       const result = await this.execution.complete(token, completionInput(body));

@@ -23,11 +23,14 @@ import type {
   CuaScreenshotRecord,
   GuestInputAction,
   GuestVerifyCheck,
+  HumanVerificationRecord,
   TaskExecutionStateView,
   TaskRecord,
   TaskTraceView,
 } from "@agent-in-box/protocol";
 import { guestPathEqualsOrWithin, isSafeAbsoluteGuestPath } from "@agent-in-box/domain";
+import { toHumanVerificationRecord } from "../persistence/mappers";
+import { redactText } from "../security/redaction";
 import { PersistenceError } from "../persistence/errors";
 import type { DatabaseSchema } from "../persistence/schema";
 import { nowIso } from "../persistence/time";
@@ -50,6 +53,11 @@ export interface CuaActionInput {
   screenshotId?: string;
   actionId?: string;
   timeoutMs?: number;
+}
+
+export interface HumanVerificationRequestInput {
+  reason: string;
+  screenshotId: string;
 }
 
 export interface CuaObservation {
@@ -159,7 +167,7 @@ export class CuaExecutionService {
 
   async finishExecution(
     taskId: string,
-    outcome: "completed" | "blocked" | "failed" | "cancelled",
+    outcome: "completed" | "waiting_human" | "blocked" | "failed" | "cancelled",
   ): Promise<void> {
     await this.db
       .updateTable("task_execution_state")
@@ -354,6 +362,85 @@ export class CuaExecutionService {
     });
   }
 
+  /**
+   * The multimodal Worker model decided that the current screen needs the
+   * human's identity/device. The host does not re-classify the screenshot; it
+   * records the model's reasoning and hands the task to the human while keeping
+   * the VM execution slot reserved.
+   */
+  async requestHumanVerification(
+    token: CuaTokenContext,
+    input: HumanVerificationRequestInput,
+  ): Promise<HumanVerificationRecord> {
+    const binding = await this.requireBinding(token, ["running"]);
+    return this.withTaskLock(binding.task.id, async () => {
+      const reason = typeof input?.reason === "string" ? redactText(input.reason).trim() : "";
+      if (!reason || reason.length > 1000) {
+        throw new PersistenceError("validation_failed", "人工处理说明必须为 1～1000 个字符");
+      }
+      const screenshotId = typeof input?.screenshotId === "string" ? input.screenshotId.trim() : "";
+      if (!screenshotId) {
+        throw new PersistenceError("validation_failed", "请求人工处理前必须先观察 VM 屏幕");
+      }
+      const source = await this.screenshotRecord(binding.task.id, screenshotId);
+      const latest = await this.latestScreenshot(binding.task.id);
+      if (!latest || latest.id !== source.id) {
+        throw new PersistenceError(
+          "conflict",
+          "引用的截图不是最新观察；请重新观察后再请求人工处理",
+        );
+      }
+      const desktop = await this.guest.desktop(binding.vmId);
+      if (desktop.width !== source.width || desktop.height !== source.height) {
+        await this.db
+          .updateTable("task_execution_state")
+          .set({ requires_observation: 1 })
+          .where("task_id", "=", binding.task.id)
+          .execute();
+        throw new PersistenceError(
+          "conflict",
+          "显示分辨率已变化，截图已失效；请重新观察后再请求人工处理",
+        );
+      }
+      const execution = await this.execution(binding.task.id);
+      if (!execution) throw new PersistenceError("conflict", "任务没有执行状态记录");
+      if (new Date(execution.deadlineAt).getTime() <= this.now().getTime()) {
+        await this.blockTask(
+          binding.task,
+          "cua_execution_timeout",
+          "任务超过最大执行时间，人工处理请求被拒绝",
+        );
+        throw new PersistenceError("conflict", "任务超过最大执行时间，人工处理请求被拒绝");
+      }
+      let record: HumanVerificationRecord;
+      try {
+        record = await this.tasks.beginHumanVerification({
+          taskId: binding.task.id,
+          workerId: binding.workerId,
+          vmId: binding.vmId,
+          reason,
+          screenshotId: source.id,
+        });
+      } catch (error) {
+        if (
+          error instanceof PersistenceError &&
+          typeof error.details === "object" &&
+          error.details !== null &&
+          (error.details as { code?: unknown }).code === "human_verification_limit"
+        ) {
+          await this.blockTask(
+            binding.task,
+            "human_verification_limit",
+            "人工处理请求次数已达上限，任务已停止以避免 Worker 继续操作验证页面",
+          );
+        }
+        throw error;
+      }
+      await this.finishExecution(binding.task.id, "waiting_human");
+      return record;
+    });
+  }
+
   async complete(token: CuaTokenContext, input: CuaCompleteRequest): Promise<CuaCompleteResult> {
     const binding = await this.requireBinding(token, ["running"]);
     return this.withTaskLock(binding.task.id, async () => {
@@ -525,7 +612,7 @@ export class CuaExecutionService {
   async trace(taskId: string): Promise<TaskTraceView> {
     const task = await this.tasks.get(taskId);
     if (!task) throw new PersistenceError("not_found", `任务不存在：${taskId}`);
-    const [execution, actions, screenshots, approvals] = await Promise.all([
+    const [execution, actions, screenshots, approvals, humanVerifications] = await Promise.all([
       this.execution(taskId),
       this.db
         .selectFrom("cua_actions")
@@ -543,6 +630,12 @@ export class CuaExecutionService {
         .execute(),
       this.db
         .selectFrom("cua_approvals")
+        .selectAll()
+        .where("task_id", "=", taskId)
+        .orderBy("requested_at", "asc")
+        .execute(),
+      this.db
+        .selectFrom("human_verifications")
         .selectAll()
         .where("task_id", "=", taskId)
         .orderBy("requested_at", "asc")
@@ -567,6 +660,7 @@ export class CuaExecutionService {
         resolvedBy: row.resolved_by,
         resolutionNote: row.resolution_note,
       })),
+      humanVerifications: humanVerifications.map(toHumanVerificationRecord),
     };
   }
 

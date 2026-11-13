@@ -6,9 +6,14 @@ import type {
   CuaApprovalStatus,
   CuaPolicyUpdateRequest,
   CuaPolicyView,
+  HumanVerificationRecord,
+  HumanVerificationResolveRequest,
+  HumanVerificationResolveResult,
+  HumanVerificationStatus,
   TaskTraceView,
 } from "@agent-in-box/protocol";
 import { PersistenceError } from "../persistence/errors";
+import { TaskService } from "../persistence/services/task-service";
 import { ApprovalService } from "./approval.service";
 import { CuaExecutionService } from "./cua-execution.service";
 import { CuaPolicyService } from "./cua-policy.service";
@@ -77,6 +82,34 @@ export class CuaApprovalController {
     @Body() body?: CuaApprovalResolveRequest,
   ): Promise<CuaApprovalRecord> {
     return this.approvals.resolve(id, "rejected", "local-user", body?.note);
+  }
+}
+
+@Controller("/api/v1/human-verifications")
+export class HumanVerificationController {
+  constructor(private readonly tasks: TaskService) {}
+
+  @Get()
+  list(
+    @Query("status") status?: string,
+    @Query("taskId") taskId?: string,
+  ): Promise<HumanVerificationRecord[]> {
+    const parsed = status?.trim() || undefined;
+    if (parsed !== undefined && !["pending", "completed", "cancelled"].includes(parsed)) {
+      throw new PersistenceError("bad_request", "人工处理状态筛选值无效");
+    }
+    return this.tasks.listHumanVerifications({
+      ...(parsed ? { status: parsed as HumanVerificationStatus } : {}),
+      ...(taskId?.trim() ? { taskId: taskId.trim() } : {}),
+    });
+  }
+
+  @Post(":id/resolve")
+  resolve(
+    @Param("id") id: string,
+    @Body() body?: HumanVerificationResolveRequest,
+  ): Promise<HumanVerificationResolveResult> {
+    return this.tasks.resumeHumanVerification(id, "local-user", body?.note);
   }
 }
 

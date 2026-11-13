@@ -305,6 +305,80 @@ describe("CuaExecutionService", () => {
     expect(h.guest.inputCalls.at(-1)?.action).toMatchObject({ point: { x: 800, y: 450 } });
   });
 
+  it("records a multimodal human-verification request and resumes through the queue", async () => {
+    const h = harness!;
+    const observation = await h.cua.observe(h.token);
+    const record = await h.cua.requestHumanVerification(h.token, {
+      reason: "屏幕显示登录二维码，需要用户用手机微信扫码",
+      screenshotId: observation.screenshotId,
+    });
+    expect(record).toMatchObject({
+      taskId: h.taskId,
+      screenshotId: observation.screenshotId,
+      status: "pending",
+    });
+    expect(await h.tasks.get(h.taskId)).toMatchObject({
+      status: "waiting_human",
+      errorCode: "human_verification_required",
+    });
+    expect((await h.cua.execution(h.taskId))?.outcome).toBe("waiting_human");
+    const trace = await h.cua.trace(h.taskId);
+    expect(trace.humanVerifications[0]).toMatchObject({
+      id: record.id,
+      reason: "屏幕显示登录二维码，需要用户用手机微信扫码",
+      status: "pending",
+    });
+    const events = (await h.tasks.detail(h.taskId)).events.map((event) => event.type);
+    expect(events).toEqual(expect.arrayContaining(["task.human_verification_requested"]));
+    // The Worker turn must stop before resume: the runtime releases its lease.
+    await expect(h.cua.observe(h.token)).rejects.toMatchObject({ code: "conflict" });
+    await expect(h.tasks.resumeHumanVerification(record.id)).rejects.toMatchObject({
+      code: "conflict",
+    });
+    const lease = await h.leases.getActive(h.ctx.vmId);
+    expect(await h.leases.release(h.ctx.vmId, lease!.id)).toBe(true);
+
+    const resumed = await h.tasks.resumeHumanVerification(
+      record.id,
+      "local-user",
+      "已扫码并确认登录",
+    );
+    expect(resumed.task.status).toBe("queued");
+    expect(resumed.verification).toMatchObject({
+      id: record.id,
+      status: "completed",
+      resolvedBy: "local-user",
+    });
+    const after = (await h.tasks.detail(h.taskId)).events.map((event) => event.type);
+    expect(after).toEqual(expect.arrayContaining(["task.human_verification_resolved"]));
+  });
+
+  it("rejects a stale screenshot or an active human console lease on verification", async () => {
+    const h = harness!;
+    const observation = await h.cua.observe(h.token);
+    const acted = await h.cua.act(h.token, {
+      action: { type: "click", point: { x: 10, y: 10 }, screenshotId: observation.screenshotId },
+    });
+    await expect(
+      h.cua.requestHumanVerification(h.token, {
+        reason: "旧截图",
+        screenshotId: observation.screenshotId,
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+
+    const fresh = await h.cua.observe(h.token);
+    const record = await h.cua.requestHumanVerification(h.token, {
+      reason: "需要人工输入短信验证码",
+      screenshotId: fresh.screenshotId,
+    });
+    await h.leases.acquire({ vmId: h.ctx.vmId, owner: "human", taskId: null });
+    await expect(h.tasks.resumeHumanVerification(record.id)).rejects.toMatchObject({
+      code: "conflict",
+    });
+    expect((await h.tasks.get(h.taskId))?.status).toBe("waiting_human");
+    expect(acted.screenshotId).toMatch(/^after-/);
+  });
+
   it("waits for approval and executes the stored sensitive action only after approval", async () => {
     const h = harness!;
     await h.policies.update(h.ctx.projectId, { approvalActionTypes: ["type_text"] });

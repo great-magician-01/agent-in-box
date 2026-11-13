@@ -26,6 +26,13 @@ describe("credential redaction", () => {
     expect(output).toContain("[REDACTED]");
   });
 
+  it("redacts verification codes when presented as a key-value pair", () => {
+    const output = redactText("短信验证码：654321\nverification_code=998877\n请输入验证码");
+    expect(output).not.toContain("654321");
+    expect(output).not.toContain("998877");
+    expect(output).toContain("请输入验证码");
+  });
+
   it("redacts structured secret keys recursively and bounds depth", () => {
     const output = redactValue({
       authorization: "Bearer abc",

@@ -28,6 +28,11 @@ const TEXT_PATTERNS: Array<{ pattern: RegExp; replacement: string }> = [
       /((?:"|')?(?:api[_-]?key|app[_-]?secret|app[_-]?id|secret|token|authorization|password|passwd|credential|cookie|access[_-]?key|private[_-]?key)(?:"|')?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;}]+)/gi,
     replacement: "$1[REDACTED]",
   },
+  {
+    pattern:
+      /((?:otp|one[- ]time[- ]code|verification[_-]?code|验证码|动态码|校验码)\s*[:=：]\s*)([A-Za-z0-9_-]{4,})/gi,
+    replacement: "$1[REDACTED]",
+  },
   { pattern: /(aib_session=)[^;\s]+/gi, replacement: "$1[REDACTED]" },
 ];
 

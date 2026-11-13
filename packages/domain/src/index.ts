@@ -15,8 +15,10 @@ const TASK_TRANSITIONS: Record<TaskStatus, readonly TaskStatus[]> = {
   waiting_resources: ["waiting_vm", "queued", "cancelled", "blocked"],
   waiting_vm: ["waiting_resources", "queued", "cancelled", "blocked", "failed"],
   queued: ["running", "waiting_vm", "cancelled", "blocked"],
-  running: ["waiting_approval", "completed", "failed", "cancelled", "blocked"],
+  running: ["waiting_approval", "waiting_human", "completed", "failed", "cancelled", "blocked"],
   waiting_approval: ["running", "blocked", "cancelled", "failed"],
+  // The Worker turn is over; resuming starts a fresh turn through the queue.
+  waiting_human: ["queued", "waiting_vm", "blocked", "cancelled", "failed"],
   blocked: ["created", "waiting_vm", "queued", "cancelled", "failed"],
   completed: [],
   failed: ["created", "waiting_vm", "queued"],

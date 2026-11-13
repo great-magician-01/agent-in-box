@@ -347,6 +347,7 @@ export class ResourceManagerService implements OnModuleInit, OnModuleDestroy {
           "queued",
           "running",
           "waiting_approval",
+          "waiting_human",
           "blocked",
         ].includes(task.status)
       ) {

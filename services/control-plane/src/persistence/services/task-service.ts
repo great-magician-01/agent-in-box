@@ -5,6 +5,8 @@ import path from "node:path";
 import { Inject, Injectable, Optional } from "@nestjs/common";
 import type { Kysely } from "kysely";
 import type {
+  HumanVerificationRecord,
+  HumanVerificationResolveResult,
   Page,
   PageRequest,
   TaskArtifactInput,
@@ -32,7 +34,12 @@ import {
 import { KYSELY } from "../tokens";
 import type { DatabaseExecutor } from "../executor";
 import type { DatabaseSchema } from "../schema";
-import { toProjectRecord, toVmInstanceRecord, toWorkerRecord } from "../mappers";
+import {
+  toHumanVerificationRecord,
+  toProjectRecord,
+  toVmInstanceRecord,
+  toWorkerRecord,
+} from "../mappers";
 import { OutboxRepository } from "../repositories/outbox-repository";
 import { TaskRepository, type TaskUpdatePatch } from "../repositories/task-repository";
 
@@ -61,6 +68,18 @@ export interface TransitionOptions {
   summary?: string;
   errorCode?: string;
   errorMessage?: string;
+}
+
+/** Stable task error code used by UI, bots and the Worker resume hint. */
+export const HUMAN_VERIFICATION_REQUIRED_CODE = "human_verification_required";
+export const MAX_HUMAN_VERIFICATIONS_PER_TASK = 8;
+
+export interface BeginHumanVerificationInput {
+  taskId: string;
+  workerId: string;
+  vmId: string;
+  reason: string;
+  screenshotId: string;
 }
 
 interface VerifiedArtifact extends TaskArtifactInput {
@@ -407,6 +426,267 @@ export class TaskService {
     });
   }
 
+  /**
+   * The Worker reported a QR/CAPTCHA/out-of-band verification step. The task
+   * keeps the VM execution slot while the human responds; the Worker turn is
+   * stopped by WorkerRuntimeService and will be restarted from the queue after
+   * resumeHumanVerification().
+   */
+  async beginHumanVerification(
+    input: BeginHumanVerificationInput,
+  ): Promise<HumanVerificationRecord> {
+    const reason = typeof input.reason === "string" ? input.reason.trim() : "";
+    if (!reason || reason.length > 1000) {
+      throw new PersistenceError("validation_failed", "人工处理说明必须为 1～1000 个字符");
+    }
+    const screenshotId = typeof input.screenshotId === "string" ? input.screenshotId.trim() : "";
+    if (!screenshotId || screenshotId.length > 128) {
+      throw new PersistenceError("validation_failed", "人工处理请求必须引用最新截图");
+    }
+    return this.db.transaction().execute(async (trx) => {
+      const current = await this.tasks.getTask(input.taskId, trx);
+      if (!current) throw new NotFoundError(`任务不存在：${input.taskId}`);
+      if (current.status !== "running") {
+        throw new InvalidTransitionError("只有运行中的任务可以请求人工处理");
+      }
+      if (current.vmId !== input.vmId) {
+        throw new PersistenceError("conflict", "人工处理请求与任务 VM 不一致");
+      }
+      const previous = await trx
+        .selectFrom("human_verifications")
+        .select("id")
+        .where("task_id", "=", input.taskId)
+        .execute();
+      if (previous.length >= MAX_HUMAN_VERIFICATIONS_PER_TASK) {
+        throw new PersistenceError(
+          "conflict",
+          `任务已请求人工处理 ${previous.length} 次，达到上限；请人工处理后重新排队`,
+          { code: "human_verification_limit" },
+        );
+      }
+      const now = nowIso();
+      const id = randomUUID();
+      await trx
+        .insertInto("human_verifications")
+        .values({
+          id,
+          task_id: input.taskId,
+          worker_id: input.workerId,
+          vm_id: input.vmId,
+          reason,
+          screenshot_id: screenshotId,
+          status: "pending",
+          requested_at: now,
+          resolved_at: null,
+          resolved_by: null,
+          resolution_note: null,
+        })
+        .execute();
+      const updated = await this.transitionInTransaction(
+        input.taskId,
+        "waiting_human",
+        {
+          summary: `等待人工处理：${reason}`,
+          errorCode: HUMAN_VERIFICATION_REQUIRED_CODE,
+          errorMessage: reason,
+        },
+        {},
+        trx,
+      );
+      const payload = {
+        taskId: input.taskId,
+        verificationId: id,
+        workerId: input.workerId,
+        vmId: input.vmId,
+        reason,
+        screenshotId,
+      };
+      await this.tasks.appendEvent(
+        input.taskId,
+        "task.human_verification_requested",
+        payload,
+        now,
+        trx,
+      );
+      await this.outbox.append("task.human_verification_requested", payload, now, trx);
+      await this.appendActivity(
+        updated.projectId,
+        "task.human_verification_requested",
+        payload,
+        now,
+        trx,
+      );
+      return {
+        id,
+        taskId: input.taskId,
+        workerId: input.workerId,
+        vmId: input.vmId,
+        reason,
+        screenshotId,
+        status: "pending" as const,
+        requestedAt: now,
+        resolvedAt: null,
+        resolvedBy: null,
+        resolutionNote: null,
+      };
+    });
+  }
+
+  /** Marks a pending human verification completed and returns the task to the VM queue. */
+  async resumeHumanVerification(
+    verificationId: string,
+    resolvedBy = "local-user",
+    note?: string,
+  ): Promise<HumanVerificationResolveResult> {
+    const id = typeof verificationId === "string" ? verificationId.trim() : "";
+    if (!id) throw new PersistenceError("validation_failed", "人工处理请求 ID 不能为空");
+    const resolver = typeof resolvedBy === "string" ? resolvedBy.trim() : "";
+    if (!resolver || resolver.length > 200) {
+      throw new PersistenceError("validation_failed", "人工处理者标识无效");
+    }
+    const noteText = typeof note === "string" ? note.trim().slice(0, 1000) : "";
+    return this.db.transaction().execute(async (trx) => {
+      const row = await trx
+        .selectFrom("human_verifications")
+        .selectAll()
+        .where("id", "=", id)
+        .executeTakeFirst();
+      if (!row) throw new NotFoundError(`人工处理请求不存在：${id}`);
+      if (row.status !== "pending") {
+        throw new PersistenceError("conflict", `人工处理请求已处于 ${row.status} 状态`);
+      }
+      const current = await this.tasks.getTask(row.task_id, trx);
+      if (!current) throw new NotFoundError(`任务不存在：${row.task_id}`);
+      if (current.status !== "waiting_human") {
+        throw new PersistenceError("conflict", "任务当前不在等待人工处理状态");
+      }
+      const [project, binding, vm] = await Promise.all([
+        trx
+          .selectFrom("projects")
+          .select("archived_at")
+          .where("id", "=", current.projectId)
+          .executeTakeFirstOrThrow(),
+        trx
+          .selectFrom("project_vm_bindings")
+          .select("id")
+          .where("project_id", "=", current.projectId)
+          .where("vm_id", "=", current.vmId)
+          .executeTakeFirst(),
+        trx
+          .selectFrom("vm_instances")
+          .select("power_state")
+          .where("id", "=", current.vmId)
+          .executeTakeFirstOrThrow(),
+      ]);
+      if (project.archived_at) {
+        throw new PersistenceError("conflict", "已归档项目不能恢复人工验证任务");
+      }
+      if (!binding) {
+        throw new PersistenceError("conflict", "目标 VM 已解绑，不能恢复人工验证任务");
+      }
+      const lease = await trx
+        .selectFrom("vm_leases")
+        .select(["owner", "expires_at"])
+        .where("vm_id", "=", current.vmId)
+        .executeTakeFirst();
+      if (lease && new Date(lease.expires_at).getTime() > Date.now()) {
+        throw new PersistenceError(
+          "conflict",
+          lease.owner === "human"
+            ? "人工接管控制台仍占用该 VM；请先关闭控制台释放人工 Lease，再恢复任务"
+            : "Worker 回合仍在停止，请稍后重试恢复任务",
+        );
+      }
+      const dependenciesReady = await this.dependenciesCompleted(current.id, trx);
+      const target: TaskStatus = !dependenciesReady
+        ? "created"
+        : vm.power_state === "running"
+          ? "queued"
+          : "waiting_vm";
+      const now = nowIso();
+      const updatedRecord = await trx
+        .updateTable("human_verifications")
+        .set({
+          status: "completed",
+          resolved_at: now,
+          resolved_by: resolver,
+          resolution_note: noteText || null,
+        })
+        .where("id", "=", id)
+        .where("status", "=", "pending")
+        .executeTakeFirst();
+      if (Number(updatedRecord.numUpdatedRows ?? 0) === 0) {
+        throw new PersistenceError("conflict", "人工处理请求已被其他操作处理");
+      }
+      const summary = noteText
+        ? `人工已处理：${noteText}`
+        : "人工已处理，任务重新排队并等待 Worker 重新观察";
+      const updatedTask = await this.transitionInTransaction(
+        current.id,
+        target,
+        { summary },
+        {
+          assignedWorkerId: null,
+          startedAt: null,
+          completedAt: null,
+          result: null,
+          errorCode: null,
+          errorMessage: null,
+        },
+        trx,
+      );
+      const payload = {
+        taskId: current.id,
+        verificationId: id,
+        resolvedBy: resolver,
+        note: noteText || null,
+      };
+      await this.tasks.appendEvent(
+        current.id,
+        "task.human_verification_resolved",
+        payload,
+        now,
+        trx,
+      );
+      await this.outbox.append("task.human_verification_resolved", payload, now, trx);
+      await this.appendActivity(
+        current.projectId,
+        "task.human_verification_resolved",
+        payload,
+        now,
+        trx,
+      );
+      return {
+        verification: toHumanVerificationRecord({
+          ...row,
+          status: "completed",
+          resolved_at: now,
+          resolved_by: resolver,
+          resolution_note: noteText || null,
+        }),
+        task: updatedTask,
+      };
+    });
+  }
+
+  async listHumanVerifications(
+    filters: {
+      status?: "pending" | "completed" | "cancelled";
+      taskId?: string;
+      limit?: number;
+    } = {},
+  ): Promise<HumanVerificationRecord[]> {
+    let query = this.db
+      .selectFrom("human_verifications")
+      .selectAll()
+      .orderBy("requested_at", "desc")
+      .orderBy("id", "desc")
+      .limit(Math.max(1, Math.min(200, filters.limit ?? 50)));
+    if (filters.status) query = query.where("status", "=", filters.status);
+    if (filters.taskId) query = query.where("task_id", "=", filters.taskId);
+    return (await query.execute()).map(toHumanVerificationRecord);
+  }
+
   async setPriority(taskId: string, value: number): Promise<TaskRecord> {
     if (typeof value !== "number" || !Number.isFinite(value)) {
       throw new PersistenceError("validation_failed", "优先级必须是有限数字");
@@ -517,7 +797,7 @@ export class TaskService {
           .selectFrom("tasks")
           .select("id")
           .where("vm_id", "=", vmId)
-          .where("status", "in", ["running", "waiting_approval"])
+          .where("status", "in", ["running", "waiting_approval", "waiting_human"])
           .limit(1)
           .executeTakeFirst();
         if (active) return null;
@@ -883,6 +1163,19 @@ export class TaskService {
     if (options.errorMessage !== undefined) patch.errorMessage = options.errorMessage;
     const updated = await this.tasks.updateTask(taskId, patch, trx);
     if (!updated) throw new NotFoundError(`任务不存在：${taskId}`);
+    if (to !== "waiting_human") {
+      await trx
+        .updateTable("human_verifications")
+        .set({
+          status: "cancelled",
+          resolved_at: now,
+          resolved_by: "system",
+          resolution_note: `任务状态变为 ${to}`,
+        })
+        .where("task_id", "=", taskId)
+        .where("status", "=", "pending")
+        .execute();
+    }
     const payload = { taskId, from: current.status, to, task: updated };
     await this.tasks.appendEvent(taskId, "task.status_changed", payload, now, trx);
     await this.outbox.append("task.status_changed", payload, now, trx);

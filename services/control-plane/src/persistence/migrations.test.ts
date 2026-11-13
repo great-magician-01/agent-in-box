@@ -42,6 +42,7 @@ describe("database migrations", () => {
         "worker_resume_contexts",
         "worker_inputs",
         "router_sessions",
+        "human_verifications",
         "vm_snapshots",
         "project_backups",
         "project_backup_bindings",

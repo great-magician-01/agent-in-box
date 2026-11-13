@@ -9,6 +9,7 @@ export const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
   queued: "排队中",
   running: "执行中",
   waiting_approval: "等待审批",
+  waiting_human: "等待人工处理",
   blocked: "已阻塞",
   completed: "已完成",
   failed: "失败",
@@ -34,6 +35,7 @@ export function taskStatusTone(status: TaskStatus): StatusTone {
     case "blocked":
       return "warning";
     case "waiting_approval":
+    case "waiting_human":
       return "warning";
     case "waiting_resources":
     case "waiting_vm":

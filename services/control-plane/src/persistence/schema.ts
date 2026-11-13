@@ -317,6 +317,20 @@ export interface CuaApprovalsTable {
   resolution_note: string | null;
 }
 
+export interface HumanVerificationsTable {
+  id: string;
+  task_id: string;
+  worker_id: string;
+  vm_id: string;
+  reason: string;
+  screenshot_id: string;
+  status: string;
+  requested_at: string;
+  resolved_at: string | null;
+  resolved_by: string | null;
+  resolution_note: string | null;
+}
+
 export interface CuaTokensTable {
   id: string;
   token_hash: string;
@@ -698,6 +712,7 @@ export interface DatabaseSchema {
   cua_screenshots: CuaScreenshotsTable;
   cua_actions: CuaActionsTable;
   cua_approvals: CuaApprovalsTable;
+  human_verifications: HumanVerificationsTable;
   cua_tokens: CuaTokensTable;
   worker_archives: WorkerArchivesTable;
   worker_resume_contexts: WorkerResumeContextsTable;

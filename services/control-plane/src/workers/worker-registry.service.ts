@@ -25,7 +25,7 @@ import { TaskService } from "../persistence/services/task-service";
 import { PersistenceError } from "../persistence/errors";
 
 const ROSTER_STATUSES = new Set(["starting", "running", "idle"]);
-const ACTIVE_TASK_STATUSES = new Set(["running", "waiting_approval"]);
+const ACTIVE_TASK_STATUSES = new Set(["running", "waiting_approval", "waiting_human"]);
 const RECENT_TASK_LIMIT = 12;
 
 @Injectable()
@@ -350,7 +350,7 @@ export class WorkerRegistryService {
         .selectFrom("tasks")
         .select(["id", "status"])
         .where("assigned_worker_id", "=", worker.id)
-        .where("status", "in", ["running", "waiting_approval"])
+        .where("status", "in", ["running", "waiting_approval", "waiting_human"])
         .execute(),
       this.db
         .selectFrom("cua_approvals")

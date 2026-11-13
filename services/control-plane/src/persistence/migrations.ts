@@ -1636,6 +1636,75 @@ const migrations: Record<string, MigrationDefinition> = {
       await db.schema.alterTable("vm_instances").dropColumn("provisioning_state").execute();
     },
   },
+  "014_human_verification": {
+    async up(db: Kysely<DatabaseSchema>): Promise<void> {
+      await db.schema
+        .createTable("human_verifications")
+        .addColumn("id", "text", (column) => column.primaryKey())
+        .addColumn("task_id", "text", (column) => column.notNull())
+        .addColumn("worker_id", "text", (column) => column.notNull())
+        .addColumn("vm_id", "text", (column) => column.notNull())
+        .addColumn("reason", "text", (column) => column.notNull())
+        .addColumn("screenshot_id", "text", (column) => column.notNull())
+        .addColumn("status", "text", (column) => column.notNull())
+        .addColumn("requested_at", "text", (column) => column.notNull())
+        .addColumn("resolved_at", "text")
+        .addColumn("resolved_by", "text")
+        .addColumn("resolution_note", "text")
+        .addForeignKeyConstraint(
+          "human_verifications_task_fk",
+          ["task_id"],
+          "tasks",
+          ["id"],
+          (constraint) => constraint.onDelete("cascade"),
+        )
+        .addForeignKeyConstraint(
+          "human_verifications_worker_fk",
+          ["worker_id"],
+          "workers",
+          ["id"],
+          (constraint) => constraint.onDelete("cascade"),
+        )
+        .addForeignKeyConstraint(
+          "human_verifications_vm_fk",
+          ["vm_id"],
+          "vm_instances",
+          ["id"],
+          (constraint) => constraint.onDelete("cascade"),
+        )
+        .execute();
+      await db.schema
+        .createIndex("human_verifications_status_idx")
+        .on("human_verifications")
+        .columns(["status", "requested_at"])
+        .execute();
+      await db.schema
+        .createIndex("human_verifications_task_idx")
+        .on("human_verifications")
+        .columns(["task_id", "requested_at"])
+        .execute();
+
+      // A waiting human still owns the VM execution slot so queued tasks on the
+      // same VM cannot change the verification screen while the user responds.
+      await db.schema.dropIndex("tasks_single_execution_idx").ifExists().execute();
+      await sql`
+        create unique index tasks_single_execution_idx on tasks(vm_id)
+        where status in ('running', 'waiting_approval', 'waiting_human')
+      `.execute(db);
+    },
+
+    async down(db: Kysely<DatabaseSchema>): Promise<void> {
+      await db.schema.dropIndex("tasks_single_execution_idx").ifExists().execute();
+      await sql`
+        create unique index tasks_single_execution_idx on tasks(vm_id)
+        where status in ('running', 'waiting_approval')
+      `.execute(db);
+      for (const index of ["human_verifications_task_idx", "human_verifications_status_idx"]) {
+        await db.schema.dropIndex(index).ifExists().execute();
+      }
+      await db.schema.dropTable("human_verifications").ifExists().execute();
+    },
+  },
 };
 
 /** Migration ids in the order the runner applies them. */

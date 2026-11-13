@@ -48,6 +48,7 @@ const ACTIVE_TASK_STATUSES = [
   "queued",
   "running",
   "waiting_approval",
+  "waiting_human",
   "blocked",
 ] as const;
 

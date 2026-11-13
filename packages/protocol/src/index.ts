@@ -43,6 +43,7 @@ export const TASK_STATUSES = [
   "queued",
   "running",
   "waiting_approval",
+  "waiting_human",
   "blocked",
   "completed",
   "failed",
@@ -56,6 +57,7 @@ export const ACTIVE_TASK_STATUSES = [
   "queued",
   "running",
   "waiting_approval",
+  "waiting_human",
   "blocked",
 ] as const satisfies readonly TaskStatus[];
 
@@ -214,6 +216,20 @@ export interface DomainEventPayloads {
   "task.created": { task: TaskRecord };
   "task.status_changed": { taskId: Id; from: TaskStatus; to: TaskStatus };
   "task.priority_changed": { taskId: Id; from: number; to: number };
+  "task.human_verification_requested": {
+    taskId: Id;
+    verificationId: Id;
+    workerId: Id;
+    vmId: Id;
+    reason: string;
+    screenshotId: Id;
+  };
+  "task.human_verification_resolved": {
+    taskId: Id;
+    verificationId: Id;
+    resolvedBy: string;
+    note: string | null;
+  };
   "project.changed": { projectId: Id; action: string };
   "worker.archived": {
     workerId: Id;
@@ -1693,6 +1709,36 @@ export interface CuaApprovalResolveRequest {
   note?: string;
 }
 
+export type HumanVerificationStatus = "pending" | "completed" | "cancelled";
+
+/**
+ * A Worker-reported check that needs the human's identity or device (QR scan,
+ * CAPTCHA, out-of-band OTP, passkey). The host does not classify the screenshot;
+ * the multimodal Worker model supplies the reason and the screenshot it used.
+ */
+export interface HumanVerificationRecord {
+  id: Id;
+  taskId: Id;
+  workerId: Id;
+  vmId: Id;
+  reason: string;
+  screenshotId: Id;
+  status: HumanVerificationStatus;
+  requestedAt: IsoTimestamp;
+  resolvedAt: IsoTimestamp | null;
+  resolvedBy: string | null;
+  resolutionNote: string | null;
+}
+
+export interface HumanVerificationResolveRequest {
+  note?: string;
+}
+
+export interface HumanVerificationResolveResult {
+  verification: HumanVerificationRecord;
+  task: TaskRecord;
+}
+
 export interface TaskExecutionStateView {
   taskId: Id;
   workerId: Id;
@@ -1706,7 +1752,7 @@ export interface TaskExecutionStateView {
   completionAttempts: number;
   requiresObservation: boolean;
   endedAt: IsoTimestamp | null;
-  outcome: "completed" | "blocked" | "failed" | "cancelled" | null;
+  outcome: "completed" | "waiting_human" | "blocked" | "failed" | "cancelled" | null;
 }
 
 export interface TaskTraceView {
@@ -1715,6 +1761,7 @@ export interface TaskTraceView {
   actions: CuaActionRecord[];
   screenshots: CuaScreenshotRecord[];
   approvals: CuaApprovalRecord[];
+  humanVerifications: HumanVerificationRecord[];
 }
 
 export type CuaCompletionEvidence =
@@ -2255,10 +2302,17 @@ export interface BotOutboundTestRequest {
   text: string;
 }
 
+export type ModelInputModality = "text" | "image";
+
 export interface ModelDefinition {
   id: string;
   name?: string;
   reasoning?: boolean;
+  /**
+   * Declared Pi model input modalities. Defaults to text+image so a configured
+   * Computer Use Worker can always see the screenshots returned by vm_* tools.
+   */
+  input?: ModelInputModality[];
 }
 
 export interface ModelProviderView {

@@ -29,6 +29,10 @@ describe("task state machine", () => {
     expect(canTransitionTask("queued", "running")).toBe(true);
     expect(canTransitionTask("running", "waiting_approval")).toBe(true);
     expect(canTransitionTask("waiting_approval", "running")).toBe(true);
+    expect(canTransitionTask("running", "waiting_human")).toBe(true);
+    expect(canTransitionTask("waiting_human", "queued")).toBe(true);
+    expect(canTransitionTask("waiting_human", "waiting_vm")).toBe(true);
+    expect(canTransitionTask("waiting_human", "running")).toBe(false);
     expect(canTransitionTask("failed", "queued")).toBe(true);
     expect(canTransitionTask("failed", "waiting_vm")).toBe(true);
     expect(canTransitionTask("failed", "created")).toBe(true);

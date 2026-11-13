@@ -2,6 +2,7 @@ import type { Selectable } from "kysely";
 import type {
   ConversationRecord,
   GuestHealthState,
+  HumanVerificationRecord,
   ImageRecord,
   OsFamily,
   ProjectActivityRecord,
@@ -19,6 +20,7 @@ import type {
 import { isTaskStatus, isVmPowerState, isWorkerStatus, OS_FAMILIES } from "@agent-in-box/protocol";
 import type {
   ConversationsTable,
+  HumanVerificationsTable,
   ImagesTable,
   ProjectVmBindingsTable,
   ProjectsTable,
@@ -283,6 +285,25 @@ export function toWorkerArchiveRecord(row: Selectable<WorkerArchivesTable>): Wor
         : ("available" as const),
     createdAt: row.created_at,
     restoredAt: row.restored_at,
+  };
+}
+
+export function toHumanVerificationRecord(
+  row: Selectable<HumanVerificationsTable>,
+): HumanVerificationRecord {
+  return {
+    id: row.id,
+    taskId: row.task_id,
+    workerId: row.worker_id,
+    vmId: row.vm_id,
+    reason: row.reason,
+    screenshotId: row.screenshot_id,
+    status:
+      row.status === "completed" || row.status === "cancelled" ? row.status : ("pending" as const),
+    requestedAt: row.requested_at,
+    resolvedAt: row.resolved_at,
+    resolvedBy: row.resolved_by,
+    resolutionNote: row.resolution_note,
   };
 }
 

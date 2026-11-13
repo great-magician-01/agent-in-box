@@ -382,9 +382,10 @@ function createWindow(show = !startHidden): BrowserWindow {
     height: 820,
     minWidth: 900,
     minHeight: 620,
-    backgroundColor: "#f2f1eb",
+    backgroundColor: "#fbfbfc",
     show: false,
     title: "Agent-in-Box",
+    icon: windowIcon(),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -642,12 +643,27 @@ function reconcilePendingUpdate(): void {
   }
 }
 
+const appIconPath = path.join(__dirname, "..", "static", "icon.png");
+
+function windowIcon(): Electron.NativeImage {
+  try {
+    const image = nativeImage.createFromPath(appIconPath);
+    if (!image.isEmpty()) {
+      return image;
+    }
+  } catch {
+    // Fall through to the bundled empty icon; Electron shows the executable icon.
+  }
+  return nativeImage.createEmpty();
+}
+
 function trayIcon(): Electron.NativeImage {
-  return nativeImage
-    .createFromDataURL(
-      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAWUlEQVR42mNgQAMnK63+0xIz4AO0thyvI+hlOVZH0NtyFEcMlOVwR4w6YNQBxCiSUJAhC486YNQBow4YdcCoA0YdMHwcMNoeGHXAsO0bDJ6u2aDonA5U9xwAKKKmoZAwm9AAAAAASUVORK5CYII=",
-    )
-    .resize({ width: 16, height: 16 });
+  const size = process.platform === "linux" ? 22 : 16;
+  const image = windowIcon();
+  if (image.isEmpty()) {
+    return image;
+  }
+  return image.resize({ width: size, height: size });
 }
 
 function updateTrayMenu(): void {
@@ -781,33 +797,9 @@ function requestQuit(): void {
 }
 
 function installApplicationMenu(): void {
-  const template: Electron.MenuItemConstructorOptions[] = [
-    {
-      label: "文件",
-      submenu: [
-        {
-          label: "打开日志目录",
-          click: () => {
-            void shell.openPath(paths.logDirectory);
-          },
-        },
-        { type: "separator" },
-        { label: "退出", accelerator: "CmdOrCtrl+Q", click: () => requestQuit() },
-      ],
-    },
-    {
-      label: "视图",
-      submenu: [
-        { role: "reload" },
-        ...(app.isPackaged ? [] : [{ role: "toggleDevTools" as const }]),
-        { type: "separator" },
-        { role: "resetZoom" },
-        { role: "zoomIn" },
-        { role: "zoomOut" },
-      ],
-    },
-  ];
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+  // No menu bar: the app ships a tray menu and an in-page settings surface.
+  // Removing it also takes the "文件 / 视图" bar off the window frame.
+  Menu.setApplicationMenu(null);
 }
 
 function reportFatal(message: string, error: unknown): void {

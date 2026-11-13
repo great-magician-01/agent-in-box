@@ -36,7 +36,7 @@ const NAV_ITEMS: Array<{ id: AppView; label: string; hint: string }> = [
 
 function viewFromHash(): AppView {
   const value = window.location.hash.replace(/^#\/?/, "").split("?")[0];
-  return NAV_ITEMS.some((item) => item.id === value) ? (value as AppView) : "overview";
+  return NAV_ITEMS.some((item) => item.id === value) ? (value as AppView) : "session";
 }
 
 type AuthState =
@@ -150,8 +150,8 @@ export function App(): React.JSX.Element {
     return (
       <main className="shell" id="main-content">
         <header className="header">
-          <div>
-            <p className="eyebrow">LOCAL-FIRST AI COMPUTER</p>
+          <div className="brand">
+            <img className="brand-logo" src="/logo.svg" alt="" width={30} height={30} />
             <h1>Agent-in-Box</h1>
           </div>
         </header>
@@ -170,12 +170,10 @@ export function App(): React.JSX.Element {
     return (
       <main className="shell login-shell" id="main-content">
         <header className="header">
-          <div>
-            <p className="eyebrow">LOCAL-FIRST AI COMPUTER</p>
+          <div className="brand">
+            <img className="brand-logo" src="/logo.svg" alt="" width={30} height={30} />
             <h1>Agent-in-Box</h1>
-            <p className="subtitle">
-              本地控制平面已在线。解锁后才能读取项目、任务、VM、机器人和设置。
-            </p>
+            <p className="subtitle">本地控制平面已在线，解锁后继续使用。</p>
           </div>
         </header>
         <LoginScreen
@@ -239,7 +237,7 @@ function AuthenticatedApp({
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
 
   const navigate = useCallback((next: string) => {
-    const target = NAV_ITEMS.some((item) => item.id === next) ? (next as AppView) : "overview";
+    const target = NAV_ITEMS.some((item) => item.id === next) ? (next as AppView) : "session";
     setView(target);
     if (target !== "session") setSelectedWorker(null);
     if (target !== "projects") setSelectedProjectId(null);
@@ -491,17 +489,8 @@ function AuthenticatedApp({
       <div className="app-workspace">
         <header className="header app-header">
           <div className="brand">
-            <p className="eyebrow">LOCAL-FIRST AI COMPUTER</p>
+            <img className="brand-logo" src="/logo.svg" alt="" width={26} height={26} />
             <h1>Agent-in-Box</h1>
-            <div className="top-badges">
-              <span className="badge">{bridge ? "桌面应用" : "本地 Web"}</span>
-              {desktopStatus && (
-                <span className="badge">
-                  Electron {desktopStatus.version} · {desktopStatus.platform}/{desktopStatus.arch}
-                </span>
-              )}
-              <span className="badge">{authInfo.user?.displayName ?? "本机管理员"}</span>
-            </div>
           </div>
           <div className="header-actions">
             {workspaceVisible && sidebarCollapsed && (
@@ -557,11 +546,7 @@ function AuthenticatedApp({
 
         {desktopStatus && (
           <div className="desktop-strip">
-            <span>
-              本地服务：{CONTROL_PLANE_STATE_LABELS[desktopStatus.controlPlane.state]}
-              {desktopStatus.controlPlane.pid ? ` · pid ${desktopStatus.controlPlane.pid}` : ""}
-            </span>
-            <span className="muted">配置目录：{desktopStatus.configDirectory}</span>
+            <span>本地服务：{CONTROL_PLANE_STATE_LABELS[desktopStatus.controlPlane.state]}</span>
             {desktopStatus.controlPlane.message && (
               <span className="muted">{desktopStatus.controlPlane.message}</span>
             )}
@@ -572,7 +557,6 @@ function AuthenticatedApp({
         <main id="main-content" tabIndex={-1} className="app-main">
           {pendingRestart ? (
             <section className="panel restart-panel">
-              <p className="eyebrow">RESTART REQUIRED</p>
               <h2>需要重启本地服务</h2>
               <p className="muted">{pendingRestart.reason}</p>
               <p className="muted small">新数据目录：{pendingRestart.targetRoot}</p>
@@ -660,7 +644,6 @@ function AuthenticatedApp({
               <section className="panel worker-main" aria-labelledby="worker-main-title">
                 <div className="panel-heading">
                   <div>
-                    <p className="eyebrow">WORKER SESSION</p>
                     <h2 id="worker-main-title">Worker {selectedWorker.workerId.slice(0, 8)}</h2>
                   </div>
                   <div className="action-row">
@@ -716,11 +699,10 @@ function AuthenticatedApp({
         </main>
 
         <footer className="footer">
-          <span>所有密钥只保存在系统安全存储中，不写入普通配置、日志或 VM。</span>
           <span>
             {online && view !== "notifications"
               ? `控制平面启动于 ${formatDate(online.startedAt)}`
-              : "本页面不连接模型。"}
+              : ""}
           </span>
         </footer>
       </div>

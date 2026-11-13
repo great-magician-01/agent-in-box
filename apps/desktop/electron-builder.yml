@@ -38,6 +38,7 @@ win:
       arch:
         - x64
   artifactName: agent-in-box-${version}-${arch}.${ext}
+  icon: build/icon.ico
 
 nsis:
   oneClick: false
@@ -58,10 +59,12 @@ linux:
   target:
     - AppImage
   category: Utility
+  icon: build/icon.png
 
 mac:
   target:
     - dmg
   category: public.app-category.productivity
+  icon: build/icon.icns
 
 publish: null

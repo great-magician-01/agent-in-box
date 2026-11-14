@@ -3480,3 +3480,765 @@ button.link-button,
   flex-wrap: wrap;
   row-gap: 0.5rem;
 }
+
+/* Conversation-first application shell. */
+.app-shell {
+  grid-template-columns: 260px minmax(0, 1fr);
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.app-shell.observer-open {
+  grid-template-columns: 260px minmax(0, 1fr) 400px;
+}
+
+.app-shell.sidebar-collapsed,
+.app-shell.sidebar-collapsed.observer-open {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.app-shell.sidebar-collapsed.observer-open {
+  grid-template-columns: minmax(0, 1fr) 400px;
+}
+
+.app-workspace {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.app-header {
+  flex: 0 0 52px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-height: 52px;
+  margin: 0;
+  padding: 0 1.25rem;
+}
+
+.app-header-leading {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 0.65rem;
+}
+
+.app-header h1 {
+  margin: 0;
+  overflow: hidden;
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.header-actions {
+  flex-wrap: nowrap;
+  gap: 0.25rem;
+}
+
+.header-tool,
+.icon-button {
+  display: inline-flex;
+  position: relative;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0.35rem 0.55rem;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.header-tool:hover:not(:disabled),
+.header-tool.active,
+.icon-button:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.header-tool .bell-count {
+  position: static;
+  margin-left: 0.3rem;
+  background: var(--text);
+  color: var(--bg);
+}
+
+.app-main {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0 1.5rem 2rem;
+  overflow: auto;
+}
+
+.app-main > .dashboard,
+.app-main > .work-manager,
+.app-main > .notification-center {
+  width: min(1040px, 100%);
+  margin: 0 auto;
+}
+
+.app-main.session-active {
+  display: flex;
+  padding: 0;
+  overflow: hidden;
+}
+
+.app-main.session-active > * {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Sidebar: one clear action, a quiet history list, and management at the foot. */
+.workspace-sidebar {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  padding: 0.85rem 0.7rem 0.7rem;
+  overflow: hidden;
+  border-right: 0;
+  background: var(--surface-2);
+}
+
+.workspace-brand {
+  align-items: center;
+  min-height: 36px;
+  margin-bottom: 0.85rem;
+  padding: 0 0.25rem;
+}
+
+.workspace-brand .brand {
+  gap: 0.45rem;
+}
+
+.workspace-brand h1 {
+  font-size: 0.94rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.workspace-primary {
+  flex: 0 0 auto;
+  justify-content: flex-start;
+  min-height: 38px;
+  margin: 0 0 0.75rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 0.84rem;
+}
+
+.workspace-primary.active {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.new-session-menu {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 2px;
+  margin: -0.4rem 0 0.75rem;
+  padding: 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 8px 24px color-mix(in srgb, #000 8%, transparent);
+}
+
+.new-session-menu button {
+  padding: 0.5rem 0.55rem;
+  overflow: hidden;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.8rem;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.new-session-menu button:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+.workspace-projects {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-top: 0.35rem;
+  overflow-y: auto;
+}
+
+.workspace-section-title {
+  padding: 0 0.45rem;
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.workspace-section-title .link-button {
+  font-size: 0.72rem;
+  text-decoration: none;
+}
+
+.workspace-empty-hint {
+  margin: 0.65rem 0.45rem;
+}
+
+.workspace-project-list,
+.workspace-session-list {
+  display: grid;
+  gap: 2px;
+}
+
+.workspace-session-list {
+  margin: 0.1rem 0 0.35rem 0.85rem;
+  padding-left: 0.45rem;
+  border-left-color: var(--border);
+}
+
+.workspace-project,
+.workspace-session {
+  min-height: 34px;
+  padding: 0.45rem 0.5rem;
+  border-radius: 7px;
+  color: var(--text-2);
+}
+
+.workspace-session.active,
+.workspace-project:active,
+.workspace-footer button.active {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.workspace-project:hover,
+.workspace-session:hover,
+.workspace-footer button:hover,
+.workspace-primary:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.workspace-session span:nth-child(2):last-child,
+.workspace-session span:first-child:not(.workspace-dot) {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-status {
+  flex: 0 0 auto;
+}
+
+.workspace-add-session {
+  opacity: 0;
+}
+
+.workspace-project-row:hover .workspace-add-session,
+.workspace-add-session:focus-visible {
+  opacity: 1;
+}
+
+.workspace-footer {
+  display: grid;
+  flex: 0 0 auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px;
+  margin-top: 0.65rem;
+  padding-top: 0.65rem;
+  border-top-color: var(--border);
+}
+
+.workspace-footer button {
+  justify-content: flex-start;
+  min-height: 34px;
+  border-radius: 7px;
+  color: var(--text-2);
+}
+
+/* Transcript and composer share one centered reading axis. */
+.conversation-page {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  margin: 0;
+  gap: 0;
+  overflow: hidden;
+}
+
+.conversation-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.conversation-column {
+  width: min(760px, calc(100% - 48px));
+  margin: 0 auto;
+  padding: 2.25rem 0 1.5rem;
+}
+
+.conversation-column .worker-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 1.4rem;
+  max-height: none;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.chat-message {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.chat-message.user {
+  align-self: flex-end;
+  max-width: 82%;
+  padding: 0.7rem 0.95rem;
+  border-radius: 16px 16px 4px 16px;
+  background: var(--surface-2);
+}
+
+.chat-message.assistant {
+  border: 0;
+}
+
+.chat-role {
+  display: block;
+  margin-bottom: 0.4rem;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.chat-message p {
+  font-size: 0.92rem;
+  line-height: 1.75;
+}
+
+.conversation-composer {
+  flex: 0 0 auto;
+  width: min(800px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: 0.65rem 0 1.25rem;
+  background: var(--bg);
+}
+
+.chat-composer {
+  overflow: hidden;
+  border: 1px solid var(--border-2);
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: 0 2px 10px color-mix(in srgb, #000 4%, transparent);
+}
+
+.chat-composer:focus-within {
+  border-color: var(--text-2);
+  box-shadow: 0 0 0 2px var(--focus);
+}
+
+.chat-composer textarea {
+  display: block;
+  width: 100%;
+  min-height: 76px;
+  max-height: 220px;
+  padding: 0.95rem 1rem 0.45rem;
+  resize: vertical;
+  border: 0;
+  border-radius: 0;
+  outline: 0;
+  background: transparent;
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
+.chat-composer textarea:focus {
+  border: 0;
+  outline: 0;
+}
+
+.composer-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-height: 42px;
+  padding: 0.25rem 0.45rem 0.45rem 0.65rem;
+}
+
+.composer-model {
+  width: auto;
+  max-width: min(360px, 65%);
+  min-height: 30px;
+  padding-top: 0.25rem;
+  padding-bottom: 0.25rem;
+  border: 0;
+  border-radius: 8px;
+  background-color: transparent;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.composer-model:hover {
+  background-color: var(--surface-2);
+  color: var(--text);
+}
+
+.composer-send,
+.composer-actions .primary,
+.composer-actions .secondary {
+  min-height: 32px;
+  padding: 0.35rem 0.85rem;
+  border-radius: 999px;
+}
+
+.composer-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.composer-hint {
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.chat-empty {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.4rem;
+  width: min(800px, calc(100% - 40px));
+  max-width: none;
+  margin: auto;
+  padding: 2rem 0 12vh;
+}
+
+.chat-empty h2 {
+  margin: 0;
+  font-size: clamp(1.35rem, 3vw, 1.75rem);
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  text-align: center;
+}
+
+.chat-empty .chat-composer {
+  width: 100%;
+  text-align: left;
+}
+
+.configuration-hint {
+  display: grid;
+  justify-items: center;
+  gap: 0.8rem;
+}
+
+.configuration-hint p {
+  margin: 0;
+  color: var(--text-2);
+}
+
+.conversation-notice {
+  flex: 0 0 auto;
+  width: min(800px, calc(100% - 40px));
+  margin: 0 auto 0.75rem;
+}
+
+.conversation-running {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0 0 1rem;
+  color: var(--text-2);
+  font-size: 0.8rem;
+}
+
+.worker-empty {
+  padding: 14vh 0 2rem;
+  text-align: center;
+}
+
+.worker-empty h2 {
+  margin: 0 0 0.65rem;
+  font-size: 1.35rem;
+}
+
+.worker-empty p {
+  margin: 0;
+}
+
+.conversation-tools {
+  margin-top: 1.25rem;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.conversation-tools summary,
+.advanced-details summary {
+  cursor: pointer;
+}
+
+.conversation-tools ul {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0;
+  list-style: none;
+}
+
+.conversation-tools li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.35rem 0;
+}
+
+/* The observer remains available, but only after an explicit user action. */
+.observer-sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  padding: 0.85rem 1rem;
+  border-left-color: var(--border);
+  background: var(--surface);
+}
+
+.observer-header {
+  align-items: center;
+  min-height: 36px;
+}
+
+.observer-header h2 {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.observer-tabs {
+  gap: 0.25rem;
+  margin: 0.65rem 0 1rem;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.observer-tabs button {
+  flex: 0 0 auto;
+  padding: 0.4rem 0.65rem;
+  border-radius: 7px;
+  font-weight: 500;
+}
+
+.observer-tabs button.active {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.activity-summary {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.75rem;
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+
+.observer-body h3 {
+  margin: 0.65rem 0 0.1rem;
+  font-size: 0.78rem;
+}
+
+.activity-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.activity-list li {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.65rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.activity-list li > div {
+  display: grid;
+  min-width: 0;
+  gap: 0.25rem;
+}
+
+.activity-list strong {
+  font-size: 0.78rem;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.activity-list p {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.advanced-details {
+  margin-top: 1rem;
+  color: var(--text-2);
+  font-size: 0.76rem;
+}
+
+/* Settings are separate destinations rather than one endless admin page. */
+.dashboard:has(.settings-nav) {
+  grid-template-columns: 170px minmax(0, 1fr);
+  align-items: start;
+  gap: 1.25rem;
+}
+
+.settings-nav {
+  display: grid;
+  position: sticky;
+  top: 0;
+  grid-row: 1 / span 20;
+  gap: 2px;
+  padding: 0.25rem 0;
+}
+
+.settings-nav button {
+  padding: 0.55rem 0.65rem;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 0.82rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-nav button:hover,
+.settings-nav button.active {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.settings-nav ~ * {
+  grid-column: 2;
+  min-width: 0;
+}
+
+.settings-theme-field {
+  max-width: 280px;
+}
+
+.panel-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+@media (max-width: 1280px) {
+  .app-shell.observer-open {
+    grid-template-columns: 260px minmax(0, 1fr);
+  }
+
+  .app-shell.sidebar-collapsed.observer-open {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .observer-sidebar {
+    position: fixed;
+    z-index: 50;
+    top: 0;
+    right: 0;
+    width: min(400px, 100vw);
+    box-shadow: -16px 0 40px color-mix(in srgb, #000 16%, transparent);
+  }
+}
+
+@media (max-width: 900px) {
+  .app-header {
+    flex-direction: row;
+    align-items: center;
+    padding: 0 0.75rem;
+  }
+
+  .app-main {
+    padding: 0 0.85rem 1.5rem;
+  }
+
+  .app-main.session-active {
+    padding: 0;
+  }
+
+  .dashboard:has(.settings-nav) {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-nav {
+    display: flex;
+    position: static;
+    grid-row: auto;
+    padding: 0 0 0.5rem;
+    overflow-x: auto;
+  }
+
+  .settings-nav button {
+    flex: 0 0 auto;
+  }
+
+  .settings-nav ~ * {
+    grid-column: 1;
+  }
+}
+
+@media (max-width: 560px) {
+  .conversation-column {
+    width: calc(100% - 28px);
+    padding-top: 1.25rem;
+  }
+
+  .conversation-composer,
+  .chat-empty,
+  .conversation-notice {
+    width: calc(100% - 24px);
+  }
+
+  .chat-empty {
+    padding-bottom: 8vh;
+  }
+
+  .composer-hint {
+    display: none;
+  }
+}

@@ -3,66 +3,66 @@ import { useCallback, useEffect, useState } from "react";
 import type { ProjectView, WorkerView } from "@agent-in-box/protocol";
 import type { AppView } from "./App";
 import { api, subscribeTaskEvents } from "./api";
-import {
-  THEME_LABELS,
-  applyThemePreference,
-  cycleThemePreference,
-  getThemePreference,
-  saveThemePreference,
-  type ThemePreference,
-} from "./theme";
 
 interface WorkspaceSidebarProps {
   view: AppView;
   selectedWorkerId: string | null;
-  observerOpen: boolean;
-  unreadCount: number;
   revision: number;
   onSelectView(view: AppView): void;
   onSelectProject(projectId: string): void;
   onSelectWorker(workerId: string, projectId: string, vmId: string): void;
   onSelectRouter(): void;
-  onToggleObserver(): void;
   onCollapse(): void;
 }
 
 const FOOTER_VIEWS: Array<{ id: AppView; label: string }> = [
+  { id: "projects", label: "项目" },
   { id: "tasks", label: "任务" },
   { id: "vms", label: "虚拟机" },
-  { id: "archive", label: "归档" },
   { id: "settings", label: "设置" },
 ];
 
 export function WorkspaceSidebar({
   view,
   selectedWorkerId,
-  observerOpen,
-  unreadCount,
   revision,
   onSelectView,
   onSelectProject,
   onSelectWorker,
   onSelectRouter,
-  onToggleObserver,
   onCollapse,
 }: WorkspaceSidebarProps): React.JSX.Element {
   const [projects, setProjects] = useState<ProjectView[]>([]);
   const [workers, setWorkers] = useState<WorkerView[]>([]);
+  const [conversationTitles, setConversationTitles] = useState<ReadonlyMap<string, string>>(
+    new Map(),
+  );
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [newSessionOpen, setNewSessionOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [creatingFor, setCreatingFor] = useState<string | null>(null);
-  const [theme, setTheme] = useState<ThemePreference>(() => getThemePreference());
 
   const load = useCallback(async (): Promise<void> => {
     try {
       const [allProjects, nextWorkers] = await Promise.all([api.projects(true), api.workers()]);
       const nextProjects = allProjects.filter((item) => item.project.archivedAt === null);
       setProjects(nextProjects);
-      setWorkers(nextWorkers);
+      setWorkers(nextWorkers.filter((item) => item.worker.archivedAt === null));
       setExpanded((current) => {
         if (current.size > 0) return current;
-        return new Set(nextProjects.slice(0, 3).map((item) => item.project.id));
+        return new Set(nextProjects.slice(0, 1).map((item) => item.project.id));
       });
+      // Conversation names live on the project detail, not on WorkerRecord.
+      const details = await Promise.all(
+        nextProjects.map((item) => api.project(item.project.id).catch(() => null)),
+      );
+      const titles = new Map<string, string>();
+      for (const detail of details) {
+        for (const conversation of detail?.conversations ?? []) {
+          titles.set(conversation.id, conversation.title || "新会话");
+        }
+      }
+      setConversationTitles(titles);
       setError(null);
     } catch (cause) {
       setError(errorMessage(cause));
@@ -91,17 +91,12 @@ export function WorkspaceSidebar({
     });
   }
 
-  function cycleTheme(): void {
-    const next = cycleThemePreference(theme);
-    setTheme(next);
-    saveThemePreference(next);
-    applyThemePreference(next);
-  }
-
   async function createWorkerFor(project: ProjectView): Promise<void> {
     const vmId = project.bindings[0]?.binding.vmId ?? null;
     if (!vmId) {
-      setError("该项目尚未绑定 VM，请先在「项目」页绑定虚拟机。");
+      setNewSessionOpen(false);
+      onSelectProject(project.project.id);
+      setError("先为项目绑定虚拟机，再创建会话。");
       return;
     }
     setCreatingFor(project.project.id);
@@ -109,6 +104,7 @@ export function WorkspaceSidebar({
     try {
       const created = await api.createWorker({ projectId: project.project.id, vmId });
       setExpanded((current) => new Set(current).add(project.project.id));
+      setNewSessionOpen(false);
       onSelectWorker(created.worker.id, project.project.id, vmId);
     } catch (cause) {
       setError(errorMessage(cause));
@@ -118,16 +114,18 @@ export function WorkspaceSidebar({
   }
 
   return (
-    <aside className="workspace-sidebar" aria-label="项目与会话导航">
+    <aside className="workspace-sidebar" aria-label="会话导航">
       <div className="workspace-brand">
-        <div>
-          <h1>工作区</h1>
+        <div className="brand">
+          <img className="brand-logo" src="/logo.svg" alt="" width={24} height={24} />
+          <h1>Agent-in-Box</h1>
         </div>
         <button
           type="button"
-          className="secondary icon-button"
+          className="icon-button"
           onClick={onCollapse}
-          title="收起左栏"
+          title="收起侧栏"
+          aria-label="收起侧栏"
         >
           ‹
         </button>
@@ -135,49 +133,63 @@ export function WorkspaceSidebar({
 
       <button
         type="button"
-        className={`workspace-primary ${view === "session" ? "active" : ""}`}
-        onClick={onSelectRouter}
+        className={`workspace-primary${newSessionOpen ? " active" : ""}`}
+        aria-expanded={newSessionOpen}
+        onClick={() => setNewSessionOpen((current) => !current)}
       >
-        <span className="workspace-dot router" aria-hidden="true" />
-        Router 主会话
+        <span aria-hidden="true">＋</span>
+        新会话
       </button>
-
-      <div className="workspace-nav-row">
-        <button
-          type="button"
-          className={view === "overview" ? "active" : ""}
-          onClick={() => onSelectView("overview")}
-        >
-          总览
-        </button>
-        <button
-          type="button"
-          className={view === "notifications" ? "active" : ""}
-          onClick={() => onSelectView("notifications")}
-        >
-          通知{unreadCount > 0 ? ` ${unreadCount}` : ""}
-        </button>
-        <button
-          type="button"
-          className={observerOpen ? "active" : ""}
-          onClick={onToggleObserver}
-          title="打开或收起右侧观察栏"
-        >
-          观察
-        </button>
-      </div>
+      {newSessionOpen && (
+        <div className="new-session-menu">
+          <button
+            type="button"
+            onClick={() => {
+              setNewSessionOpen(false);
+              setError(null);
+              onSelectRouter();
+            }}
+          >
+            主会话
+          </button>
+          {projects.map((item) => (
+            <button
+              key={item.project.id}
+              type="button"
+              disabled={creatingFor === item.project.id}
+              onClick={() => void createWorkerFor(item)}
+            >
+              {creatingFor === item.project.id ? "正在创建…" : item.project.name}
+            </button>
+          ))}
+          {projects.length === 0 && (
+            <button type="button" onClick={() => onSelectView("projects")}>
+              先创建项目
+            </button>
+          )}
+        </div>
+      )}
 
       {error && <div className="notice small">{error}</div>}
 
       <div className="workspace-projects">
         <div className="workspace-section-title">
-          <span>项目</span>
+          <span>会话</span>
           <button type="button" className="link-button" onClick={() => onSelectView("projects")}>
-            管理
+            管理项目
           </button>
         </div>
+        <button
+          type="button"
+          className={`workspace-session workspace-router-link${
+            view === "session" && selectedWorkerId === null ? " active" : ""
+          }`}
+          onClick={onSelectRouter}
+        >
+          <span>主会话</span>
+        </button>
         {projects.length === 0 ? (
-          <p className="muted small">尚无项目。打开“项目”创建并绑定 VM。</p>
+          <p className="muted small workspace-empty-hint">还没有项目会话</p>
         ) : (
           <ul className="workspace-project-list">
             {projects.map((item) => {
@@ -190,26 +202,20 @@ export function WorkspaceSidebar({
                   <div className="workspace-project-row">
                     <button
                       type="button"
-                      className={`workspace-project ${view === "projects" ? "active" : ""}`}
-                      onClick={() => {
-                        toggleProject(item.project.id);
-                        onSelectProject(item.project.id);
-                      }}
+                      className="workspace-project"
+                      aria-expanded={isExpanded}
+                      onClick={() => toggleProject(item.project.id)}
                     >
                       <span className="workspace-chevron" aria-hidden="true">
                         {isExpanded ? "▾" : "▸"}
                       </span>
                       <span className="workspace-project-name">{item.project.name}</span>
-                      <span className="workspace-count">{projectWorkers.length}</span>
                     </button>
                     <button
                       type="button"
                       className="workspace-add-session"
-                      title={
-                        item.bindings.length > 0
-                          ? "新建 Worker 会话"
-                          : "新建 Worker 会话（需先在「项目」页绑定虚拟机）"
-                      }
+                      title="在此项目中新建会话"
+                      aria-label={`在 ${item.project.name} 中新建会话`}
                       disabled={creatingFor === item.project.id}
                       onClick={() => void createWorkerFor(item)}
                     >
@@ -219,7 +225,7 @@ export function WorkspaceSidebar({
                   {isExpanded && (
                     <ul className="workspace-session-list">
                       {projectWorkers.length === 0 ? (
-                        <li className="muted small">暂无 Worker 会话</li>
+                        <li className="muted small">暂无会话</li>
                       ) : (
                         projectWorkers.map((worker) => (
                           <li key={worker.worker.id}>
@@ -235,14 +241,20 @@ export function WorkspaceSidebar({
                                   worker.worker.vmId,
                                 )
                               }
-                              title={`${worker.worker.status} · ${worker.worker.providerId ?? "默认模型"}`}
                             >
-                              <span
-                                className={`workspace-dot ${worker.worker.status}`}
-                                aria-hidden="true"
-                              />
-                              <span>Worker {worker.worker.id.slice(0, 8)}</span>
-                              <span className="workspace-status">{worker.worker.status}</span>
+                              {(worker.worker.status === "running" ||
+                                worker.worker.status === "failed") && (
+                                <span
+                                  className={`workspace-dot ${worker.worker.status}`}
+                                  aria-hidden="true"
+                                />
+                              )}
+                              <span>
+                                {conversationTitles.get(worker.worker.conversationId) ?? "新会话"}
+                              </span>
+                              {worker.worker.status === "running" && (
+                                <span className="workspace-status">执行中</span>
+                              )}
                             </button>
                           </li>
                         ))
@@ -256,14 +268,7 @@ export function WorkspaceSidebar({
         )}
       </div>
 
-      <div className="workspace-theme">
-        <span>主题</span>
-        <button type="button" className="link-button" onClick={cycleTheme}>
-          {THEME_LABELS[theme]}
-        </button>
-      </div>
-
-      <nav className="workspace-footer" aria-label="其他视图">
+      <nav className="workspace-footer" aria-label="工作区管理">
         {FOOTER_VIEWS.map((item) => (
           <button
             key={item.id}

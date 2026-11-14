@@ -23,6 +23,7 @@ interface WorkManagerProps {
   onOpenVmConsole?(vmId: string): void;
   onOpenWorker?(projectId: string, workerId: string): void;
   focusProjectId?: string;
+  onNavigate?(view: "tasks" | "archive" | "settings"): void;
 }
 
 const VIEW_TITLES: Record<WorkView, string> = {
@@ -37,6 +38,7 @@ export function WorkManager({
   onOpenVmConsole,
   onOpenWorker,
   focusProjectId,
+  onNavigate,
 }: WorkManagerProps): React.JSX.Element {
   const [projects, setProjects] = useState<ProjectView[]>([]);
   const [board, setBoard] = useState<TaskBoardSnapshot | null>(null);
@@ -187,6 +189,16 @@ export function WorkManager({
     document.getElementById("worker-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [focusedWorkerId, selectedDetail]);
 
+  if (view === "session") {
+    return (
+      <RouterPanel
+        revision={revision}
+        onChanged={() => load(true)}
+        {...(onNavigate ? { onOpenSettings: () => onNavigate("settings") } : {})}
+      />
+    );
+  }
+
   const title = VIEW_TITLES[view];
   return (
     <section className="panel work-manager" aria-labelledby="work-manager-title">
@@ -194,9 +206,17 @@ export function WorkManager({
         <div>
           <h2 id="work-manager-title">{title}</h2>
         </div>
-        <div className="stream-status" role="status">
-          <span className={`dot ${streamState === "live" ? "live" : ""}`} aria-hidden="true" />
-          {streamState === "live" ? "实时更新已连接" : "正在重连"}
+        <div className="panel-heading-actions">
+          {onNavigate && (view === "tasks" || view === "archive") && (
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => onNavigate(view === "tasks" ? "archive" : "tasks")}
+            >
+              {view === "tasks" ? "已归档" : "返回任务"}
+            </button>
+          )}
+          {streamState !== "live" && <span className="muted small">正在更新连接</span>}
         </div>
       </div>
       {error && (
@@ -206,8 +226,6 @@ export function WorkManager({
       )}
       {loading && !board ? (
         <p className="muted">正在读取项目与任务快照…</p>
-      ) : view === "session" ? (
-        <RouterPanel revision={revision} onChanged={() => load(true)} />
       ) : view === "archive" ? (
         <WorkerRegistryPanel revision={revision} onChanged={() => load(true)} />
       ) : view === "tasks" ? (

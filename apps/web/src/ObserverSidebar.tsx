@@ -1,11 +1,17 @@
 /* eslint-disable react-hooks/set-state-in-effect -- VM/worker snapshots refresh from server events */
 import { useCallback, useEffect, useState } from "react";
-import type { VmConsoleSession, VmInstanceView } from "@agent-in-box/protocol";
+import type {
+  RouterToolCallRecord,
+  RouterToolDefinition,
+  RouterView,
+  VmConsoleSession,
+  VmInstanceView,
+  WorkerView,
+} from "@agent-in-box/protocol";
 import { api } from "./api";
 import { VmConsole } from "./VmConsole";
-import { WorkerConversation } from "./WorkerConversation";
 
-export type ObserverTab = "vm" | "worker";
+export type ObserverTab = "vm" | "activity";
 
 interface ObserverSidebarProps {
   open: boolean;
@@ -26,7 +32,6 @@ export function ObserverSidebar({
   revision,
   onTabChange,
   onClose,
-  onChanged,
 }: ObserverSidebarProps): React.JSX.Element | null {
   const [vms, setVms] = useState<VmInstanceView[]>([]);
   const [selectedVmId, setSelectedVmId] = useState("");
@@ -34,6 +39,10 @@ export function ObserverSidebar({
   const [error, setError] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [connectNonce, setConnectNonce] = useState(0);
+  const [router, setRouter] = useState<RouterView | null>(null);
+  const [worker, setWorker] = useState<WorkerView | null>(null);
+  const [tools, setTools] = useState<RouterToolDefinition[]>([]);
+  const [toolCalls, setToolCalls] = useState<RouterToolCallRecord[]>([]);
 
   const loadVms = useCallback(async (): Promise<void> => {
     try {
@@ -45,10 +54,33 @@ export function ObserverSidebar({
     }
   }, []);
 
+  const loadActivity = useCallback(async (): Promise<void> => {
+    try {
+      const [nextRouter, nextTools, nextCalls, nextWorker] = await Promise.all([
+        api.router(),
+        api.routerTools(),
+        api.routerToolCalls(50),
+        workerId ? api.worker(workerId) : Promise.resolve(null),
+      ]);
+      setRouter(nextRouter);
+      setTools(nextTools);
+      setToolCalls(nextCalls);
+      setWorker(nextWorker);
+      setError(null);
+    } catch (cause) {
+      setError(errorMessage(cause));
+    }
+  }, [workerId]);
+
   useEffect(() => {
     if (!open || tab !== "vm") return;
     void loadVms();
   }, [open, tab, revision, loadVms]);
+
+  useEffect(() => {
+    if (!open || tab !== "activity") return;
+    void loadActivity();
+  }, [open, tab, revision, loadActivity]);
 
   useEffect(() => {
     if (!open || tab !== "vm") return;
@@ -106,18 +138,26 @@ export function ObserverSidebar({
   if (!open) return null;
 
   const selected = vms.find((item) => item.vm.id === selectedVmId) ?? null;
+  const status = worker?.worker.status ?? router?.status;
 
   return (
-    <aside className="observer-sidebar" aria-label="Agent 观察栏">
+    <aside className="observer-sidebar" aria-label="执行观察栏">
       <div className="observer-header">
-        <div>
-          <h2>观察</h2>
-        </div>
-        <button type="button" className="secondary" onClick={onClose}>
-          收起
+        <h2>执行详情</h2>
+        <button type="button" className="icon-button" onClick={onClose} aria-label="收起观察栏">
+          ×
         </button>
       </div>
       <div className="observer-tabs" role="tablist" aria-label="观察内容">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "activity"}
+          className={tab === "activity" ? "active" : ""}
+          onClick={() => onTabChange("activity")}
+        >
+          执行记录
+        </button>
         <button
           type="button"
           role="tab"
@@ -127,44 +167,87 @@ export function ObserverSidebar({
         >
           VM 画面
         </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "worker"}
-          className={tab === "worker" ? "active" : ""}
-          onClick={() => onTabChange("worker")}
-        >
-          Worker 会话
-        </button>
       </div>
 
-      {tab === "worker" ? (
+      {tab === "activity" ? (
         <div className="observer-body">
-          <WorkerConversation
-            workerId={workerId}
-            revision={revision}
-            compact
-            {...(onChanged ? { onChanged } : {})}
-          />
+          {error && <div className="notice">{error}</div>}
+          <div className="activity-summary">
+            <strong>
+              {status === "running" ? "正在执行" : status === "failed" ? "执行失败" : "当前空闲"}
+            </strong>
+            <span className="muted small">
+              {worker
+                ? `${worker.worker.providerId ?? "默认模型"} / ${worker.worker.modelId ?? "默认"}`
+                : `${router?.providerId ?? "未配置"} / ${router?.modelId ?? "未配置"}`}
+            </span>
+          </div>
+          <h3>最近工具调用</h3>
+          {toolCalls.length === 0 ? (
+            <p className="muted small">暂无执行记录</p>
+          ) : (
+            <ul className="activity-list">
+              {toolCalls
+                .slice()
+                .reverse()
+                .map((call) => (
+                  <li key={call.id}>
+                    <div>
+                      <strong>{call.toolName}</strong>
+                      <span className="muted small">
+                        {new Date(call.createdAt).toLocaleTimeString("zh-CN")}
+                      </span>
+                    </div>
+                    <span className={call.status === "error" ? "error-line" : "muted small"}>
+                      {call.status === "error" ? "失败" : "完成"}
+                    </span>
+                    {call.errorMessage && <p className="error-line">{call.errorMessage}</p>}
+                  </li>
+                ))}
+            </ul>
+          )}
+          <details className="advanced-details">
+            <summary>技术详情</summary>
+            {worker && (
+              <dl className="runtime-list">
+                <div>
+                  <dt>RPC</dt>
+                  <dd>{worker.runtime.connected ? "已连接" : "未连接"}</dd>
+                </div>
+                <div>
+                  <dt>会话恢复</dt>
+                  <dd>{worker.runtime.restoreMode ?? "—"}</dd>
+                </div>
+              </dl>
+            )}
+            <h4>可用工具（{tools.length}）</h4>
+            <ul className="activity-list">
+              {tools.map((tool) => (
+                <li key={tool.name}>
+                  <div>
+                    <strong>{tool.name}</strong>
+                    <span className="muted small">{tool.description}</span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </details>
         </div>
       ) : (
         <div className="observer-body">
           {error && <div className="notice">{error}</div>}
           <label className="field">
-            <span>观察 VM</span>
+            <span>虚拟机</span>
             <select value={selectedVmId} onChange={(event) => setSelectedVmId(event.target.value)}>
               <option value="">未选择</option>
               {vms.map((item) => (
                 <option key={item.vm.id} value={item.vm.id}>
-                  {item.vm.name} · {item.vm.powerState}
+                  {item.vm.name} · {item.vm.powerState === "running" ? "运行中" : "已停止"}
                 </option>
               ))}
             </select>
           </label>
-          <p className="muted small">
-            只读观察不会获取 Execution Lease，也不会向虚拟机发送键盘、鼠标或剪贴板输入。
-          </p>
-          {connecting && <p className="muted small">正在建立只读观察连接…</p>}
+          {connecting && <p className="muted small">正在连接只读画面…</p>}
           {session && selected && (
             <>
               <VmConsole
@@ -176,7 +259,7 @@ export function ObserverSidebar({
               />
               {session.viewOnly && (
                 <button type="button" className="secondary" onClick={() => void takeover()}>
-                  人工接管（会撤销 AI Lease）
+                  人工接管
                 </button>
               )}
             </>
@@ -187,9 +270,10 @@ export function ObserverSidebar({
               className="primary"
               onClick={() => setConnectNonce((value) => value + 1)}
             >
-              连接观察
+              重新连接
             </button>
           )}
+          {!selected && !connecting && <p className="muted small">暂无可用虚拟机。</p>}
         </div>
       )}
     </aside>

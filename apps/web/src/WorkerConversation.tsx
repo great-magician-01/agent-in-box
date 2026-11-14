@@ -21,7 +21,6 @@ export function WorkerConversation({
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const loadRequest = useRef(0);
 
   const load = useCallback(async (): Promise<void> => {
@@ -51,22 +50,24 @@ export function WorkerConversation({
     setWorker(null);
     setMessages([]);
     setError(null);
-    setNotice(null);
   }, [workerId]);
 
   useEffect(() => {
     void load();
   }, [load, revision]);
 
-  async function submit(mode: "prompt" | "steer" | "follow_up"): Promise<void> {
-    if (!workerId || !text.trim()) return;
+  async function submit(): Promise<void> {
+    if (!workerId || !text.trim() || !worker) return;
     setBusy(true);
     setError(null);
-    setNotice(null);
     try {
-      if (mode === "prompt") await api.workerPrompt(workerId, { text: text.trim() });
-      if (mode === "steer") await api.workerSteer(workerId, { text: text.trim() });
-      if (mode === "follow_up") await api.workerFollowUp(workerId, { text: text.trim() });
+      if (worker.worker.status === "running") {
+        await api.workerSteer(workerId, { text: text.trim() });
+      } else if (worker.worker.status === "idle") {
+        await api.workerPrompt(workerId, { text: text.trim() });
+      } else {
+        await api.workerFollowUp(workerId, { text: text.trim() });
+      }
       setText("");
       await load();
       onChanged?.();
@@ -83,7 +84,6 @@ export function WorkerConversation({
     setError(null);
     try {
       await api.workerAbort(workerId);
-      setNotice("已请求中止 Worker 当前回合");
       await load();
       onChanged?.();
     } catch (cause) {
@@ -94,90 +94,85 @@ export function WorkerConversation({
   }
 
   if (!workerId) {
-    return <p className="muted small">选择一个 Worker 会话查看消息。</p>;
+    return <p className="muted small">选择一个会话查看执行详情。</p>;
   }
 
   const running = worker?.worker.status === "running";
   const connected = worker?.runtime.connected === true;
-  const canPrompt = connected && worker?.worker.status === "idle";
+
+  const composer = (
+    <div className="chat-composer">
+      <textarea
+        aria-label="消息"
+        rows={compact ? 2 : 3}
+        value={text}
+        maxLength={4000}
+        onChange={(event) => setText(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+            event.preventDefault();
+            if (!busy && connected && text.trim()) void submit();
+          }
+        }}
+        placeholder={running ? "补充要求，发送后立即指导当前任务" : "描述要在 VM 桌面完成的任务"}
+        disabled={busy || !connected}
+      />
+      <div className="composer-toolbar">
+        <span className="composer-hint">Enter 发送 · Shift + Enter 换行</span>
+        <div className="composer-actions">
+          {running && (
+            <button
+              type="button"
+              className="secondary"
+              disabled={busy}
+              onClick={() => void abort()}
+            >
+              停止
+            </button>
+          )}
+          <button
+            type="button"
+            className="primary composer-send"
+            disabled={busy || !connected || !text.trim()}
+            onClick={() => void submit()}
+          >
+            发送
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 
   return (
-    <div className={`worker-conversation${compact ? " compact" : ""}`}>
-      <div className="worker-meta">
-        <span>
-          {worker?.worker.status ?? "读取中"} · {connected ? "RPC 已连接" : "RPC 未连接"}
-        </span>
-        <span className="muted small">
-          模型：{worker?.worker.providerId ?? "默认"} / {worker?.worker.modelId ?? "默认"}
-        </span>
-        {worker?.runtime.restoreMode && (
-          <span className="muted small">
-            恢复：{worker.runtime.restoreMode === "native" ? "原生会话" : "摘要会话"}
-          </span>
-        )}
+    <div className={`conversation-page worker-conversation${compact ? " compact" : ""}`}>
+      <div className="conversation-scroll">
+        <div className="conversation-column">
+          {running && (
+            <p className="conversation-running" role="status">
+              <span className="workspace-dot running" aria-hidden="true" />
+              正在执行任务
+            </p>
+          )}
+          {!connected && worker && <p className="muted">执行环境尚未连接，暂时无法发送消息。</p>}
+          {error && <div className="notice">{error}</div>}
+          <div className="worker-messages" aria-live="polite">
+            {messages.length === 0 ? (
+              <div className="worker-empty">
+                <h2>准备开始</h2>
+                <p className="muted">在下方描述任务，Agent 会在项目绑定的虚拟机中执行。</p>
+              </div>
+            ) : (
+              messages.map((message) => (
+                <article key={message.id} className={`chat-message ${message.role}`}>
+                  {message.role !== "user" && <span className="chat-role">Agent</span>}
+                  <p>{message.content}</p>
+                </article>
+              ))
+            )}
+          </div>
+        </div>
       </div>
-      {error && <div className="notice">{error}</div>}
-      {notice && <div className="validation-box ok">{notice}</div>}
-      <div className="worker-messages" aria-live="polite">
-        {messages.length === 0 ? (
-          <p className="muted small">尚无会话消息。</p>
-        ) : (
-          messages.map((message) => (
-            <article key={message.id} className={`chat-message ${message.role}`}>
-              <span className="chat-role">
-                {message.role === "user" ? "用户" : "Worker"} · {message.mode} ·{" "}
-                {new Date(message.createdAt).toLocaleTimeString("zh-CN")}
-              </span>
-              <p>{message.content}</p>
-            </article>
-          ))
-        )}
-      </div>
-      <label className="field">
-        <span>{compact ? "发送到 Worker" : "消息 / 任务目标"}</span>
-        <textarea
-          rows={compact ? 2 : 3}
-          value={text}
-          maxLength={4000}
-          onChange={(event) => setText(event.target.value)}
-          placeholder="描述要在 VM 桌面上完成的任务"
-          disabled={busy || !connected}
-        />
-      </label>
-      <div className="action-row">
-        <button
-          type="button"
-          className="primary"
-          disabled={busy || !canPrompt || !text.trim()}
-          onClick={() => void submit("prompt")}
-        >
-          {running ? "执行中" : "发送任务"}
-        </button>
-        <button
-          type="button"
-          className="secondary"
-          disabled={busy || !running || !text.trim()}
-          onClick={() => void submit("steer")}
-        >
-          Steer
-        </button>
-        <button
-          type="button"
-          className="secondary"
-          disabled={busy || !connected || !text.trim()}
-          onClick={() => void submit("follow_up")}
-        >
-          Follow-up
-        </button>
-        <button
-          type="button"
-          className="secondary"
-          disabled={busy || !connected}
-          onClick={() => void abort()}
-        >
-          中止
-        </button>
-      </div>
+      <div className="conversation-composer">{composer}</div>
     </div>
   );
 }

@@ -25,6 +25,13 @@ import { BotManager } from "./BotManager";
 import { ModelSettings } from "./ModelSettings";
 import { VmRuntimeSettings } from "./VmRuntimeSettings";
 import {
+  THEME_LABELS,
+  applyThemePreference,
+  getThemePreference,
+  saveThemePreference,
+  type ThemePreference,
+} from "./theme";
+import {
   CONTROL_PLANE_STATE_LABELS,
   DATA_ROOT_SOURCE_LABELS,
   HOST_CHECK_STATUS_LABELS,
@@ -39,6 +46,19 @@ export interface RestartRequest {
   targetRoot: string;
   reason: string;
 }
+
+type SettingsSection =
+  "models" | "general" | "runtime" | "bots" | "storage" | "security" | "diagnostics";
+
+const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string }> = [
+  { id: "models", label: "模型" },
+  { id: "general", label: "通用" },
+  { id: "runtime", label: "运行环境" },
+  { id: "bots", label: "机器人" },
+  { id: "storage", label: "存储" },
+  { id: "security", label: "安全" },
+  { id: "diagnostics", label: "诊断" },
+];
 
 interface DashboardProps {
   view: Exclude<AppView, "notifications">;
@@ -74,6 +94,8 @@ export function Dashboard({
   const [settings, setSettings] = useState<SettingsView | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>("models");
+  const [theme, setTheme] = useState<ThemePreference>(() => getThemePreference());
 
   const [reserveGb, setReserveGb] = useState(formatGb(onboarding.resourcePolicy.hostReserveBytes));
   const [autoStart, setAutoStart] = useState<AutoStartPolicy>(
@@ -432,6 +454,47 @@ export function Dashboard({
         </div>
       )}
 
+      {view === "settings" && (
+        <nav className="settings-nav" aria-label="设置分类">
+          {SETTINGS_SECTIONS.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={settingsSection === item.id ? "active" : ""}
+              onClick={() => setSettingsSection(item.id)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </nav>
+      )}
+
+      {view === "settings" && settingsSection === "general" && (
+        <section className="panel" aria-labelledby="appearance-title">
+          <div className="panel-heading">
+            <h2 id="appearance-title">外观</h2>
+          </div>
+          <label className="field settings-theme-field">
+            <span>主题</span>
+            <select
+              value={theme}
+              onChange={(event) => {
+                const next = event.target.value as ThemePreference;
+                setTheme(next);
+                saveThemePreference(next);
+                applyThemePreference(next);
+              }}
+            >
+              {Object.entries(THEME_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </section>
+      )}
+
       {view === "overview" && (
         <section className="grid dashboard-grid" aria-label="本机总览">
           <article className="card">
@@ -501,6 +564,7 @@ export function Dashboard({
           view={workView}
           {...(onOpenWorker ? { onOpenWorker } : {})}
           {...(initialProjectId ? { focusProjectId: initialProjectId } : {})}
+          onNavigate={(next) => onNavigate(next)}
           onOpenVmConsole={(vmId) => {
             consoleNonce.current += 1;
             setConsoleRequest({ vmId, nonce: consoleNonce.current });
@@ -509,9 +573,11 @@ export function Dashboard({
         />
       )}
 
-      {view === "settings" && <ModelSettings bridge={bridge} />}
-      {view === "settings" && <VmRuntimeSettings bridge={bridge} />}
-      {view === "settings" && <BotManager bridge={bridge} />}
+      {view === "settings" && settingsSection === "models" && <ModelSettings bridge={bridge} />}
+      {view === "settings" && settingsSection === "runtime" && (
+        <VmRuntimeSettings bridge={bridge} />
+      )}
+      {view === "settings" && settingsSection === "bots" && <BotManager bridge={bridge} />}
 
       {view === "vms" && (
         <VmManager
@@ -526,7 +592,7 @@ export function Dashboard({
         />
       )}
 
-      {view === "settings" && (
+      {view === "settings" && settingsSection === "storage" && (
         <section className="panel" aria-labelledby="storage-title">
           <div className="panel-heading">
             <h2 id="storage-title">存储</h2>
@@ -681,7 +747,7 @@ export function Dashboard({
         </section>
       )}
 
-      {view === "settings" && (
+      {view === "settings" && settingsSection === "runtime" && (
         <section className="panel" aria-labelledby="resource-title">
           <div className="panel-heading">
             <h2 id="resource-title">资源策略</h2>
@@ -787,7 +853,7 @@ export function Dashboard({
         </section>
       )}
 
-      {view === "settings" && (
+      {view === "settings" && settingsSection === "diagnostics" && (
         <section className="panel muted-panel" aria-labelledby="runtime-title">
           <div className="panel-heading">
             <h2 id="runtime-title">运行信息</h2>
@@ -856,6 +922,7 @@ export function Dashboard({
 
       {view === "settings" && (
         <DesktopSettingsPanels
+          section={settingsSection}
           bridge={bridge}
           preferences={preferences}
           setPreferences={setPreferences}
@@ -882,6 +949,7 @@ export function Dashboard({
 }
 
 interface DesktopSettingsPanelsProps {
+  section: SettingsSection;
   bridge: DesktopBridge | null;
   preferences: DesktopPreferences | null;
   setPreferences(value: DesktopPreferences): void;
@@ -904,6 +972,7 @@ interface DesktopSettingsPanelsProps {
 }
 
 function DesktopSettingsPanels({
+  section,
   bridge,
   preferences,
   setPreferences,
@@ -926,242 +995,252 @@ function DesktopSettingsPanels({
 }: DesktopSettingsPanelsProps): React.JSX.Element {
   return (
     <>
-      <section className="panel" aria-labelledby="desktop-settings-title">
-        <div className="panel-heading">
-          <div>
-            <h2 id="desktop-settings-title">桌面与后台服务</h2>
-            <p className="muted small">这些选项只在 Electron 桌面应用中可用。</p>
+      {section === "general" && (
+        <section className="panel" aria-labelledby="desktop-settings-title">
+          <div className="panel-heading">
+            <div>
+              <h2 id="desktop-settings-title">桌面与后台服务</h2>
+              <p className="muted small">这些选项只在 Electron 桌面应用中可用。</p>
+            </div>
+            <span className="pill ok">
+              {controlPlaneState ? CONTROL_PLANE_STATE_LABELS[controlPlaneState] : "运行中"}
+            </span>
           </div>
-          <span className="pill ok">
-            {controlPlaneState ? CONTROL_PLANE_STATE_LABELS[controlPlaneState] : "运行中"}
-          </span>
-        </div>
-        {!bridge || !preferences ? (
-          <p className="muted">
-            当前通过浏览器访问；桌面服务管理、开机启动和原生通知仅桌面应用可用。
-          </p>
-        ) : (
-          <>
-            <div className="policy-grid">
-              <label className="field">
-                <span>关闭窗口时</span>
-                <select
-                  value={preferences.closeBehavior}
-                  onChange={(event) =>
-                    onCloseBehaviorChange(event.target.value as DesktopPreferences["closeBehavior"])
-                  }
-                >
-                  <option value="keep_running">后台继续运行</option>
-                  <option value="quit">停止服务并退出</option>
-                </select>
-              </label>
-              <label className="toggle policy-toggle">
-                <input
-                  type="checkbox"
-                  checked={preferences.launchAtLogin}
-                  onChange={(event) =>
-                    setPreferences({ ...preferences, launchAtLogin: event.target.checked })
-                  }
-                />
-                <span>开机时启动（隐藏到托盘）</span>
-              </label>
-              <label className="toggle policy-toggle">
-                <input
-                  type="checkbox"
-                  checked={preferences.notificationsEnabled}
-                  onChange={(event) =>
-                    setPreferences({
-                      ...preferences,
-                      notificationsEnabled: event.target.checked,
-                    })
-                  }
-                />
-                <span>任务和审批使用桌面通知</span>
-              </label>
-              <label className="toggle policy-toggle">
-                <input
-                  type="checkbox"
-                  checked={preferences.autoUpdateCheck}
-                  onChange={(event) =>
-                    setPreferences({ ...preferences, autoUpdateCheck: event.target.checked })
-                  }
-                />
-                <span>启动后自动检查更新</span>
-              </label>
-              <label className="field">
-                <span>更新源（HTTPS Manifest）</span>
-                <input
-                  value={updateFeedDraft}
-                  placeholder="https://updates.example.com/latest.json"
-                  spellCheck={false}
-                  onChange={(event) => setUpdateFeedDraft(event.target.value)}
-                />
-              </label>
-            </div>
-            <div className="action-row">
-              <button type="button" className="primary" onClick={onSavePreferences}>
-                保存桌面设置
-              </button>
-              <button
-                type="button"
-                className="secondary"
-                onClick={() => void bridge.app.restartControlPlane()}
-              >
-                重启本地服务
-              </button>
-              <button
-                type="button"
-                className="secondary"
-                onClick={() => void bridge.app.stopControlPlane()}
-              >
-                停止本地服务
-              </button>
-              <button
-                type="button"
-                className="secondary"
-                onClick={() => void bridge.app.startControlPlane()}
-              >
-                启动本地服务
-              </button>
-              <button
-                type="button"
-                className="secondary"
-                onClick={() => void bridge.app.openLogs()}
-              >
-                打开日志目录
-              </button>
-            </div>
-            {preferencesMessage && <p className="muted small">{preferencesMessage}</p>}
-          </>
-        )}
-      </section>
-
-      <section className="panel" aria-labelledby="updates-title">
-        <div className="panel-heading">
-          <div>
-            <h2 id="updates-title">更新与回滚</h2>
-            <p className="muted small">
-              安装前备份 SQLite 数据库和当前应用资源；更新失败可在本页回到上一版本。
+          {!bridge || !preferences ? (
+            <p className="muted">
+              当前通过浏览器访问；桌面服务管理、开机启动和原生通知仅桌面应用可用。
             </p>
-          </div>
-          <span className={`pill ${updateStatus?.state === "error" ? "warn" : "ok"}`}>
-            {updateStatus?.currentVersion ?? "—"}
-          </span>
-        </div>
-        {!bridge ? (
-          <p className="muted">更新只适用于桌面安装版。</p>
-        ) : (
-          <>
-            <dl className="runtime-list">
-              <div>
-                <dt>当前版本</dt>
-                <dd>{updateStatus?.currentVersion ?? "—"}</dd>
+          ) : (
+            <>
+              <div className="policy-grid">
+                <label className="field">
+                  <span>关闭窗口时</span>
+                  <select
+                    value={preferences.closeBehavior}
+                    onChange={(event) =>
+                      onCloseBehaviorChange(
+                        event.target.value as DesktopPreferences["closeBehavior"],
+                      )
+                    }
+                  >
+                    <option value="keep_running">后台继续运行</option>
+                    <option value="quit">停止服务并退出</option>
+                  </select>
+                </label>
+                <label className="toggle policy-toggle">
+                  <input
+                    type="checkbox"
+                    checked={preferences.launchAtLogin}
+                    onChange={(event) =>
+                      setPreferences({ ...preferences, launchAtLogin: event.target.checked })
+                    }
+                  />
+                  <span>开机时启动（隐藏到托盘）</span>
+                </label>
+                <label className="toggle policy-toggle">
+                  <input
+                    type="checkbox"
+                    checked={preferences.notificationsEnabled}
+                    onChange={(event) =>
+                      setPreferences({
+                        ...preferences,
+                        notificationsEnabled: event.target.checked,
+                      })
+                    }
+                  />
+                  <span>任务和审批使用桌面通知</span>
+                </label>
+                <label className="toggle policy-toggle">
+                  <input
+                    type="checkbox"
+                    checked={preferences.autoUpdateCheck}
+                    onChange={(event) =>
+                      setPreferences({ ...preferences, autoUpdateCheck: event.target.checked })
+                    }
+                  />
+                  <span>启动后自动检查更新</span>
+                </label>
+                <label className="field">
+                  <span>更新源（HTTPS Manifest）</span>
+                  <input
+                    value={updateFeedDraft}
+                    placeholder="https://updates.example.com/latest.json"
+                    spellCheck={false}
+                    onChange={(event) => setUpdateFeedDraft(event.target.value)}
+                  />
+                </label>
               </div>
-              <div>
-                <dt>可用版本</dt>
-                <dd>{updateStatus?.availableVersion ?? "—"}</dd>
-              </div>
-              <div>
-                <dt>状态</dt>
-                <dd>{updateStatus?.state ?? "idle"}</dd>
-              </div>
-            </dl>
-            {updateStatus?.notes && <p className="muted small">{updateStatus.notes}</p>}
-            {updateStatus?.downloadProgress !== null &&
-              updateStatus?.downloadProgress !== undefined && (
-                <div
-                  className="meter"
-                  role="progressbar"
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-valuenow={Math.round(updateStatus.downloadProgress * 100)}
-                  aria-label={`下载进度 ${Math.round(updateStatus.downloadProgress * 100)}%`}
+              <div className="action-row">
+                <button type="button" className="primary" onClick={onSavePreferences}>
+                  保存桌面设置
+                </button>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => void bridge.app.restartControlPlane()}
                 >
-                  <span style={{ width: `${Math.round(updateStatus.downloadProgress * 100)}%` }} />
+                  重启本地服务
+                </button>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => void bridge.app.stopControlPlane()}
+                >
+                  停止本地服务
+                </button>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => void bridge.app.startControlPlane()}
+                >
+                  启动本地服务
+                </button>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => void bridge.app.openLogs()}
+                >
+                  打开日志目录
+                </button>
+              </div>
+              {preferencesMessage && <p className="muted small">{preferencesMessage}</p>}
+            </>
+          )}
+        </section>
+      )}
+
+      {section === "general" && (
+        <section className="panel" aria-labelledby="updates-title">
+          <div className="panel-heading">
+            <div>
+              <h2 id="updates-title">更新与回滚</h2>
+              <p className="muted small">
+                安装前备份 SQLite 数据库和当前应用资源；更新失败可在本页回到上一版本。
+              </p>
+            </div>
+            <span className={`pill ${updateStatus?.state === "error" ? "warn" : "ok"}`}>
+              {updateStatus?.currentVersion ?? "—"}
+            </span>
+          </div>
+          {!bridge ? (
+            <p className="muted">更新只适用于桌面安装版。</p>
+          ) : (
+            <>
+              <dl className="runtime-list">
+                <div>
+                  <dt>当前版本</dt>
+                  <dd>{updateStatus?.currentVersion ?? "—"}</dd>
+                </div>
+                <div>
+                  <dt>可用版本</dt>
+                  <dd>{updateStatus?.availableVersion ?? "—"}</dd>
+                </div>
+                <div>
+                  <dt>状态</dt>
+                  <dd>{updateStatus?.state ?? "idle"}</dd>
+                </div>
+              </dl>
+              {updateStatus?.notes && <p className="muted small">{updateStatus.notes}</p>}
+              {updateStatus?.downloadProgress !== null &&
+                updateStatus?.downloadProgress !== undefined && (
+                  <div
+                    className="meter"
+                    role="progressbar"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={Math.round(updateStatus.downloadProgress * 100)}
+                    aria-label={`下载进度 ${Math.round(updateStatus.downloadProgress * 100)}%`}
+                  >
+                    <span
+                      style={{ width: `${Math.round(updateStatus.downloadProgress * 100)}%` }}
+                    />
+                  </div>
+                )}
+              {updateStatus?.error && (
+                <div className="notice" role="alert">
+                  {updateStatus.error}
                 </div>
               )}
-            {updateStatus?.error && (
-              <div className="notice" role="alert">
-                {updateStatus.error}
+              {updateMessage && (
+                <p className="muted small" role="status">
+                  {updateMessage}
+                </p>
+              )}
+              <div className="action-row">
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={updateBusy}
+                  onClick={() => onUpdateAction("check")}
+                >
+                  检查更新
+                </button>
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={updateBusy || updateStatus?.state !== "available"}
+                  onClick={() => onUpdateAction("download")}
+                >
+                  下载并校验
+                </button>
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={updateBusy || !updateStatus?.readyToInstall}
+                  onClick={onInstall}
+                >
+                  安装并重启
+                </button>
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={updateBusy || !updateStatus?.rollbackAvailable}
+                  onClick={onRollback}
+                >
+                  回滚到上一版本
+                </button>
               </div>
-            )}
-            {updateMessage && (
-              <p className="muted small" role="status">
-                {updateMessage}
-              </p>
-            )}
-            <div className="action-row">
-              <button
-                type="button"
-                className="secondary"
-                disabled={updateBusy}
-                onClick={() => onUpdateAction("check")}
-              >
-                检查更新
-              </button>
-              <button
-                type="button"
-                className="secondary"
-                disabled={updateBusy || updateStatus?.state !== "available"}
-                onClick={() => onUpdateAction("download")}
-              >
-                下载并校验
-              </button>
-              <button
-                type="button"
-                className="primary"
-                disabled={updateBusy || !updateStatus?.readyToInstall}
-                onClick={onInstall}
-              >
-                安装并重启
-              </button>
-              <button
-                type="button"
-                className="secondary"
-                disabled={updateBusy || !updateStatus?.rollbackAvailable}
-                onClick={onRollback}
-              >
-                回滚到上一版本
-              </button>
-            </div>
-            {updateStatus?.rollbackAvailable && (
-              <p className="muted small">
-                可回滚版本：{updateStatus.rollbackAvailable.version} · 数据库备份：
-                {updateStatus.rollbackAvailable.databaseBackupPath ?? "无"}
-              </p>
-            )}
-          </>
-        )}
-      </section>
+              {updateStatus?.rollbackAvailable && (
+                <p className="muted small">
+                  可回滚版本：{updateStatus.rollbackAvailable.version} · 数据库备份：
+                  {updateStatus.rollbackAvailable.databaseBackupPath ?? "无"}
+                </p>
+              )}
+            </>
+          )}
+        </section>
+      )}
 
-      <section className="panel" aria-labelledby="auth-settings-title">
-        <div className="panel-heading">
-          <h2 id="auth-settings-title">本机身份与认证</h2>
-          <span className="pill ok">{authInfo.user?.displayName ?? "本机管理员"}</span>
-        </div>
-        <dl className="runtime-list">
-          <div>
-            <dt>访问密钥文件</dt>
-            <dd>
-              <code>{authInfo.accessKeyPath}</code>
-            </dd>
+      {section === "security" && (
+        <section className="panel" aria-labelledby="auth-settings-title">
+          <div className="panel-heading">
+            <h2 id="auth-settings-title">本机身份与认证</h2>
+            <span className="pill ok">{authInfo.user?.displayName ?? "本机管理员"}</span>
           </div>
-          <div>
-            <dt>会话过期</dt>
-            <dd>{authInfo.expiresAt ? formatDate(authInfo.expiresAt) : "—"}</dd>
+          <dl className="runtime-list">
+            <div>
+              <dt>访问密钥文件</dt>
+              <dd>
+                <code>{authInfo.accessKeyPath}</code>
+              </dd>
+            </div>
+            <div>
+              <dt>会话过期</dt>
+              <dd>{authInfo.expiresAt ? formatDate(authInfo.expiresAt) : "—"}</dd>
+            </div>
+          </dl>
+          <p className="muted small">
+            控制平面只接受回环地址和同源请求，写操作需要 CSRF
+            令牌。更换访问密钥会使其他浏览器会话立即失效。
+          </p>
+          <div className="action-row">
+            <button type="button" className="secondary" disabled={rotateBusy} onClick={onRotate}>
+              {rotateBusy ? "正在更换…" : "更换本机访问密钥"}
+            </button>
+            {rotateMessage && <span className="muted small">{rotateMessage}</span>}
           </div>
-        </dl>
-        <p className="muted small">
-          控制平面只接受回环地址和同源请求，写操作需要 CSRF
-          令牌。更换访问密钥会使其他浏览器会话立即失效。
-        </p>
-        <div className="action-row">
-          <button type="button" className="secondary" disabled={rotateBusy} onClick={onRotate}>
-            {rotateBusy ? "正在更换…" : "更换本机访问密钥"}
-          </button>
-          {rotateMessage && <span className="muted small">{rotateMessage}</span>}
-        </div>
-      </section>
+        </section>
+      )}
     </>
   );
 }

@@ -12,7 +12,7 @@ import type {
 import { api, UNAUTHORIZED_EVENT } from "./api";
 import { Dashboard, type RestartRequest } from "./Dashboard";
 import { useDesktop } from "./desktop";
-import { CONTROL_PLANE_STATE_LABELS, formatDate } from "./format";
+import { CONTROL_PLANE_STATE_LABELS } from "./format";
 import { LoginScreen } from "./LoginScreen";
 import { NotificationCenter, useNotificationCenter } from "./NotificationCenter";
 import { ObserverSidebar, type ObserverTab } from "./ObserverSidebar";
@@ -229,7 +229,7 @@ function AuthenticatedApp({
     vmId: string;
   } | null>(null);
   const [observerOpen, setObserverOpen] = useState(false);
-  const [observerTab, setObserverTab] = useState<ObserverTab>("vm");
+  const [observerTab, setObserverTab] = useState<ObserverTab>("activity");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
     () => typeof window !== "undefined" && window.innerWidth < 900,
   );
@@ -443,12 +443,7 @@ function AuthenticatedApp({
   }
 
   const online = connection.state === "online" ? connection.health : null;
-  const statusLabel =
-    connection.state === "online"
-      ? `本地服务在线 · ${connection.health.protocolVersion}`
-      : connection.state === "offline"
-        ? "本地服务离线"
-        : "正在连接本地服务";
+  const currentTitle = NAV_ITEMS.find((item) => item.id === view)?.label ?? "";
 
   const workspaceVisible = Boolean(onboarding && runtime && online && !onboarding.required);
   const openWorkerFromBoard = (projectId: string, workerId: string): void => {
@@ -484,79 +479,71 @@ function AuthenticatedApp({
         <WorkspaceSidebar
           view={view}
           selectedWorkerId={selectedWorker?.workerId ?? null}
-          observerOpen={observerOpen}
-          unreadCount={notifications.view?.unreadCount ?? 0}
           revision={workspaceRevision}
           onSelectView={navigate}
           onSelectProject={selectProject}
           onSelectWorker={(workerId, projectId, vmId) => {
             selectWorker(workerId, projectId, vmId);
-            setObserverTab("worker");
+            setObserverTab("activity");
           }}
           onSelectRouter={selectRouter}
-          onToggleObserver={() => setObserverOpen((current) => !current)}
           onCollapse={() => setSidebarCollapsed(true)}
         />
       )}
       <div className="app-workspace">
         <header className="header app-header">
-          <div className="brand">
-            <img className="brand-logo" src="/logo.svg" alt="" width={26} height={26} />
-            <h1>Agent-in-Box</h1>
-          </div>
-          <div className="header-actions">
+          <div className="app-header-leading">
             {workspaceVisible && sidebarCollapsed && (
               <button
                 type="button"
-                className="secondary icon-button"
-                title="展开左栏"
+                className="icon-button"
+                title="展开侧栏"
+                aria-label="展开侧栏"
                 onClick={() => setSidebarCollapsed(false)}
               >
                 ☰
               </button>
             )}
+            {view !== "session" && <h1>{currentTitle}</h1>}
+          </div>
+          <div className="header-actions">
             {workspaceVisible && (
               <button
                 type="button"
-                className={observerOpen ? "secondary active" : "secondary"}
+                className="header-tool"
+                aria-label={`通知中心，${notifications.view?.unreadCount ?? 0} 条未读`}
+                onClick={() => navigate("notifications")}
+              >
+                通知
+                {(notifications.view?.unreadCount ?? 0) > 0 && (
+                  <span className="bell-count">{notifications.view?.unreadCount}</span>
+                )}
+              </button>
+            )}
+            {workspaceVisible && (
+              <button
+                type="button"
+                className={observerOpen ? "header-tool active" : "header-tool"}
                 aria-pressed={observerOpen}
                 onClick={() => setObserverOpen((current) => !current)}
               >
-                观察栏
+                观察
               </button>
             )}
-            <button
-              type="button"
-              className="bell-button"
-              aria-label={`通知中心，${notifications.view?.unreadCount ?? 0} 条未读`}
-              onClick={() => navigate("notifications")}
-            >
-              <span aria-hidden="true">🔔</span>
-              {(notifications.view?.unreadCount ?? 0) > 0 && (
-                <span className="bell-count">{notifications.view?.unreadCount}</span>
-              )}
-            </button>
-            <div
-              className={`status ${connection.state === "online" ? "online" : connection.state === "offline" ? "offline" : "checking"}`}
-              role="status"
-            >
-              <span className="dot" aria-hidden="true" />
-              {statusLabel}
-            </div>
             {!bridge && (
               <button
                 type="button"
-                className="secondary"
+                className="header-tool"
                 onClick={() => void lockUi()}
                 disabled={logoutBusy}
               >
-                {logoutBusy ? "正在锁定…" : "锁定界面"}
+                {logoutBusy ? "锁定中…" : "锁定"}
               </button>
             )}
           </div>
         </header>
 
-        {desktopStatus && (
+        {desktopStatus && desktopStatus.controlPlane.state !== "running" && (
           <div className="desktop-strip">
             <span>本地服务：{CONTROL_PLANE_STATE_LABELS[desktopStatus.controlPlane.state]}</span>
             {desktopStatus.controlPlane.message && (
@@ -566,7 +553,11 @@ function AuthenticatedApp({
         )}
         {desktopError && <div className="notice">桌面桥接异常：{desktopError}</div>}
 
-        <main id="main-content" tabIndex={-1} className="app-main">
+        <main
+          id="main-content"
+          tabIndex={-1}
+          className={`app-main${view === "session" && workspaceVisible ? " session-active" : ""}`}
+        >
           {pendingRestart ? (
             <section className="panel restart-panel">
               <h2>需要重启本地服务</h2>
@@ -653,27 +644,7 @@ function AuthenticatedApp({
             ) : view === "notifications" ? (
               <NotificationCenter state={notifications} onNavigate={navigate} />
             ) : selectedWorker ? (
-              <section className="panel worker-main" aria-labelledby="worker-main-title">
-                <div className="panel-heading">
-                  <div>
-                    <h2 id="worker-main-title">Worker {selectedWorker.workerId.slice(0, 8)}</h2>
-                  </div>
-                  <div className="action-row">
-                    <button
-                      type="button"
-                      className="secondary"
-                      onClick={() => {
-                        setObserverTab("vm");
-                        setObserverOpen(true);
-                      }}
-                    >
-                      观察 VM
-                    </button>
-                    <button type="button" className="secondary" onClick={selectRouter}>
-                      返回主会话
-                    </button>
-                  </div>
-                </div>
+              <section className="conversation-page worker-main" aria-label="项目会话">
                 <WorkerConversation
                   workerId={selectedWorker.workerId}
                   revision={workspaceRevision}
@@ -709,14 +680,6 @@ function AuthenticatedApp({
             </section>
           )}
         </main>
-
-        <footer className="footer">
-          <span>
-            {online && view !== "notifications"
-              ? `控制平面启动于 ${formatDate(online.startedAt)}`
-              : ""}
-          </span>
-        </footer>
       </div>
       {workspaceVisible && (
         <ObserverSidebar

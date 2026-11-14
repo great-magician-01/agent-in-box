@@ -244,7 +244,9 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     } else {
       this.connectorFactory = (target) =>
         new WorkerRpcClient({
-          baseUrl: `http://127.0.0.2:${target.hostPort}`,
+          baseUrl: `http://${
+            process.env.AGENT_IN_BOX_GUEST_LOOPBACK_HOST?.trim() || "127.0.0.2"
+          }:${target.hostPort}`,
           tokenFile:
             process.env.AGENT_IN_BOX_WORKER_TOKEN_FILE?.trim() ||
             `${target.storageRoot}/worker-rpc.token`,

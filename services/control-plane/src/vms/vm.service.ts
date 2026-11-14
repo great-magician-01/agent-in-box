@@ -416,7 +416,9 @@ export class VmService {
     let guestHealth: GuestHealthState = "unknown";
     if (state.powerState === "running" && state.guestHostPort > 0) {
       try {
-        const response = await this.guestFetch(`http://127.0.0.2:${state.guestHostPort}/healthz`, {
+        const guestHost =
+          process.env.AGENT_IN_BOX_GUEST_LOOPBACK_HOST?.trim() || "127.0.0.2";
+        const response = await this.guestFetch(`http://${guestHost}:${state.guestHostPort}/healthz`, {
           headers: { accept: "application/json" },
           signal: AbortSignal.timeout(this.guestTimeoutMs),
         });

@@ -168,7 +168,11 @@ func (s *Server) pathAllowedByRoots(path string) bool {
 		return false
 	}
 	for _, root := range s.verifyRoots {
-		relative, err := filepath.Rel(root, path)
+		resolvedRoot := root
+		if evaluated, err := filepath.EvalSymlinks(root); err == nil {
+			resolvedRoot = evaluated
+		}
+		relative, err := filepath.Rel(resolvedRoot, path)
 		if err != nil || relative == "." || strings.HasPrefix(relative, "..") || filepath.IsAbs(relative) {
 			continue
 		}

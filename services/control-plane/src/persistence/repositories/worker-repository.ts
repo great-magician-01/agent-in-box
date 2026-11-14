@@ -226,12 +226,25 @@ export class WorkerRepository {
   async claimIdle(workerId: string): Promise<boolean> {
     const result = await this.db
       .updateTable("workers")
-      .set({ status: "running", last_active_at: nowIso() })
+      .set({ status: "running" })
       .where("id", "=", workerId)
       .where("status", "=", "idle")
       .where("archived_at", "is", null)
       .executeTakeFirst();
     return Number(result.numUpdatedRows ?? 0) > 0;
+  }
+
+  /**
+   * Returns a Worker to idle after a claim that found no runnable task. This
+   * must not touch last_active_at, otherwise every tick would reset the idle
+   * timeout and auto-archive would never become eligible.
+   */
+  async releaseClaim(workerId: string): Promise<void> {
+    await this.db
+      .updateTable("workers")
+      .set({ status: "idle", current_task_id: null })
+      .where("id", "=", workerId)
+      .execute();
   }
 
   /** Marks an idle Worker as archiving; false means it started a task first. */

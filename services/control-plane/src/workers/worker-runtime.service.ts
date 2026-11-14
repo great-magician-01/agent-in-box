@@ -2050,17 +2050,17 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     try {
       claimed = await this.tasks.claimNext(worker.vmId, worker.id);
     } catch (error) {
-      await this.workers.updateRuntime(worker.id, { status: "idle", currentTaskId: null });
+      await this.workers.releaseClaim(worker.id);
       throw error;
     }
     if (!claimed) {
-      await this.workers.updateRuntime(worker.id, { status: "idle", currentTaskId: null });
+      await this.workers.releaseClaim(worker.id);
       return;
     }
     const active = this.active.get(worker.id);
     if (!active) {
       await this.tasks.fail(claimed.id, "worker_not_connected", "任务认领后 Worker 会话不存在");
-      await this.workers.updateRuntime(worker.id, { status: "idle", currentTaskId: null });
+      await this.workers.releaseClaim(worker.id);
       return;
     }
     try {

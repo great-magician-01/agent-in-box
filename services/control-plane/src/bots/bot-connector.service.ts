@@ -23,6 +23,7 @@ import { OutboxRepository } from "../persistence/repositories/outbox-repository"
 import type { DatabaseSchema } from "../persistence/schema";
 import { nowIso } from "../persistence/time";
 import { KYSELY } from "../persistence/tokens";
+import { assertSafeOutboundUrl } from "../security/outbound";
 import { BotAccountService } from "./bot-account.service";
 import { createBotIngressStore } from "./bot-ingress-store";
 
@@ -220,6 +221,11 @@ export class BotConnectorService implements OnModuleInit, OnModuleDestroy {
     if (!secret) {
       throw new PersistenceError("validation_failed", "机器人 Secret 不能为空");
     }
+    try {
+      await this.assertAccountEndpoints(account);
+    } catch (error) {
+      return { ok: false, state: "disconnected", lastError: safeErrorMessage(error) };
+    }
     const deviceId = await this.accounts.ensureDeviceId();
     const testConnector = this.connectorFactory({
       account,
@@ -247,6 +253,18 @@ export class BotConnectorService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  private async assertAccountEndpoints(account: BotAccountRecord): Promise<void> {
+    for (const raw of [
+      account.config.domain,
+      account.config.apiBase,
+      account.config.tokenBaseUrl,
+    ]) {
+      if (typeof raw === "string" && raw.trim()) {
+        await assertSafeOutboundUrl(raw.trim(), { allowLoopback: true });
+      }
+    }
+  }
+
   private async startAccount(account: BotAccountRecord, deviceId: string): Promise<void> {
     if (account.deviceId && account.deviceId !== deviceId) {
       await this.accounts.setRuntimeState(account.id, "disabled", {
@@ -261,6 +279,14 @@ export class BotConnectorService implements OnModuleInit, OnModuleDestroy {
       const message = safeErrorMessage(error);
       await this.accounts.setRuntimeState(account.id, "degraded", { error: message });
       this.scheduleRetry(account.id);
+      return;
+    }
+    try {
+      await this.assertAccountEndpoints(account);
+    } catch (error) {
+      await this.accounts.setRuntimeState(account.id, "degraded", {
+        error: safeErrorMessage(error),
+      });
       return;
     }
     const ingressStore = createBotIngressStore(this.db, this.outbox, account, deviceId);

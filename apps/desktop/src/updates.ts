@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, createPublicKey, randomUUID, verify } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type {
@@ -32,6 +32,80 @@ export interface UpdateManifest {
   files: UpdateManifestFile[];
 }
 
+export interface SignedUpdateEnvelope {
+  manifest: UpdateManifest;
+  /** Base64 Ed25519 signature over canonical JSON of `manifest`. */
+  signature: string;
+}
+
+/** Deterministic JSON used as the signed payload. */
+export function canonicalJson(value: unknown): string {
+  const normalize = (item: unknown): unknown => {
+    if (Array.isArray(item)) return item.map(normalize);
+    if (typeof item === "object" && item !== null) {
+      const record = item as Record<string, unknown>;
+      return Object.fromEntries(
+        Object.keys(record)
+          .sort()
+          .map((key) => [key, normalize(record[key])]),
+      );
+    }
+    return item;
+  };
+  return JSON.stringify(normalize(value));
+}
+
+function publicKeyObject(value: string): ReturnType<typeof createPublicKey> {
+  const trimmed = value.trim();
+  if (trimmed.includes("BEGIN PUBLIC KEY")) {
+    return createPublicKey(trimmed);
+  }
+  return createPublicKey({
+    key: Buffer.from(trimmed, "base64"),
+    format: "der",
+    type: "spki",
+  });
+}
+
+/**
+ * Verifies the Ed25519 signature before any manifest field is trusted. The
+ * signature covers the canonical form of `manifest`, not the wrapper, so a
+ * publisher can sign the same manifest regardless of envelope formatting.
+ */
+export function verifyUpdateEnvelope(raw: unknown, publicKey: string): UpdateManifest {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    throw new Error("更新响应必须是 JSON 对象");
+  }
+  const envelope = raw as Record<string, unknown>;
+  if (
+    typeof envelope.signature !== "string" ||
+    envelope.signature.length < 16 ||
+    envelope.signature.length > 4096
+  ) {
+    throw new Error("更新 Manifest 缺少有效签名");
+  }
+  if (typeof envelope.manifest !== "object" || envelope.manifest === null) {
+    throw new Error("更新 Manifest 缺少 manifest 字段");
+  }
+  let signature: Buffer;
+  try {
+    signature = Buffer.from(envelope.signature, "base64");
+  } catch {
+    throw new Error("更新 Manifest 签名编码无效");
+  }
+  const payload = Buffer.from(canonicalJson(envelope.manifest), "utf8");
+  let valid = false;
+  try {
+    valid = verify(null, payload, publicKeyObject(publicKey), signature);
+  } catch {
+    throw new Error("更新签名公钥无效");
+  }
+  if (!valid) {
+    throw new Error("更新 Manifest 签名校验失败，已拒绝该更新");
+  }
+  return envelope.manifest as UpdateManifest;
+}
+
 export interface NormalizedUpdate {
   version: string;
   notes: string | null;
@@ -52,6 +126,8 @@ export interface UpdateManagerOptions {
   now?: () => Date;
   rollbackAvailable?: () => DesktopUpdateRollbackView | null;
   maxDownloadBytes?: number;
+  /** Ed25519 public key (PEM or base64 SPKI). Updates are disabled without it. */
+  publicKey?: string;
 }
 
 export interface UpdateDownloadReady {
@@ -196,6 +272,9 @@ export class UpdateManager {
     this.progress = null;
     this.ready = null;
     try {
+      if (!this.options.publicKey) {
+        throw new Error("更新签名公钥未配置，已禁用自动更新");
+      }
       const feed = this.options.feedUrl();
       if (!feed) {
         throw new Error("尚未配置更新源");
@@ -206,6 +285,7 @@ export class UpdateManager {
       const response = await this.fetchImpl(feed, {
         signal: AbortSignal.timeout(20_000),
         headers: { accept: "application/json" },
+        redirect: "error",
       });
       if (!response.ok) {
         throw new Error(`更新源返回 HTTP ${response.status}`);
@@ -214,7 +294,8 @@ export class UpdateManager {
       if (body.length > MAX_MANIFEST_BYTES) {
         throw new Error("更新 Manifest 过大");
       }
-      const parsed = parseUpdateManifest(JSON.parse(body) as unknown, {
+      const manifest = verifyUpdateEnvelope(JSON.parse(body) as unknown, this.options.publicKey);
+      const parsed = parseUpdateManifest(manifest, {
         currentVersion: this.options.currentVersion,
         ...(this.options.platform ? { platform: this.options.platform } : {}),
         ...(this.options.arch ? { arch: this.options.arch } : {}),
@@ -273,6 +354,7 @@ export class UpdateManager {
     try {
       const response = await this.fetchImpl(update.url, {
         signal: AbortSignal.timeout(30 * 60_000),
+        redirect: "error",
       });
       if (!response.ok || !response.body) {
         throw new Error(`下载安装包失败：HTTP ${response.status}`);

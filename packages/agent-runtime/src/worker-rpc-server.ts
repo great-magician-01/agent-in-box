@@ -26,7 +26,39 @@ interface SessionRecord {
   status: WorkerSessionView["status"];
   nextEventId: number;
   events: EventEnvelope[];
+  eventBytes: number;
   streams: Set<ServerResponse<IncomingMessage>>;
+}
+
+const MAX_REPLAY_EVENTS = 1000;
+const MAX_REPLAY_BYTES = 32 * 1024 * 1024;
+const MAX_EVENT_STRING = 256 * 1024;
+const MAX_EVENT_DEPTH = 12;
+
+/**
+ * Tool results may contain base64 screenshots. The host does not need those
+ * bytes for replay/trace, and keeping them in the 1000-event ring would let a
+ * single Worker exhaust Guest memory. Truncate oversized strings and cap the
+ * traversal depth before an event is stored or streamed.
+ */
+function sanitizeEventValue(value: unknown, depth = 0): unknown {
+  if (typeof value === "string") {
+    return value.length <= MAX_EVENT_STRING
+      ? value
+      : `[truncated ${value.length} chars]`;
+  }
+  if (depth >= MAX_EVENT_DEPTH) return "[truncated: depth limit]";
+  if (Array.isArray(value)) {
+    return value.slice(0, 200).map((item) => sanitizeEventValue(item, depth + 1));
+  }
+  if (typeof value === "object" && value !== null) {
+    const record: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value)) {
+      record[key] = sanitizeEventValue(item, depth + 1);
+    }
+    return record;
+  }
+  return value;
 }
 
 export interface WorkerRpcServerOptions {
@@ -218,18 +250,28 @@ export class WorkerRpcServer {
       status: "active",
       nextEventId: 1,
       events: [],
+      eventBytes: 0,
       streams: new Set(),
     };
     this.sessions.set(handle.sessionId, record);
     this.options.engine.subscribe(handle.sessionId, (event) => {
       if (event.type === "session_failed") record.status = "failed";
+      const safeEvent = sanitizeEventValue(event) as WorkerEngineEvent;
       const envelope: EventEnvelope = {
         id: record.nextEventId++,
         sessionId: handle.sessionId,
-        event,
+        event: safeEvent,
       };
       record.events.push(envelope);
-      if (record.events.length > 1000) record.events.splice(0, record.events.length - 1000);
+      record.eventBytes += Buffer.byteLength(JSON.stringify(envelope));
+      while (
+        record.events.length > MAX_REPLAY_EVENTS ||
+        record.eventBytes > MAX_REPLAY_BYTES
+      ) {
+        const removed = record.events.shift();
+        if (!removed) break;
+        record.eventBytes -= Buffer.byteLength(JSON.stringify(removed));
+      }
       for (const stream of record.streams) writeSse(stream, envelope);
     });
     return this.view(record);
@@ -249,6 +291,20 @@ export class WorkerRpcServer {
     });
     response.flushHeaders();
     record.streams.add(response);
+    const oldest = record.events[0];
+    if (after > 0 && oldest && after < oldest.id - 1) {
+      // The client asked for an event that has already been evicted. Tell it
+      // explicitly instead of silently replaying a discontinuous stream.
+      writeSse(response, {
+        id: oldest.id - 1,
+        sessionId: record.handle.sessionId,
+        event: {
+          type: "stream_gap",
+          oldestEventId: oldest.id,
+          latestEventId: record.nextEventId - 1,
+        },
+      });
+    }
     for (const event of record.events) {
       if (event.id > after) writeSse(response, event);
     }

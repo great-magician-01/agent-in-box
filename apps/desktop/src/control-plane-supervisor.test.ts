@@ -20,12 +20,15 @@ class FakeChildProcess extends EventEmitter {
   }
 }
 
+const instanceNonce = "test-instance-nonce-0123456789abcdef";
+
 const health: HealthResponse = {
   status: "ok",
   service: "control-plane",
   protocolVersion: "0.1.0",
   startedAt: "2026-11-10T00:00:00.000Z",
   now: "2026-11-10T00:00:00.000Z",
+  instanceNonce,
 };
 
 function logger(): {
@@ -53,6 +56,7 @@ describe("control plane supervisor", () => {
       workingDirectory: "/service",
       port: 3000,
       nodeCommand: "node",
+      instanceNonce,
       logger: logger(),
       fetchHealth: async () => health,
       spawnProcess: (() => {
@@ -71,6 +75,28 @@ describe("control plane supervisor", () => {
     });
   });
 
+  it("refuses to attach to a process that cannot prove the installation nonce", async () => {
+    let spawned = false;
+    const supervisor = new ControlPlaneSupervisor({
+      entryPath: "/service/main.js",
+      workingDirectory: "/service",
+      port: 3000,
+      nodeCommand: "node",
+      instanceNonce,
+      logger: logger(),
+      fetchHealth: async () => ({ ...health, instanceNonce: "someone-else" }),
+      spawnProcess: (() => {
+        spawned = true;
+        return new FakeChildProcess();
+      }) as unknown as typeof spawn,
+    });
+
+    await supervisor.start();
+
+    expect(spawned).toBe(false);
+    expect(supervisor.getStatus().state).toBe("failed");
+  });
+
   it("starts a child process, waits for health and stops it", async () => {
     const child = new FakeChildProcess();
     let calls = 0;
@@ -82,6 +108,7 @@ describe("control plane supervisor", () => {
       port: 3123,
       nodeCommand: "/electron",
       runAsNode: true,
+      instanceNonce,
       env: { AGENT_IN_BOX_CONFIG_DIR: "/config" },
       logger: logger(),
       fetchHealth: async () => {
@@ -113,6 +140,7 @@ describe("control plane supervisor", () => {
       AGENT_IN_BOX_CONFIG_DIR: "/config",
       CONTROL_PLANE_HOST: "127.0.0.1",
       CONTROL_PLANE_PORT: "3123",
+      AGENT_IN_BOX_INSTANCE_NONCE: instanceNonce,
       ELECTRON_RUN_AS_NODE: "1",
     });
     expect(captured?.cwd).toBe("/service");
@@ -130,6 +158,7 @@ describe("control plane supervisor", () => {
       workingDirectory: "/service",
       port: 3000,
       nodeCommand: "node",
+      instanceNonce,
       logger: logger(),
       fetchHealth: async () => null,
       spawnProcess: (() => child) as unknown as typeof spawn,
@@ -150,6 +179,7 @@ describe("control plane supervisor", () => {
       workingDirectory: "/service",
       port: 3000,
       nodeCommand: "node",
+      instanceNonce,
       logger: logger(),
       fetchHealth: async () => {
         calls += 1;

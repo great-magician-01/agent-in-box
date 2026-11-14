@@ -38,6 +38,7 @@ import { BotOverviewService } from "./bot-overview.service";
           process.env.AGENT_IN_BOX_BOT_CREDENTIALS_FILE?.trim() ||
           process.env.AGENT_IN_BOX_MODEL_CREDENTIALS_FILE?.trim();
         return new HostCredentialProvider({
+          kind: "bot",
           purpose: "机器人",
           ...(developmentCredentialsFile ? { developmentCredentialsFile } : {}),
         });

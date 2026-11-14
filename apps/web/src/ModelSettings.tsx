@@ -197,7 +197,11 @@ export function ModelSettings({
     setBusy(true);
     setError(null);
     try {
-      const next = await bridge.credentials.save({ providerId, secret: secret.trim() });
+      const next = await bridge.credentials.save({
+        kind: "model",
+        providerId,
+        secret: secret.trim(),
+      });
       setCredentials(next);
       setSecret("");
       setMessage(`已保存 ${providerId} 的长期密钥到系统安全存储`);
@@ -210,10 +214,11 @@ export function ModelSettings({
 
   async function removeCredential(providerId: string): Promise<void> {
     if (!bridge) return;
+    if (!window.confirm(`删除 ${providerId} 的长期密钥？删除后需要重新输入。`)) return;
     setBusy(true);
     setError(null);
     try {
-      setCredentials(await bridge.credentials.remove(providerId));
+      setCredentials(await bridge.credentials.remove("model", providerId));
       setMessage(`已删除 ${providerId} 的长期密钥`);
     } catch (cause) {
       setError(errorMessage(cause));
@@ -287,7 +292,11 @@ export function ModelSettings({
   }
 
   const selectedProvider = configuration?.providers.find((provider) => provider.id === draft.id);
-  const credentialIds = new Set((credentials?.providers ?? []).map((item) => item.providerId));
+  const credentialIds = new Set(
+    (credentials?.providers ?? [])
+      .filter((item) => item.kind === "model")
+      .map((item) => item.providerId),
+  );
 
   return (
     <section className="panel model-settings" aria-labelledby="model-settings-title">
@@ -401,7 +410,7 @@ export function ModelSettings({
           <h4>模型白名单</h4>
           <div className="model-rows">
             {draft.models.map((model, index) => (
-              <div className="model-row" key={`${index}-${model.id}`}>
+              <div className="model-row" key={index}>
                 <input
                   placeholder="模型 ID"
                   value={model.id}
@@ -504,21 +513,23 @@ export function ModelSettings({
                   : "不可用"}
                 {credentials?.message ? ` · ${credentials.message}` : ""}
               </p>
-              {credentials?.providers.length ? (
+              {(credentials?.providers ?? []).filter((item) => item.kind === "model").length ? (
                 <ul className="plain-list">
-                  {credentials.providers.map((item) => (
-                    <li key={item.providerId}>
-                      <code>{item.providerId}</code>
-                      <button
-                        type="button"
-                        className="secondary"
-                        disabled={busy}
-                        onClick={() => void removeCredential(item.providerId)}
-                      >
-                        删除密钥
-                      </button>
-                    </li>
-                  ))}
+                  {(credentials?.providers ?? [])
+                    .filter((item) => item.kind === "model")
+                    .map((item) => (
+                      <li key={`${item.kind}:${item.providerId}`}>
+                        <code>{item.providerId}</code>
+                        <button
+                          type="button"
+                          className="secondary"
+                          disabled={busy}
+                          onClick={() => void removeCredential(item.providerId)}
+                        >
+                          删除密钥
+                        </button>
+                      </li>
+                    ))}
                 </ul>
               ) : (
                 <p className="muted small">尚未保存长期密钥。</p>

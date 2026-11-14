@@ -128,7 +128,16 @@ func (s *Server) verifyFile(check VerifyCheck) VerifyCheckResult {
 	if info.Mode()&os.ModeSymlink != 0 {
 		return verifyFailure(result, "symlink_rejected", "symlink evidence is not accepted")
 	}
-	if !info.Mode().IsRegular() {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return verifyFailure(result, "file_unreadable", "could not resolve evidence path")
+	}
+	if !s.pathAllowedByRoots(resolved) {
+		return verifyFailure(result, "path_outside_roots", "resolved evidence path is outside the configured verification roots")
+	}
+	path = resolved
+	info, err = os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() {
 		return verifyFailure(result, "not_regular_file", "evidence path is not a regular file")
 	}
 	result.SizeBytes = info.Size()

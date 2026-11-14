@@ -314,6 +314,13 @@ export interface HealthResponse {
   protocolVersion: ProtocolVersion;
   startedAt: IsoTimestamp;
   now: IsoTimestamp;
+  /**
+   * Installation nonce injected by the desktop shell. It lets the shell prove
+   * that a process on the fixed control-plane port is the child it spawned
+   * (or the same installation's previous child), instead of an arbitrary
+   * local process that merely answers the health check.
+   */
+  instanceNonce?: string;
 }
 
 export type ApiErrorCode =
@@ -1048,7 +1055,10 @@ export interface VmRuntimeStatus {
   qemu: QemuToolchainStatus;
 }
 
+export type CredentialKind = "model" | "bot";
+
 export interface DesktopCredentialProvider {
+  kind: CredentialKind;
   providerId: string;
   updatedAt: IsoTimestamp;
 }
@@ -1061,6 +1071,7 @@ export interface DesktopCredentialStatus {
 }
 
 export interface CredentialSaveRequest {
+  kind: CredentialKind;
   providerId: string;
   secret: string;
 }
@@ -1113,7 +1124,7 @@ export interface DesktopBridge {
   credentials: {
     status(): Promise<DesktopCredentialStatus>;
     save(request: CredentialSaveRequest): Promise<DesktopCredentialStatus>;
-    remove(providerId: string): Promise<DesktopCredentialStatus>;
+    remove(kind: CredentialKind, providerId: string): Promise<DesktopCredentialStatus>;
   };
   log(level: "info" | "warn" | "error", message: string, data?: unknown): void;
 }
@@ -1721,7 +1732,12 @@ export const COMPUTER_ACTION_TYPES = [
 export type ComputerActionType = (typeof COMPUTER_ACTION_TYPES)[number];
 
 export interface CuaNetworkPolicy {
-  /** broker_only means the VM may only reach the local Model Broker/CUA Broker. */
+  /**
+   * Reserved for a future host-firewall/proxy implementation. The current
+   * QEMU user-network backend cannot enforce `broker_only`, so the control
+   * plane rejects new values and reports `unrestricted` rather than claiming
+   * isolation that does not exist.
+   */
   mode: "broker_only" | "unrestricted";
   allowedHosts: string[];
 }

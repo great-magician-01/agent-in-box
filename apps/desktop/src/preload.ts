@@ -117,9 +117,10 @@ const bridge: DesktopBridge = {
       ipcRenderer.invoke(IPC_CHANNELS.credentialsStatus) as Promise<DesktopCredentialStatus>,
     save: (request: CredentialSaveRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.credentialsSave, request) as Promise<DesktopCredentialStatus>,
-    remove: (providerId: string) =>
+    remove: (kind: "model" | "bot", providerId: string) =>
       ipcRenderer.invoke(
         IPC_CHANNELS.credentialsRemove,
+        kind,
         providerId,
       ) as Promise<DesktopCredentialStatus>,
   },

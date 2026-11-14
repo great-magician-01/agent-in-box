@@ -11,6 +11,8 @@ export interface OutboxMessage {
   createdAt: string;
   attempts: number;
   lastError: string | null;
+  /** Set when the stored JSON cannot be parsed; the publisher quarantines it. */
+  parseError: string | null;
 }
 
 export class OutboxRepository {
@@ -42,18 +44,45 @@ export class OutboxRepository {
       .selectFrom("outbox")
       .selectAll()
       .where("published_at", "is", null)
+      // Poison rows are retried five times, then excluded so one bad payload
+      // cannot block every later event forever.
+      .where("attempts", "<", 5)
       .orderBy("id", "asc")
       .limit(limit)
       .execute();
 
-    return rows.map((row) => ({
-      id: row.id,
-      topic: row.topic,
-      payload: JSON.parse(row.payload_json) as unknown,
-      createdAt: row.created_at,
-      attempts: row.attempts,
-      lastError: row.last_error,
-    }));
+    return rows.map((row) => {
+      try {
+        return {
+          id: row.id,
+          topic: row.topic,
+          payload: JSON.parse(row.payload_json) as unknown,
+          createdAt: row.created_at,
+          attempts: row.attempts,
+          lastError: row.last_error,
+          parseError: null,
+        };
+      } catch (error) {
+        return {
+          id: row.id,
+          topic: row.topic,
+          payload: null,
+          createdAt: row.created_at,
+          attempts: row.attempts,
+          lastError: row.last_error,
+          parseError: error instanceof Error ? error.message : String(error),
+        };
+      }
+    });
+  }
+
+  async prunePublished(before: string, executor: DatabaseExecutor = this.db): Promise<number> {
+    const result = await executor
+      .deleteFrom("outbox")
+      .where("published_at", "is not", null)
+      .where("published_at", "<", before)
+      .executeTakeFirst();
+    return Number(result.numDeletedRows ?? 0);
   }
 
   async markPublished(

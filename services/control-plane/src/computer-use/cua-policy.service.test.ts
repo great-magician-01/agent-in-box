@@ -23,7 +23,7 @@ describe("CuaPolicyService", () => {
     expect(enabled.source).toBe("default");
     expect(enabled.policy.approvalActionTypes).toEqual(DEFAULT_SENSITIVE_ACTIONS);
     expect(enabled.policy.maxSteps).toBe(80);
-    expect(enabled.policy.network.mode).toBe("broker_only");
+    expect(enabled.policy.network.mode).toBe("unrestricted");
     expect(enabled.policy.credentials.allowInGuest).toBe(false);
 
     await settings.updatePreferences({
@@ -31,6 +31,12 @@ describe("CuaPolicyService", () => {
     });
     const disabled = await policies.view(ctx.projectId);
     expect(disabled.policy.approvalActionTypes).toEqual([]);
+  });
+
+  it("rejects broker_only because the current network backend cannot enforce it", async () => {
+    await expect(
+      policies.update(ctx.projectId, { network: { mode: "broker_only" } }),
+    ).rejects.toThrow("网络隔离");
   });
 
   it("persists project overrides and merges nested policy objects", async () => {
@@ -44,7 +50,7 @@ describe("CuaPolicyService", () => {
     expect(updated.policy).toMatchObject({
       maxSteps: 12,
       approvalActionTypes: ["type_text", "drag"],
-      network: { mode: "broker_only", allowedHosts: ["models.example.test"] },
+      network: { mode: "unrestricted", allowedHosts: ["models.example.test"] },
       fileExchange: {
         enabled: true,
         allowedRoots: ["/home/worker/workspace", "C:\\Users\\aib-worker"],

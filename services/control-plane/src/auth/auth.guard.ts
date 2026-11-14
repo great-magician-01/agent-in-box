@@ -42,6 +42,9 @@ export function validateLocalRequest(request: Request): void {
   if (!host) {
     throw new PersistenceError("forbidden", "缺少 Host 请求头");
   }
+  if (host.includes("@") || host.includes("\\") || host.includes("/") || host.includes("?")) {
+    throw new PersistenceError("forbidden", "Host 请求头包含非法字符");
+  }
   let hostname: string;
   try {
     hostname = new URL(`http://${host}`).hostname.replace(/^\[|\]$/g, "");

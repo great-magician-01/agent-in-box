@@ -17,8 +17,15 @@ export interface VmSupervisorOptions {
   restartWindowMs?: number;
   stopTimeoutMs?: number;
   spawnProcess?: typeof spawn;
-  fetchHealth?: (url: string, timeoutMs: number) => Promise<boolean>;
+  fetchHealth?: (url: string, timeoutMs: number) => Promise<VmSupervisorHealth | null>;
   now?: () => number;
+  /** Installation nonce the spawned supervisor echoes from /healthz. */
+  instanceNonce?: string;
+}
+
+export interface VmSupervisorHealth {
+  ok: boolean;
+  instanceNonce: string | null;
 }
 
 interface InternalState {
@@ -30,17 +37,28 @@ interface InternalState {
 
 type StatusListener = (status: VmRuntimeStatus) => void;
 
-async function fetchVmSupervisorHealth(url: string, timeoutMs: number): Promise<boolean> {
+async function fetchVmSupervisorHealth(
+  url: string,
+  timeoutMs: number,
+): Promise<VmSupervisorHealth | null> {
   try {
     const response = await fetch(url, {
       signal: AbortSignal.timeout(timeoutMs),
       headers: { accept: "application/json" },
     });
-    if (!response.ok) return false;
-    const body = (await response.json()) as { status?: unknown; service?: unknown };
-    return body.status === "ok" && body.service === "vm-supervisor";
+    if (!response.ok) return null;
+    const body = (await response.json()) as {
+      status?: unknown;
+      service?: unknown;
+      instanceNonce?: unknown;
+    };
+    if (body.status !== "ok" || body.service !== "vm-supervisor") return null;
+    return {
+      ok: true,
+      instanceNonce: typeof body.instanceNonce === "string" ? body.instanceNonce : null,
+    };
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -76,6 +94,7 @@ export class VmSupervisor {
   private readonly listeners = new Set<StatusListener>();
   private readonly logger: LoggerLike;
   private readonly now: () => number;
+  private readonly instanceNonce: string;
   private qemuStatus: VmRuntimeStatus["qemu"] = {
     state: "missing",
     path: null,
@@ -99,6 +118,7 @@ export class VmSupervisor {
     this.logger = options.logger;
     this.now = options.now ?? (() => Date.now());
     this.qemuBinDirectory = options.qemuBinDirectory;
+    this.instanceNonce = options.instanceNonce ?? "";
   }
 
   setStorageRoot(storageRoot: string): void {
@@ -180,18 +200,28 @@ export class VmSupervisor {
     this.setState("stopped", { pid: null, message: "VM 运行组件已停止" });
   }
 
-  private async doStart(): Promise<void> {
-    this.clearRestartTimer();
+  private isOurs(health: VmSupervisorHealth): boolean {
+    if (!this.instanceNonce) return health.ok;
+    return health.ok && health.instanceNonce === this.instanceNonce;
+  }
+
+  private async doStart(): Promise<void> {    this.clearRestartTimer();
     this.expectedStop = false;
     const healthUrl = `http://${this.options.host}:${this.options.port}/healthz`;
-    const existing = await (this.options.fetchHealth ?? fetchVmSupervisorHealth)(
-      healthUrl,
-      this.options.healthTimeoutMs,
-    );
+    const probe = this.options.fetchHealth ?? fetchVmSupervisorHealth;
+    const existing = await probe(healthUrl, this.options.healthTimeoutMs);
     if (existing) {
+      if (!this.isOurs(existing)) {
+        this.setState("error", {
+          pid: null,
+          message: "VM Supervisor 端口已被其他进程占用，已拒绝连接",
+          lastError: "instance identity mismatch",
+        });
+        return;
+      }
       this.setState("running", {
         pid: null,
-        message: "已连接正在运行的 VM Supervisor（外部进程）",
+        message: "已连接正在运行的 VM Supervisor（本安装实例）",
       });
       return;
     }
@@ -208,6 +238,7 @@ export class VmSupervisor {
         `${this.options.host}:${this.options.port}`,
         "-storage-root",
         this.options.storageRoot,
+        ...(this.instanceNonce ? ["-instance-nonce", this.instanceNonce] : []),
         "-qemu-system",
         joinPath(this.qemuBinDirectory, qemuSystem),
         "-qemu-img",
@@ -246,12 +277,8 @@ export class VmSupervisor {
       if (child.exitCode !== null) {
         throw new Error(`VM Supervisor 启动后立即退出（code=${child.exitCode}）`);
       }
-      if (
-        await (this.options.fetchHealth ?? fetchVmSupervisorHealth)(
-          healthUrl,
-          this.options.healthTimeoutMs,
-        )
-      ) {
+      const health = await probe(healthUrl, this.options.healthTimeoutMs);
+      if (health && this.isOurs(health)) {
         this.setState("running", {
           pid: child.pid ?? null,
           message: "VM Supervisor 在线",

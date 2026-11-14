@@ -92,6 +92,7 @@ export type WorkerEngineEvent =
   | { type: "tool_finished"; toolName: string; output: unknown; isError: boolean }
   | { type: "waiting_approval"; reason: string }
   | { type: "turn_finished" }
+  | { type: "stream_gap"; oldestEventId: number; latestEventId: number }
   | { type: "session_failed"; message: string }
   | { type: "session_ended"; reason: "completed" | "cancelled" | "failed" };
 

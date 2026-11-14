@@ -23,12 +23,17 @@ export function BootstrapMonitor({ bridge }: { bridge: DesktopBridge | null }) {
   const [busy, setBusy] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const runtimeAttempted = useRef(false);
+  const refreshInFlight = useRef(false);
 
   const refresh = useCallback(async () => {
+    if (refreshInFlight.current) return;
+    refreshInFlight.current = true;
     try {
       setState(await api.bootstrap());
     } catch {
       // The global connection/error surface already handles a disconnected API.
+    } finally {
+      refreshInFlight.current = false;
     }
   }, []);
 
@@ -56,9 +61,9 @@ export function BootstrapMonitor({ bridge }: { bridge: DesktopBridge | null }) {
   }, [refresh, start]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => {
-      if (state?.status !== "execution_ready") void refresh();
-    }, 1500);
+    const active = state?.status === "running" || state?.status === "waiting_user_action";
+    if (!active) return;
+    const timer = window.setInterval(() => void refresh(), 1500);
     return () => window.clearInterval(timer);
   }, [refresh, state?.status]);
 

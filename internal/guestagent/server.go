@@ -11,6 +11,7 @@ import (
 	"image"
 	"image/png"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -61,7 +62,13 @@ type ServerOptions struct {
 	WorkspaceRoots []string
 	// MaxWorkspaceArchiveBytes caps both uploaded and downloaded workspace archives.
 	MaxWorkspaceArchiveBytes int64
-	Now                      func() time.Time
+	// AllowedClientCIDRs restricts which peers may call the authenticated API.
+	// QEMU's user-mode NAT forwards host connections to the guest from the
+	// gateway address 10.0.2.2, so configuring that /32 prevents a process
+	// running inside the guest from calling the agent directly with a token it
+	// can read. Empty means no restriction (development/tests).
+	AllowedClientCIDRs []string
+	Now                func() time.Time
 }
 
 // Server exposes authenticated guest desktop RPC over HTTP.
@@ -79,6 +86,7 @@ type Server struct {
 	verifyRoots              []string
 	workspaceRoots           []string
 	maxWorkspaceArchiveBytes int64
+	allowedClientNets        []*net.IPNet
 	startedAt                time.Time
 	now                      func() time.Time
 	actions                  *actionTracker
@@ -135,6 +143,7 @@ func NewServerWithOptions(options ServerOptions) *Server {
 		verifyRoots:              normalizeVerifyRoots(options.VerifyRoots),
 		workspaceRoots:           normalizeVerifyRoots(options.WorkspaceRoots),
 		maxWorkspaceArchiveBytes: maxWorkspaceArchiveBytes,
+		allowedClientNets:        parseClientCIDRs(options.AllowedClientCIDRs),
 		startedAt:                now(),
 		now:                      now,
 		actions:                  newActionTracker(now),
@@ -173,9 +182,48 @@ func (s *Server) Handler() http.Handler {
 	return s.authenticate(mux)
 }
 
+func parseClientCIDRs(values []string) []*net.IPNet {
+	nets := make([]*net.IPNet, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		_, network, err := net.ParseCIDR(value)
+		if err == nil {
+			nets = append(nets, network)
+		}
+	}
+	return nets
+}
+
+func (s *Server) clientAllowed(r *http.Request) bool {
+	if len(s.allowedClientNets) == 0 {
+		return true
+	}
+	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
+	if err != nil {
+		host = strings.Trim(strings.TrimSpace(r.RemoteAddr), "[]")
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	for _, network := range s.allowedClientNets {
+		if network.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		actionID, _ := parseActionIDHeader(r)
+		if !s.clientAllowed(r) {
+			writeActionError(w, http.StatusForbidden, actionID, "forbidden", "client address is not allowed")
+			return
+		}
 		token, err := s.authenticationToken()
 		if err != nil || token == "" {
 			writeActionError(w, http.StatusServiceUnavailable, actionID, "unavailable", "guest authentication token is not configured")

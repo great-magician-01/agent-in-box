@@ -34,6 +34,12 @@ export interface GuestClientOptions {
 export interface GuestTarget {
   hostPort: number;
   storageRoot: string;
+  /**
+   * Host address that QEMU forwarded the Guest Agent port to. It defaults to
+   * the host-only loopback alias so an in-guest process cannot reach the
+   * forwarded port through the 10.0.2.2 host alias.
+   */
+  host?: string;
 }
 
 @Injectable()
@@ -272,7 +278,7 @@ export class GuestClient {
     const token = await readToken(tokenFile, this.sharedTokenFile);
     let response: Response;
     try {
-      response = await this.fetchImpl(`http://127.0.0.1:${target.hostPort}${route}`, {
+      response = await this.fetchImpl(`http://${target.host ?? "127.0.0.2"}:${target.hostPort}${route}`, {
         method,
         headers: {
           accept: "application/json",

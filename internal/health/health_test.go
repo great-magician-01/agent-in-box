@@ -8,7 +8,7 @@ import (
 )
 
 func TestHealthHandler(t *testing.T) {
-	handler := NewHandler("vm-supervisor", "0.1.0")
+	handler := NewHandler("vm-supervisor", "0.1.0", "test-nonce")
 
 	for _, path := range []string{"/healthz", "/readyz"} {
 		request := httptest.NewRequest(http.MethodGet, path, nil)
@@ -33,11 +33,14 @@ func TestHealthHandler(t *testing.T) {
 		if response.Version != "0.1.0" {
 			t.Fatalf("%s: unexpected version %q", path, response.Version)
 		}
+		if response.InstanceNonce != "test-nonce" {
+			t.Fatalf("%s: unexpected instance nonce %q", path, response.InstanceNonce)
+		}
 	}
 }
 
 func TestUnknownPath(t *testing.T) {
-	handler := NewHandler("vm-supervisor", "0.1.0")
+	handler := NewHandler("vm-supervisor", "0.1.0", "")
 	request := httptest.NewRequest(http.MethodGet, "/unknown", nil)
 	recorder := httptest.NewRecorder()
 

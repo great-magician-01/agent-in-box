@@ -48,7 +48,7 @@ export class ModelProviderService {
     const providerId = normalizeProviderId(id);
     const baseUrl = normalizeBaseUrl(input?.baseUrl);
     const api = normalizeApi(input?.api);
-    const credentialProviderId = normalizeProviderId(input?.credentialProviderId);
+    const credentialProviderId = normalizeModelCredentialId(input?.credentialProviderId);
     const models = normalizeModels(input?.models);
     const enabled = input?.enabled !== false;
     const now = nowIso();
@@ -157,6 +157,14 @@ function normalizeProviderId(value: unknown): string {
     throw new PersistenceError("validation_failed", "Provider 标识格式无效");
   }
   return value;
+}
+
+function normalizeModelCredentialId(value: unknown): string {
+  const id = normalizeProviderId(value);
+  if (id.startsWith("bot-")) {
+    throw new PersistenceError("validation_failed", "模型不能引用机器人命名空间中的凭据");
+  }
+  return id;
 }
 
 function normalizeBaseUrl(value: unknown): string {

@@ -174,6 +174,18 @@ export class ProjectService {
     if ((current.archivedAt !== null) === archived) return this.get(projectId);
     const now = nowIso();
     await this.db.transaction().execute(async (trx) => {
+      if (archived) {
+        const activeNow = await trx
+          .selectFrom("tasks")
+          .select("id")
+          .where("project_id", "=", projectId)
+          .where("status", "in", ACTIVE_TASK_STATUSES)
+          .limit(1)
+          .executeTakeFirst();
+        if (activeNow) {
+          throw new PersistenceError("conflict", "项目在归档提交前创建了新任务，请稍后重试");
+        }
+      }
       await trx
         .updateTable("projects")
         .set({ archived_at: archived ? now : null, updated_at: now })
@@ -232,22 +244,39 @@ export class ProjectService {
         { dependencies },
       );
     }
-    // Project backups are project-owned. Remove their files only after the
-    // dependency check passed; the database rows cascade with the project.
-    if (backups.length > 0 && this.database && isSafeIdentifier(projectId)) {
-      const root = path.resolve(this.database.layout.archives, "project-backups");
-      const directory = path.resolve(root, projectId);
-      const relative = path.relative(root, directory);
-      if (relative === projectId && !path.isAbsolute(relative)) {
-        await rm(directory, { recursive: true, force: true });
-      }
-    }
     await this.db.transaction().execute(async (trx) => {
+      const [taskNow, workerNow, archiveNow] = await Promise.all([
+        trx.selectFrom("tasks").select("id").where("project_id", "=", projectId).limit(1).executeTakeFirst(),
+        trx
+          .selectFrom("workers")
+          .select("id")
+          .where("project_id", "=", projectId)
+          .limit(1)
+          .executeTakeFirst(),
+        trx
+          .selectFrom("worker_archives")
+          .select("id")
+          .where("project_id", "=", projectId)
+          .limit(1)
+          .executeTakeFirst(),
+      ]);
+      if (taskNow || workerNow || archiveNow) {
+        throw new PersistenceError("conflict", "删除提交前项目出现了任务、Worker 或归档历史");
+      }
       // Foreign keys cascade only project-owned metadata. VM rows and disks are
       // deliberately not touched, including when another project shares them.
       await trx.deleteFrom("projects").where("id", "=", projectId).execute();
       await this.outbox.append("project.changed", { projectId, action: "deleted" }, nowIso(), trx);
     });
+    // Only remove backup files after the authoritative DB delete committed.
+    if (backups.length > 0 && this.database && isSafeIdentifier(projectId)) {
+      const root = path.resolve(this.database.layout.archives, "project-backups");
+      const directory = path.resolve(root, projectId);
+      const relative = path.relative(root, directory);
+      if (relative === projectId && !path.isAbsolute(relative)) {
+        await rm(directory, { recursive: true, force: true }).catch(() => undefined);
+      }
+    }
     return { deleted: true, projectId };
   }
 
@@ -399,6 +428,17 @@ export class ProjectService {
     if (active) throw new PersistenceError("conflict", "该项目在此 VM 上仍有未结束任务，不能解绑");
     const now = nowIso();
     await this.db.transaction().execute(async (trx) => {
+      const activeNow = await trx
+        .selectFrom("tasks")
+        .select("id")
+        .where("project_id", "=", projectId)
+        .where("vm_id", "=", binding.vm_id)
+        .where("status", "in", ACTIVE_TASK_STATUSES)
+        .limit(1)
+        .executeTakeFirst();
+      if (activeNow) {
+        throw new PersistenceError("conflict", "解绑提交前出现了新的活动任务，请稍后重试");
+      }
       await trx.deleteFrom("project_vm_bindings").where("id", "=", bindingId).execute();
       let defaultBindingId: string | null = null;
       if (binding.is_primary === 1) {

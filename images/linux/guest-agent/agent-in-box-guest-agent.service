@@ -9,13 +9,18 @@ User=root
 Group=root
 Environment=DISPLAY=:0
 Environment=XAUTHORITY=/home/aib/.Xauthority
-ExecStart=/usr/local/bin/agent-in-box-guest-agent -addr 0.0.0.0:7611 -token-file /etc/agent-in-box/guest-agent.token
+ExecStart=/usr/local/bin/agent-in-box-guest-agent -addr 0.0.0.0:7611 -token-file /etc/agent-in-box/guest-agent.token -allowed-client-cidrs 10.0.2.2/32
 Restart=on-failure
 RestartSec=2
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 ReadWritePaths=/etc/agent-in-box /var/lib/agent-in-box
+# The agent parses untrusted PNG/JSON over the network; drop everything it
+# does not need instead of running a default-capability root process.
+CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_SYS_PTRACE CAP_KILL
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+MemoryMax=1G
 
 [Install]
 WantedBy=multi-user.target

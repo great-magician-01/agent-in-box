@@ -6,6 +6,7 @@ import type {
   WorkerLeaseRequest,
 } from "@agent-in-box/protocol";
 import { LeaseService } from "../persistence/services/lease-service";
+import { TaskService } from "../persistence/services/task-service";
 import { PersistenceError } from "../persistence/errors";
 import { ConsoleService } from "./console.service";
 import { VmService } from "./vm.service";
@@ -16,6 +17,7 @@ export class ExecutionController {
     private readonly vms: VmService,
     private readonly leases: LeaseService,
     private readonly consoles: ConsoleService,
+    private readonly tasks: TaskService,
   ) {}
 
   @Get(":id/control")
@@ -43,6 +45,13 @@ export class ExecutionController {
     await this.vms.getRecord(id);
     if (typeof input?.taskId !== "string" || !input.taskId.trim() || input.taskId.length > 128) {
       throw new PersistenceError("validation_failed", "Worker Lease 必须关联有效的任务 ID");
+    }
+    const task = await this.tasks.get(input.taskId.trim()).catch(() => null);
+    if (!task || task.vmId !== id) {
+      throw new PersistenceError("validation_failed", "任务不存在或不属于该 VM");
+    }
+    if (task.status !== "running") {
+      throw new PersistenceError("conflict", "只有运行中的任务可以申请 Worker Lease");
     }
     return this.leases.acquire({
       vmId: id,

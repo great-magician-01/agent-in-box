@@ -1,5 +1,3 @@
-import path from "node:path";
-import { pathToFileURL } from "node:url";
 import { dialog, ipcMain, type BrowserWindow } from "electron";
 import type {
   CredentialSaveRequest,
@@ -46,26 +44,22 @@ export interface DesktopIpcDependencies {
   showNotification(request: DesktopNotificationRequest): boolean;
   quit(): void;
   openLogs(): Promise<void>;
+  /** Exact-origin check for the verified control-plane page or bundled static files. */
+  isTrustedRendererUrl(url: string): boolean;
   appVersion: string;
   platform: NodeJS.Platform;
   arch: string;
 }
 
-function isTrustedFileUrl(url: string): boolean {
-  const staticDirectory = pathToFileURL(path.join(__dirname, "..", "static")).href;
-  return url.startsWith(staticDirectory);
-}
-
-function assertTrustedSender(event: { senderFrame?: { url?: string } | null }): void {
+function assertTrustedSender(
+  event: { senderFrame?: { url?: string } | null },
+  isTrustedRendererUrl: (url: string) => boolean,
+): void {
   const url = event.senderFrame?.url ?? "";
-  if (
-    isTrustedFileUrl(url) ||
-    url.startsWith("http://127.0.0.1:") ||
-    url.startsWith("http://localhost:")
-  ) {
+  if (isTrustedRendererUrl(url)) {
     return;
   }
-  throw new Error("拒绝来自非本地页面的调用");
+  throw new Error("拒绝来自非受信页面的调用");
 }
 
 export interface DesktopIpcHandle {
@@ -90,12 +84,12 @@ export function registerDesktopIpc(dependencies: DesktopIpcDependencies): Deskto
   };
 
   ipcMain.handle(IPC_CHANNELS.appStatus, (event) => {
-    assertTrustedSender(event);
+    assertTrustedSender(event, dependencies.isTrustedRendererUrl);
     return status();
   });
 
   ipcMain.handle(IPC_CHANNELS.restartControlPlane, async (event) => {
-    assertTrustedSender(event);
+    assertTrustedSender(event, dependencies.isTrustedRendererUrl);
     dependencies.logger.info("渲染进程请求重启本地控制平面");
     await dependencies.beforeControlPlaneRestart?.();
     await dependencies.supervisor.restart();
@@ -103,55 +97,55 @@ export function registerDesktopIpc(dependencies: DesktopIpcDependencies): Deskto
   });
 
   ipcMain.handle(IPC_CHANNELS.startControlPlane, async (event) => {
-    assertTrustedSender(event);
+    assertTrustedSender(event, dependencies.isTrustedRendererUrl);
     dependencies.logger.info("渲染进程请求启动本地控制平面");
     await dependencies.supervisor.start();
     return status();
   });
 
   ipcMain.handle(IPC_CHANNELS.stopControlPlane, async (event) => {
-    assertTrustedSender(event);
+    assertTrustedSender(event, dependencies.isTrustedRendererUrl);
     dependencies.logger.info("渲染进程请求停止本地控制平面");
     await dependencies.supervisor.stop();
     return status();
   });
 
   ipcMain.handle(IPC_CHANNELS.vmStatus, async (event) => {
-    assertTrustedSender(event);
+    assertTrustedSender(event, dependencies.isTrustedRendererUrl);
     return dependencies.vm.status();
   });
 
   ipcMain.handle(IPC_CHANNELS.vmInstallQemu, async (event) => {
-    assertTrustedSender(event);
+    assertTrustedSender(event, dependencies.isTrustedRendererUrl);
     dependencies.logger.info("渲染进程请求安装托管 QEMU");
     return dependencies.vm.installQemu();
   });
 
   ipcMain.handle(IPC_CHANNELS.vmSetQemuPath, async (event, value: string | null) => {
-    assertTrustedSender(event);
+    assertTrustedSender(event, dependencies.isTrustedRendererUrl);
     return dependencies.vm.setQemuPath(value);
   });
 
   ipcMain.handle(IPC_CHANNELS.vmRestartSupervisor, async (event) => {
-    assertTrustedSender(event);
+    assertTrustedSender(event, dependencies.isTrustedRendererUrl);
     dependencies.logger.info("渲染进程请求重启 VM Supervisor");
     return dependencies.vm.restartSupervisor();
   });
 
   ipcMain.handle(IPC_CHANNELS.quit, (event) => {
-    assertTrustedSender(event);
+    assertTrustedSender(event, dependencies.isTrustedRendererUrl);
     dependencies.quit();
   });
 
   ipcMain.handle(IPC_CHANNELS.openLogs, async (event) => {
-    assertTrustedSender(event);
+    assertTrustedSender(event, dependencies.isTrustedRendererUrl);
     await dependencies.openLogs();
   });
 
   ipcMain.handle(
     IPC_CHANNELS.chooseDirectory,
     async (event, input?: { title?: string; defaultPath?: string }) => {
-      assertTrustedSender(event);
+      assertTrustedSender(event, dependencies.isTrustedRendererUrl);
       const title =
         typeof input?.title === "string" && input.title.length < 120
           ? input.title
@@ -176,44 +170,44 @@ export function registerDesktopIpc(dependencies: DesktopIpcDependencies): Deskto
   );
 
   ipcMain.handle(IPC_CHANNELS.getPreferences, (event) => {
-    assertTrustedSender(event);
+    assertTrustedSender(event, dependencies.isTrustedRendererUrl);
     return dependencies.getPreferences();
   });
 
   ipcMain.handle(IPC_CHANNELS.setPreferences, (event, patch: DesktopPreferencesPatch) => {
-    assertTrustedSender(event);
+    assertTrustedSender(event, dependencies.isTrustedRendererUrl);
     return dependencies.setPreferences(patch);
   });
 
   ipcMain.handle(IPC_CHANNELS.updatesStatus, (event) => {
-    assertTrustedSender(event);
+    assertTrustedSender(event, dependencies.isTrustedRendererUrl);
     return dependencies.updates.status();
   });
 
   ipcMain.handle(IPC_CHANNELS.updatesCheck, async (event) => {
-    assertTrustedSender(event);
+    assertTrustedSender(event, dependencies.isTrustedRendererUrl);
     return dependencies.updates.check();
   });
 
   ipcMain.handle(IPC_CHANNELS.updatesDownload, async (event) => {
-    assertTrustedSender(event);
+    assertTrustedSender(event, dependencies.isTrustedRendererUrl);
     return dependencies.updates.download();
   });
 
   ipcMain.handle(IPC_CHANNELS.updatesInstall, async (event) => {
-    assertTrustedSender(event);
+    assertTrustedSender(event, dependencies.isTrustedRendererUrl);
     await dependencies.updates.install();
   });
 
   ipcMain.handle(IPC_CHANNELS.updatesRollback, async (event) => {
-    assertTrustedSender(event);
+    assertTrustedSender(event, dependencies.isTrustedRendererUrl);
     await dependencies.updates.rollback();
   });
 
   ipcMain.handle(
     IPC_CHANNELS.showNotification,
     (event, request: DesktopNotificationRequest): boolean => {
-      assertTrustedSender(event);
+      assertTrustedSender(event, dependencies.isTrustedRendererUrl);
       if (
         typeof request?.notificationId !== "string" ||
         typeof request.title !== "string" ||
@@ -226,29 +220,32 @@ export function registerDesktopIpc(dependencies: DesktopIpcDependencies): Deskto
   );
 
   ipcMain.handle(IPC_CHANNELS.credentialsStatus, (event): DesktopCredentialStatus => {
-    assertTrustedSender(event);
+    assertTrustedSender(event, dependencies.isTrustedRendererUrl);
     return dependencies.credentialStore.status();
   });
 
   ipcMain.handle(
     IPC_CHANNELS.credentialsSave,
     (event, request: CredentialSaveRequest): DesktopCredentialStatus => {
-      assertTrustedSender(event);
+      assertTrustedSender(event, dependencies.isTrustedRendererUrl);
       return dependencies.credentialStore.save(request);
     },
   );
 
   ipcMain.handle(
     IPC_CHANNELS.credentialsRemove,
-    (event, providerId: string): DesktopCredentialStatus => {
-      assertTrustedSender(event);
-      return dependencies.credentialStore.remove(providerId);
+    (event, kind: unknown, providerId: string): DesktopCredentialStatus => {
+      assertTrustedSender(event, dependencies.isTrustedRendererUrl);
+      if (kind !== "model" && kind !== "bot") {
+        throw new Error("凭据类型无效");
+      }
+      return dependencies.credentialStore.remove(kind, providerId);
     },
   );
 
   ipcMain.on(IPC_CHANNELS.rendererLog, (event, level: unknown, message: unknown, data: unknown) => {
     try {
-      assertTrustedSender(event);
+      assertTrustedSender(event, dependencies.isTrustedRendererUrl);
     } catch {
       return;
     }

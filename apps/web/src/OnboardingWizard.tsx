@@ -85,6 +85,7 @@ export function OnboardingWizard({
     knownProvider ? "" : (initialState.preferredModelProvider ?? ""),
   );
   const [secret, setSecret] = useState("");
+  const [workspaceId, setWorkspaceId] = useState("");
   const [credentialsLoading, setCredentialsLoading] = useState(false);
   const [credentialError, setCredentialError] = useState<string | null>(null);
   const [savedProvider, setSavedProvider] = useState<string | null>(
@@ -233,6 +234,10 @@ export function OnboardingWizard({
       return;
     }
     const preset = PROVIDER_PRESETS.find((candidate) => candidate.id === credentialProvider);
+    if (preset?.baseUrl.includes("{WorkspaceId}") && !workspaceId.trim()) {
+      setCredentialError("请输入阿里云百炼业务空间 ID");
+      return;
+    }
     setCredentialsLoading(true);
     setCredentialError(null);
     try {
@@ -246,7 +251,7 @@ export function OnboardingWizard({
       // in settings.
       if (preset) {
         await api.upsertModelProvider(preset.id, {
-          baseUrl: preset.baseUrl,
+          baseUrl: preset.baseUrl.replace("{WorkspaceId}", workspaceId.trim()),
           api: preset.api,
           credentialProviderId: preset.id,
           models: preset.models,
@@ -589,6 +594,20 @@ export function OnboardingWizard({
                       />
                     </label>
                   )}
+                  {credentialProvider === "qwen" && (
+                    <label className="field">
+                      <span>百炼业务空间 ID（WorkspaceId）</span>
+                      <input
+                        value={workspaceId}
+                        onChange={(event) => setWorkspaceId(event.target.value)}
+                        placeholder="在百炼控制台的业务空间详情中查看"
+                        spellCheck={false}
+                      />
+                      <small className="muted">
+                        使用北京地域专属接入地址；API Key 必须与业务空间所属地域一致。
+                      </small>
+                    </label>
+                  )}
                   <label className="field">
                     <span>API Key</span>
                     <input
@@ -603,7 +622,11 @@ export function OnboardingWizard({
                     type="button"
                     className="primary"
                     onClick={() => void saveCredential()}
-                    disabled={credentialsLoading || secret.trim().length === 0}
+                    disabled={
+                      credentialsLoading ||
+                      secret.trim().length === 0 ||
+                      (credentialProvider === "qwen" && workspaceId.trim().length === 0)
+                    }
                   >
                     {credentialsLoading ? "保存中…" : "保存到系统安全存储"}
                   </button>

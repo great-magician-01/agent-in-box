@@ -1,10 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   buildHostInspection,
   cpuVirtualizationFromInfo,
   parseWindowsVirtualizationOutput,
   type HostProbeSnapshot,
 } from "./host-inspection";
+import { probeWindowsVirtualization } from "./host-inspection.service";
 
 const GIB = 1024 * 1024 * 1024;
 
@@ -105,5 +106,48 @@ describe("host inspection", () => {
       ).detection,
     ).toBe("missing");
     expect(parseWindowsVirtualizationOutput("garbage").detection).toBe("unknown");
+  });
+
+  it("falls back to WMI when the Windows CIM query fails", async () => {
+    const run = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("CIM unavailable"))
+      .mockResolvedValueOnce("HypervisorPresent=True\r\nVirtualizationFirmwareEnabled=False\r\n");
+
+    const result = await probeWindowsVirtualization(run);
+
+    expect(result.detection).toBe("detected");
+    expect(result.details).toMatchObject({ hypervisorPresent: "true" });
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(run.mock.calls[1]?.[1].at(-1)).toContain("Get-WmiObject");
+  });
+
+  it("uses systeminfo when both PowerShell query APIs fail", async () => {
+    const run = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("CIM unavailable"))
+      .mockRejectedValueOnce(new Error("WMI unavailable"))
+      .mockResolvedValueOnce(
+        "Hyper-V Requirements: A hypervisor has been detected. Features required for Hyper-V will not be displayed.",
+      );
+
+    const result = await probeWindowsVirtualization(run);
+
+    expect(result.detection).toBe("detected");
+    expect(result.details).toEqual({ source: "systeminfo", hypervisorPresent: "true" });
+    expect(run).toHaveBeenNthCalledWith(3, "systeminfo.exe", ["/FO", "LIST"]);
+  });
+
+  it("keeps an explicit negative result authoritative and reports fallback stderr", async () => {
+    const negative = await probeWindowsVirtualization(
+      vi.fn().mockResolvedValue("HypervisorPresent=False\nVirtualizationFirmwareEnabled=False\n"),
+    );
+    expect(negative.detection).toBe("missing");
+
+    const failure = new Error("command failed") as Error & { stderr: string };
+    failure.stderr = "Access denied";
+    const unknown = await probeWindowsVirtualization(vi.fn().mockRejectedValue(failure));
+    expect(unknown.detection).toBe("unknown");
+    expect(unknown.message).toContain("Access denied");
   });
 });

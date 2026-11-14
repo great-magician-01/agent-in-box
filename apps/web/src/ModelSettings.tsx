@@ -159,6 +159,9 @@ export function ModelSettings({
       if (!draft.id.trim() || !draft.baseUrl.trim() || !credentialProviderId) {
         throw new Error("Provider ID、Base URL 和凭据 Provider ID 不能为空");
       }
+      if (/\{[^}]+\}/.test(draft.baseUrl)) {
+        throw new Error("请先把 Base URL 中的 {WorkspaceId} 替换为实际业务空间 ID");
+      }
       if (models.length === 0) throw new Error("至少配置一个模型");
       await api.upsertModelProvider(draft.id.trim(), {
         baseUrl: draft.baseUrl.trim(),
@@ -332,8 +335,14 @@ export function ModelSettings({
               <span>Base URL</span>
               <input
                 value={draft.baseUrl}
+                spellCheck={false}
                 onChange={(event) => updateDraft({ baseUrl: event.target.value })}
               />
+              {draft.baseUrl.includes("{WorkspaceId}") && (
+                <small className="muted">
+                  将 {"{WorkspaceId}"} 替换为百炼业务空间 ID；API Key 必须与所选地域一致。
+                </small>
+              )}
             </label>
             <label className="field">
               <span>API 类型</span>

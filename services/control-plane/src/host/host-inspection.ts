@@ -252,6 +252,19 @@ export function cpuVirtualizationFromInfo(cpuInfo: string): VirtualizationDetect
   return "missing";
 }
 
+export function parseWindowsSystemInfoOutput(output: string): {
+  detection: VirtualizationDetection;
+  details: Record<string, string>;
+} {
+  if (/a hypervisor (?:has been|is) detected|检测到(?:虚拟机监控程序|hypervisor)/i.test(output)) {
+    return {
+      detection: "detected",
+      details: { source: "systeminfo", hypervisorPresent: "true" },
+    };
+  }
+  return { detection: "unknown", details: { source: "systeminfo" } };
+}
+
 export function parseWindowsVirtualizationOutput(output: string): {
   detection: VirtualizationDetection;
   details: Record<string, string>;

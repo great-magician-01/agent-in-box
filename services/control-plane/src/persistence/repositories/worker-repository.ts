@@ -102,6 +102,23 @@ export class WorkerRepository {
     return rows.map(toWorkerRecord);
   }
 
+  /**
+   * Workers the runtime tick must service. Failed rows are deliberately
+   * excluded so a long-lived installation cannot fill the page limit with
+   * stale failures and starve healthy Workers.
+   */
+  async listForTick(limit = 500): Promise<WorkerRecord[]> {
+    const rows = await this.db
+      .selectFrom("workers")
+      .selectAll()
+      .where("archived_at", "is", null)
+      .where("status", "in", ["starting", "running", "idle", "archiving", "restoring"])
+      .orderBy("last_active_at", "desc")
+      .limit(limit)
+      .execute();
+    return rows.map(toWorkerRecord);
+  }
+
   async listActive(projectId?: string, limit = 50): Promise<WorkerRecord[]> {
     let query = this.db
       .selectFrom("workers")
@@ -200,6 +217,46 @@ export class WorkerRepository {
       .where("id", "=", workerId)
       .execute();
     return this.getWorker(workerId);
+  }
+
+  /**
+   * Atomically moves an idle Worker to running before a task claim. Archive
+   * uses the same idle precondition, so a claim and an archive cannot both win.
+   */
+  async claimIdle(workerId: string): Promise<boolean> {
+    const result = await this.db
+      .updateTable("workers")
+      .set({ status: "running" })
+      .where("id", "=", workerId)
+      .where("status", "=", "idle")
+      .where("archived_at", "is", null)
+      .executeTakeFirst();
+    return Number(result.numUpdatedRows ?? 0) > 0;
+  }
+
+  /**
+   * Returns a Worker to idle after a claim that found no runnable task. This
+   * must not touch last_active_at, otherwise every tick would reset the idle
+   * timeout and auto-archive would never become eligible.
+   */
+  async releaseClaim(workerId: string): Promise<void> {
+    await this.db
+      .updateTable("workers")
+      .set({ status: "idle", current_task_id: null })
+      .where("id", "=", workerId)
+      .execute();
+  }
+
+  /** Marks an idle Worker as archiving; false means it started a task first. */
+  async markArchivingIfIdle(workerId: string): Promise<boolean> {
+    const result = await this.db
+      .updateTable("workers")
+      .set({ status: "archiving", current_task_id: null, last_active_at: nowIso() })
+      .where("id", "=", workerId)
+      .where("status", "=", "idle")
+      .where("archived_at", "is", null)
+      .executeTakeFirst();
+    return Number(result.numUpdatedRows ?? 0) > 0;
   }
 
   async brokerTokenId(workerId: string): Promise<string | null> {

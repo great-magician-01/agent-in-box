@@ -1,5 +1,5 @@
 /* eslint-disable react-hooks/set-state-in-effect -- selected server records initialize edit forms */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   ComputerActionType,
   CuaPolicyView,
@@ -54,9 +54,18 @@ export function ProjectManager({
   const [policyApproval, setPolicyApproval] = useState<ComputerActionType[]>([]);
   const [policyHosts, setPolicyHosts] = useState("");
   const [policyRoots, setPolicyRoots] = useState("/home, /tmp, C:\\Users");
+  const loadedProjectId = useRef<string | null>(null);
+  const loadedPolicyProjectId = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!detail) return;
+    if (!detail) {
+      loadedProjectId.current = null;
+      return;
+    }
+    // Background task invalidations reload `detail`; never overwrite a form
+    // the operator is currently editing just because the object identity changed.
+    if (loadedProjectId.current === detail.project.id) return;
+    loadedProjectId.current = detail.project.id;
     setEditName(detail.project.name);
     setEditDescription(detail.project.description);
     setEditWorkspace(detail.project.workspaceConfig.defaultGuestWorkspacePath);
@@ -65,9 +74,12 @@ export function ProjectManager({
 
   useEffect(() => {
     if (!detail) {
+      loadedPolicyProjectId.current = null;
       setPolicyView(null);
       return;
     }
+    if (loadedPolicyProjectId.current === detail.project.id) return;
+    loadedPolicyProjectId.current = detail.project.id;
     let active = true;
     void api
       .projectPolicy(detail.project.id)
@@ -349,13 +361,19 @@ export function ProjectManager({
                   type="button"
                   className="secondary"
                   disabled={busy}
-                  onClick={() =>
+                  onClick={() => {
+                    if (
+                      !archived &&
+                      !window.confirm("归档该项目？任务与历史会保留，可随时恢复。")
+                    ) {
+                      return;
+                    }
                     void run(() =>
                       archived
                         ? api.restoreProject(detail.project.id)
                         : api.archiveProject(detail.project.id),
-                    )
-                  }
+                    );
+                  }}
                 >
                   {archived ? "恢复项目" : "归档项目"}
                 </button>
@@ -530,7 +548,7 @@ export function ProjectManager({
                       保存策略
                     </button>
                     <span className="muted small">
-                      网络策略默认 broker_only；文件交换与凭据策略按项目配置审计。
+                      网络隔离在当前版本尚未启用（VM 仍可访问网络）；文件交换与凭据策略按项目配置审计。
                     </span>
                   </div>
                 </form>
@@ -720,9 +738,11 @@ function BindingRow({
             type="button"
             className="link-button danger-link"
             disabled={busy || rowBusy}
-            onClick={() =>
-              void update(() => api.unbindProjectVm(currentProjectId, item.binding.id))
-            }
+            onClick={() => {
+              if (window.confirm("解绑该 VM？VM 与磁盘不会被删除，但项目将失去这个执行环境。")) {
+                void update(() => api.unbindProjectVm(currentProjectId, item.binding.id));
+              }
+            }}
           >
             解绑（不删除 VM）
           </button>

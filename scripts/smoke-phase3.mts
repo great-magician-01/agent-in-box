@@ -223,6 +223,7 @@ try {
     CONTROL_PLANE_PORT: String(controlPlanePort),
     AGENT_IN_BOX_IMAGE_MANIFEST: manifestPath,
     AGENT_IN_BOX_SUPERVISOR_URL: `http://127.0.0.1:${supervisorPort}`,
+    AGENT_IN_BOX_GUEST_LOOPBACK_HOST: "127.0.0.1",
     AGENT_IN_BOX_SUPERVISOR_TOKEN_FILE: path.join(temporary, "supervisor-acl.token"),
   };
   const startControlPlane = async (): Promise<void> => {

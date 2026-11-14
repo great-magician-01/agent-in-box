@@ -569,6 +569,8 @@ wait
 
 **阶段 7 实现（2026-11-11）**：新增 Host 侧 Computer Use Broker（默认回环 `6720`，Guest 通过 `10.0.2.2` 访问）和短期 `cua_tokens`。Guest Pi 的 `cua-extension.js` 只调用 Broker，不持有 Guest Agent 令牌；Broker 每次请求重新校验令牌、VM 状态、Worker 当前任务和 Per-VM Execution Lease，再通过 Guest Agent 执行。`cua_actions`、`cua_screenshots`、`task_execution_state` 和 `cua_approvals` 保存动作、前后截图、显示元数据、审批和限制计数，`GET /api/v1/tasks/:id/trace` 提供任务 Trace。动作必须引用最新截图；分辨率变化、无观察、过期截图或 Lease 失效都会在执行前拒绝。执行保护包括最大步数、最长执行时间、无进展/重复动作和完成证据校验；完成必须通过 Guest 文件/进程只读校验或重新截图，模型自述不会使任务完成。项目策略（`project_policies`）约束审批动作、步数/时长、文件交换根目录、网络白名单基础和 Guest 凭据禁止策略，默认敏感动作来自全局审批设置。
 
+**管理面隔离（2026-11-15）**：QEMU VNC、QMP、SSH、Guest Agent 与 Worker RPC 的宿主机转发统一绑定 `127.0.0.2`，不使用 slirp 的 `10.0.2.2 → 127.0.0.1` 别名；Guest 内进程只能访问宿主 `127.0.0.1` 上带短期令牌的 Model/CUA Broker。Guest Agent 额外以 `-allowed-client-cidrs 10.0.2.2/32` 只接受宿主机转发请求。Windows Guest 的交互用户仍可读 Guest Agent token 文件，因此该网络限制是防止 Worker 绕过 Broker 的关键边界；交互用户不应加入 Administrators。
+
 ## 10. Pi 与 Worker Engine 适配
 
 ### 10.1 复用范围
@@ -633,7 +635,7 @@ Agent S 等开源项目用于对照评测和专用引擎研究，不直接承担
 - Router 本地使用凭据；
 - VM Worker 通过短期、绑定 VM/会话的令牌访问本地 Model Broker；
 - Broker 限定可用模型、速率、任务和有效期；
-- 网络策略只允许 VM 访问必要的 Broker 地址；
+- 网络策略只允许 VM 访问必要的 Broker 地址（当前版本尚未实现 VM 级出网隔离；`network.mode=broker_only` 会被拒绝，Broker 依赖短期令牌保护）；
 - Broker 记录用量和错误，敏感内容默认不写普通日志；
 - 重启或撤销令牌后 VM 不能继续使用旧凭据。
 

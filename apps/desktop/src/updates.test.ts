@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import { once } from "node:events";
@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   UpdateManager,
   backupDatabase,
+  canonicalJson,
   compareVersions,
   createRollbackSnapshot,
   parseUpdateManifest,
@@ -16,6 +17,20 @@ import {
 } from "./updates";
 
 const temporaryDirectories: string[] = [];
+
+const testKeys = generateKeyPairSync("ed25519");
+const testPublicKey = testKeys.publicKey.export({ type: "spki", format: "pem" }).toString();
+
+function signedManifest(manifest: unknown): string {
+  return JSON.stringify({
+    manifest,
+    signature: sign(
+      null,
+      Buffer.from(canonicalJson(manifest), "utf8"),
+      testKeys.privateKey,
+    ).toString("base64"),
+  });
+}
 
 function temporaryDirectory(): string {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "agent-in-box-updates-"));
@@ -118,7 +133,7 @@ describe("UpdateManager", () => {
       if (request.url === "/latest.json") {
         response.writeHead(200, { "content-type": "application/json" });
         response.end(
-          JSON.stringify({
+          signedManifest({
             version: "0.2.0",
             notes: "test",
             files: [
@@ -151,6 +166,7 @@ describe("UpdateManager", () => {
       platform: "win32",
       arch: "x64",
       directory,
+      publicKey: testPublicKey,
       feedUrl: () => `http://127.0.0.1:${port}/latest.json`,
     });
     try {
@@ -174,6 +190,7 @@ describe("UpdateManager", () => {
     const noFeed = new UpdateManager({
       currentVersion: "0.1.0",
       directory,
+      publicKey: testPublicKey,
       feedUrl: () => null,
     });
     expect((await noFeed.check()).state).toBe("error");
@@ -182,7 +199,7 @@ describe("UpdateManager", () => {
     const server = http.createServer((request, response) => {
       if (request.url === "/latest.json") {
         response.end(
-          JSON.stringify({
+          signedManifest({
             version: "0.2.0",
             files: [
               {
@@ -206,6 +223,7 @@ describe("UpdateManager", () => {
       platform: "linux",
       arch: "x64",
       directory,
+      publicKey: testPublicKey,
       feedUrl: () => `http://127.0.0.1:${port}/latest.json`,
     });
     try {
@@ -217,6 +235,48 @@ describe("UpdateManager", () => {
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
+  });
+
+  it("rejects unsigned manifests and refuses updates without a public key", async () => {
+    const directory = temporaryDirectory();
+    const unsigned = new UpdateManager({
+      currentVersion: "0.1.0",
+      platform: "linux",
+      arch: "x64",
+      directory,
+      publicKey: testPublicKey,
+      feedUrl: () => "https://updates.example.test/latest.json",
+      fetchImpl: async () =>
+        new Response(
+          JSON.stringify({
+            manifest: {
+              version: "0.2.0",
+              files: [
+                {
+                  platform: "linux",
+                  arch: "x64",
+                  url: "https://updates.example.test/agent.bin",
+                  sha256: "a".repeat(64),
+                },
+              ],
+            },
+            signature: "not-a-real-signature",
+          }),
+          { status: 200 },
+        ),
+    });
+    const unsignedStatus = await unsigned.check();
+    expect(unsignedStatus.state).toBe("error");
+    expect(unsignedStatus.error).toContain("签名");
+
+    const noKey = new UpdateManager({
+      currentVersion: "0.1.0",
+      directory,
+      feedUrl: () => "https://updates.example.test/latest.json",
+    });
+    const noKeyStatus = await noKey.check();
+    expect(noKeyStatus.state).toBe("error");
+    expect(noKeyStatus.error).toContain("公钥");
   });
 });
 

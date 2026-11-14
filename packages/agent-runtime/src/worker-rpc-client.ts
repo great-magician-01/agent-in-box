@@ -180,6 +180,14 @@ export class WorkerRpcClient {
               const parsed = parseSseBlock(block);
               if (parsed) {
                 after = Math.max(after, parsed.id);
+                if (parsed.event.type === "stream_gap") {
+                  listener({
+                    type: "session_failed",
+                    message: "Worker 事件流出现缺口，Worker 会话需要重新同步",
+                  });
+                  controller.abort();
+                  return;
+                }
                 if (parsed.sessionId === sessionId) listener(parsed.event);
               }
               boundary = buffer.indexOf("\n\n");
@@ -292,8 +300,26 @@ function parseSseBlock(block: string): WorkerEventEnvelope | null {
     }
   }
   if (id === null || data.length === 0) return null;
-  const event = JSON.parse(data.join("\n")) as WorkerEventEnvelope;
-  return event.id === id && typeof event.sessionId === "string" ? event : null;
+  let event: WorkerEventEnvelope;
+  try {
+    event = JSON.parse(data.join("\n")) as WorkerEventEnvelope;
+  } catch {
+    throw new WorkerRpcError(
+      "Worker RPC event stream is malformed",
+      "protocol_error",
+      502,
+      false,
+    );
+  }
+  if (event.id !== id || typeof event.sessionId !== "string") {
+    throw new WorkerRpcError(
+      "Worker RPC event stream id does not match its payload",
+      "protocol_error",
+      502,
+      false,
+    );
+  }
+  return event;
 }
 
 async function readLimited(response: Response, limit: number): Promise<Uint8Array> {

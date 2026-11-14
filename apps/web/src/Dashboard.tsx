@@ -343,7 +343,6 @@ export function Dashboard({
         launchAtLogin: preferences.launchAtLogin,
         notificationsEnabled: preferences.notificationsEnabled,
         autoUpdateCheck: preferences.autoUpdateCheck,
-        updateFeedUrl: updateFeedDraft.trim() ? updateFeedDraft.trim() : null,
       });
       if (next) {
         setPreferences(next);
@@ -933,7 +932,6 @@ export function Dashboard({
           setPreferences={setPreferences}
           preferencesMessage={preferencesMessage}
           updateFeedDraft={updateFeedDraft}
-          setUpdateFeedDraft={setUpdateFeedDraft}
           updateStatus={updateStatus}
           updateBusy={updateBusy}
           updateMessage={updateMessage}
@@ -960,7 +958,6 @@ interface DesktopSettingsPanelsProps {
   setPreferences(value: DesktopPreferences): void;
   preferencesMessage: string | null;
   updateFeedDraft: string;
-  setUpdateFeedDraft(value: string): void;
   updateStatus: DesktopUpdateStatus | null;
   updateBusy: boolean;
   updateMessage: string | null;
@@ -983,7 +980,6 @@ function DesktopSettingsPanels({
   setPreferences,
   preferencesMessage,
   updateFeedDraft,
-  setUpdateFeedDraft,
   updateStatus,
   updateBusy,
   updateMessage,
@@ -1066,12 +1062,13 @@ function DesktopSettingsPanels({
                   <span>启动后自动检查更新</span>
                 </label>
                 <label className="field">
-                  <span>更新源（HTTPS Manifest）</span>
+                  <span>更新源（由安装包或环境变量配置）</span>
                   <input
                     value={updateFeedDraft}
-                    placeholder="https://updates.example.com/latest.json"
+                    placeholder="未配置"
                     spellCheck={false}
-                    onChange={(event) => setUpdateFeedDraft(event.target.value)}
+                    readOnly
+                    disabled
                   />
                 </label>
               </div>
@@ -1089,7 +1086,13 @@ function DesktopSettingsPanels({
                 <button
                   type="button"
                   className="secondary"
-                  onClick={() => void bridge.app.stopControlPlane()}
+                  onClick={() => {
+                    if (
+                      window.confirm("停止本地服务会中断所有会话与正在执行的任务，确定继续？")
+                    ) {
+                      void bridge.app.stopControlPlane();
+                    }
+                  }}
                 >
                   停止本地服务
                 </button>

@@ -80,7 +80,13 @@ export function OnboardingWizard({
   useEffect(() => {
     if (!bridge) return;
     void credentialStatus(bridge)
-      .then((status) => setKnownCredentials(status?.providers.map((item) => item.providerId) ?? []))
+      .then((status) =>
+        setKnownCredentials(
+          (status?.providers ?? [])
+            .filter((item) => item.kind === "model")
+            .map((item) => item.providerId),
+        ),
+      )
       .catch(() => undefined);
   }, [bridge]);
 
@@ -125,8 +131,14 @@ export function OnboardingWizard({
         throw new Error("请输入 API Key");
       }
       if (secret) {
-        const status = await bridge.credentials.save({ providerId: effectiveId, secret });
-        setKnownCredentials(status.providers.map((item) => item.providerId));
+        const status = await bridge.credentials.save({
+          kind: "model",
+          providerId: effectiveId,
+          secret,
+        });
+        setKnownCredentials(
+          status.providers.filter((item) => item.kind === "model").map((item) => item.providerId),
+        );
         setSecret("");
       }
       // Presets keep their declared modalities: only a fully custom provider

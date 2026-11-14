@@ -61,6 +61,10 @@ function collect() {
 }
 
 const files = collect();
+if (files.length === 0) {
+  console.error(`no release artifacts found under ${release}; refusing to write an empty checksum file`);
+  process.exit(1);
+}
 const artifacts = [];
 const sums = [];
 for (const file of files) {

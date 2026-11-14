@@ -61,6 +61,14 @@ if (-not (Test-Path -LiteralPath (Join-Path $ProvisionDirectory "AIB-PROVISION")
     throw "Provisioning directory must contain the AIB-PROVISION folder"
 }
 
+$unattendText = Get-Content -LiteralPath $unattend -Raw
+if ($unattendText -match 'AIB-LOCAL-ONLY-CHANGE-ME') {
+    throw "autounattend.xml still uses the example password; set a unique password before building"
+}
+if ($unattendText -match '<PlainText>true</PlainText>') {
+    Write-Warning "autounattend.xml contains a plaintext password and AutoLogon credentials; protect the golden image as a secret."
+}
+
 if ($WindowsIsoSha256) {
     $actualIsoHash = (Get-FileHash -LiteralPath $WindowsIso -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($actualIsoHash -ne $WindowsIsoSha256.ToLowerInvariant()) {

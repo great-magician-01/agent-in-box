@@ -12,7 +12,7 @@ import { nowIso } from "../persistence/time";
 export const AUTH_OPTIONS = Symbol("AUTH_OPTIONS");
 
 export const SESSION_COOKIE_NAME = "aib_session";
-export const DEFAULT_SESSION_TTL_MS = 30 * 24 * 60 * 60_000;
+export const DEFAULT_SESSION_TTL_MS = 7 * 24 * 60 * 60_000;
 const ACCESS_KEY_BYTES = 32;
 const SESSION_TOKEN_BYTES = 32;
 const MAX_LOGIN_FAILURES = 5;
@@ -163,16 +163,20 @@ export class AuthService implements OnModuleInit {
     remoteAddress?: string;
   }): Promise<{ token: string; session: AuthSession; user: LocalAuthUser }> {
     const source = input.remoteAddress ?? "local";
-    this.assertNotBlocked(source);
+    const blocked = this.isBlocked(source);
     if (typeof input.accessKey !== "string" || input.accessKey.length < 8) {
       this.recordFailure(source);
+      if (blocked) throw this.rateLimited(source);
       throw new PersistenceError("unauthorized", "本机访问密钥无效");
     }
     const expected = this.readAccessKey();
     if (!safeEqual(input.accessKey.trim(), expected)) {
       this.recordFailure(source);
+      if (blocked) throw this.rateLimited(source);
       throw new PersistenceError("unauthorized", "本机访问密钥无效");
     }
+    // A correct key always wins: an attacker must not be able to keep the
+    // legitimate user locked out by filling the shared loopback bucket.
     this.loginFailures.delete(source);
 
     const token = this.randomBytes(SESSION_TOKEN_BYTES).toString("base64url");
@@ -348,15 +352,19 @@ export class AuthService implements OnModuleInit {
       : { id: "local-admin", displayName: "本机管理员", role: "admin" };
   }
 
-  private assertNotBlocked(source: string): void {
+  private isBlocked(source: string): boolean {
     const state = this.loginFailures.get(source);
-    if (state && state.blockedUntil > this.now().getTime()) {
-      const seconds = Math.ceil((state.blockedUntil - this.now().getTime()) / 1000);
-      throw new PersistenceError(
-        "rate_limited",
-        `本机访问密钥尝试过于频繁，请在 ${seconds} 秒后重试`,
-      );
-    }
+    return Boolean(state && state.blockedUntil > this.now().getTime());
+  }
+
+  private rateLimited(source: string): PersistenceError {
+    const state = this.loginFailures.get(source);
+    const remaining = state ? state.blockedUntil - this.now().getTime() : LOGIN_BLOCK_MS;
+    const seconds = Math.max(1, Math.ceil(remaining / 1000));
+    return new PersistenceError(
+      "rate_limited",
+      `本机访问密钥尝试过于频繁，请在 ${seconds} 秒后重试`,
+    );
   }
 
   private recordFailure(source: string): void {

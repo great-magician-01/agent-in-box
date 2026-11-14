@@ -313,6 +313,20 @@ export class QqProtocol implements BotProtocol {
       const code = asNumber(body?.err_code) ?? asNumber(body?.code) ?? -1;
       throw new Error(`qq gateway response is missing url (code ${code})`);
     }
+    let gateway: URL;
+    try {
+      gateway = new URL(url);
+    } catch {
+      throw new Error("qq gateway returned an invalid WebSocket URL");
+    }
+    const loopback = ["127.0.0.1", "localhost", "::1"].includes(gateway.hostname);
+    if (
+      gateway.username ||
+      gateway.password ||
+      (gateway.protocol !== "wss:" && !(gateway.protocol === "ws:" && loopback))
+    ) {
+      throw new Error("qq gateway must use wss:// (loopback ws:// is allowed for tests)");
+    }
     return { url };
   }
 

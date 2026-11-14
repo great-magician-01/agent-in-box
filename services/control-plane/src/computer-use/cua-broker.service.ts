@@ -49,6 +49,9 @@ export class CuaBrokerService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleInit(): Promise<void> {
+    if (!["127.0.0.1", "127.0.0.2", "localhost", "::1"].includes(this.host)) {
+      throw new Error(`Computer Use Broker 只允许绑定回环地址，当前为 ${this.host}`);
+    }
     await new Promise<void>((resolve, reject) => {
       this.server.once("error", reject);
       this.server.listen(this.requestedPort, this.host, () => {

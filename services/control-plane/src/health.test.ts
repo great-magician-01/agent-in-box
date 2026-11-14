@@ -12,5 +12,11 @@ describe("buildHealthResponse", () => {
     expect(response.protocolVersion).toBe("0.1.0");
     expect(response.startedAt).toBe("2026-11-10T00:00:00.000Z");
     expect(response.now).toBe("2026-11-10T00:00:05.000Z");
+    expect(response.instanceNonce).toBeUndefined();
+  });
+
+  it("echoes the installation nonce when configured", () => {
+    const response = buildHealthResponse(new Date(), new Date(), "test-nonce");
+    expect(response.instanceNonce).toBe("test-nonce");
   });
 });

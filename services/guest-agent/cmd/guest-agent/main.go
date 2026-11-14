@@ -59,6 +59,17 @@ func splitVerifyRoots(value string) []string {
 	return roots
 }
 
+func splitCommaList(value string) []string {
+	parts := strings.Split(value, ",")
+	items := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			items = append(items, trimmed)
+		}
+	}
+	return items
+}
+
 func defaultWorkspaceRoots() string {
 	if value := strings.TrimSpace(os.Getenv("AGENT_IN_BOX_WORKSPACE_ROOTS")); value != "" {
 		return value
@@ -83,6 +94,7 @@ func main() {
 	verifyRoots := flag.String("verify-roots", defaultVerifyRoots(), "path-list-separated absolute guest roots allowed for read-only completion file evidence (';' on Windows, ':' on Linux)")
 	workspaceRoots := flag.String("workspace-roots", defaultWorkspaceRoots(), "path-list-separated absolute guest roots allowed for project workspace archive and restore")
 	maxWorkspaceArchiveBytes := flag.Int64("workspace-max-bytes", 512<<20, "largest workspace archive accepted or produced (capped at 512 MiB)")
+	allowedClientCIDRs := flag.String("allowed-client-cidrs", "", "comma-separated client CIDRs allowed to call the authenticated API; empty allows any peer")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
@@ -105,7 +117,7 @@ func main() {
 		defer desktop.Close()
 	}
 
-	healthHandler := health.NewHandler("guest-agent", version)
+	healthHandler := health.NewHandler("guest-agent", version, "")
 	rpc := guestagent.NewServerWithOptions(guestagent.ServerOptions{
 		Token:                    token,
 		TokenFile:                *tokenFile,
@@ -118,6 +130,7 @@ func main() {
 		VerifyRoots:              splitVerifyRoots(*verifyRoots),
 		WorkspaceRoots:           splitVerifyRoots(*workspaceRoots),
 		MaxWorkspaceArchiveBytes: *maxWorkspaceArchiveBytes,
+		AllowedClientCIDRs:       splitCommaList(*allowedClientCIDRs),
 	})
 	mux := http.NewServeMux()
 	mux.Handle("/healthz", healthHandler)

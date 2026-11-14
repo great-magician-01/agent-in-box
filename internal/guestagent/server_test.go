@@ -65,6 +65,33 @@ func TestGuestAgentRequiresAuthentication(t *testing.T) {
 	}
 }
 
+func TestGuestAgentRestrictsClientCIDRs(t *testing.T) {
+	server := NewServerWithOptions(ServerOptions{
+		Token:              "secret-token",
+		Desktop:            &fakeDesktop{},
+		AllowedClientCIDRs: []string{"10.0.2.2/32"},
+	})
+	handler := server.Handler()
+
+	request := httptest.NewRequest(http.MethodGet, "/v1/capabilities", nil)
+	request.RemoteAddr = "127.0.0.1:41000"
+	request.Header.Set("Authorization", "Bearer secret-token")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("guest-local client should be forbidden, got %d", recorder.Code)
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/v1/capabilities", nil)
+	request.RemoteAddr = "10.0.2.2:41000"
+	request.Header.Set("Authorization", "Bearer secret-token")
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("forwarded host client should be allowed, got %d: %s", recorder.Code, recorder.Body)
+	}
+}
+
 func TestGuestAgentRejectsMissingTokenConfiguration(t *testing.T) {
 	server := NewServer("", &fakeDesktop{}, nil)
 	request := httptest.NewRequest(http.MethodGet, "/v1/capabilities", nil)

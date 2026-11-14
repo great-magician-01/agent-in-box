@@ -20,7 +20,8 @@ describe("CredentialBridge", () => {
     const bridge = new CredentialBridge({
       descriptorPath,
       credentialStore: {
-        decrypt: (providerId) => (providerId === "anthropic" ? "sk-ant-secret" : null),
+        decrypt: (kind, providerId) =>
+          kind === "model" && providerId === "anthropic" ? "sk-ant-secret" : null,
       },
     });
     await bridge.start();
@@ -46,7 +47,7 @@ describe("CredentialBridge", () => {
         "content-type": "application/json",
         authorization: `Bearer ${descriptor.token}`,
       },
-      body: JSON.stringify({ providerId: "anthropic" }),
+      body: JSON.stringify({ kind: "model", providerId: "anthropic" }),
     });
     expect(allowed.status).toBe(200);
     await expect(allowed.json()).resolves.toEqual({ secret: "sk-ant-secret" });
@@ -57,7 +58,7 @@ describe("CredentialBridge", () => {
         "content-type": "application/json",
         authorization: `Bearer ${descriptor.token}`,
       },
-      body: JSON.stringify({ providerId: "missing" }),
+      body: JSON.stringify({ kind: "model", providerId: "missing" }),
     });
     expect(missing.status).toBe(404);
     await missing.arrayBuffer();

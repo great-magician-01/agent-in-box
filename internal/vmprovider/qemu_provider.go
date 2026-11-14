@@ -22,6 +22,13 @@ import (
 
 const metadataFilename = "vm.json"
 
+// QEMU user-mode networking maps the guest alias 10.0.2.2 to the host's
+// 127.0.0.1. Management surfaces that the in-guest Worker must not reach
+// (VNC, QMP, SSH and the Guest/Worker RPC forwards) therefore bind to
+// 127.0.0.2, which slirp does not alias. Brokers that the Guest legitimately
+// calls stay on 127.0.0.1 and are protected by short-lived tokens.
+const hostLoopbackAlias = "127.0.0.2"
+
 type vmMetadata struct {
 	Spec      VmSpec    `json:"spec"`
 	State     VmState   `json:"state"`
@@ -97,6 +104,26 @@ func NewQemuProvider(config QemuConfig) (*QemuProvider, error) {
 
 var vmIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
 
+func qemuOptionValue(value string) string {
+	// QEMU option lists use commas; a literal comma is escaped by doubling it.
+	return strings.ReplaceAll(value, ",", ",,")
+}
+
+// assertQemuProcess refuses to signal a PID that no longer belongs to QEMU.
+// A crashed supervisor can otherwise kill an unrelated process after PID reuse.
+// If the image cannot be inspected, the caller keeps the existing behavior.
+func assertQemuProcess(pid int) error {
+	image, err := processImage(pid)
+	if err != nil || image == "" {
+		return nil
+	}
+	base := strings.ToLower(filepath.Base(image))
+	if !strings.Contains(base, "qemu") {
+		return fmt.Errorf("refusing to kill pid %d (%s): not a QEMU process", pid, image)
+	}
+	return nil
+}
+
 func validateSpec(spec VmSpec) error {
 	if _, err := spec.EffectiveOsFamily(); err != nil {
 		return err
@@ -118,6 +145,37 @@ func validateSpec(spec VmSpec) error {
 	}
 	if spec.DiskSizeGB < 1 || spec.DiskSizeGB > 2048 {
 		return fmt.Errorf("%w: disk size must be 1..2048 GB", ErrInvalidSpec)
+	}
+	if spec.VNCDisplay < 0 || spec.VNCDisplay > 30 {
+		return fmt.Errorf("%w: vnc display must be 0..30", ErrInvalidSpec)
+	}
+	ports := []struct {
+		name  string
+		value int
+	}{
+		{"qmp", spec.QMPPort},
+		{"ssh", spec.SSHHostPort},
+		{"guest", spec.GuestHostPort},
+		{"worker", spec.WorkerHostPort},
+	}
+	if spec.VNCDisplay > 0 {
+		ports = append(ports, struct {
+			name  string
+			value int
+		}{"vnc", 5900 + spec.VNCDisplay})
+	}
+	seen := map[int]string{}
+	for _, port := range ports {
+		if port.value == 0 {
+			continue
+		}
+		if port.value < 1 || port.value > 65535 {
+			return fmt.Errorf("%w: %s port must be 1..65535", ErrInvalidSpec, port.name)
+		}
+		if previous, ok := seen[port.value]; ok {
+			return fmt.Errorf("%w: %s and %s use the same host port %d", ErrInvalidSpec, previous, port.name, port.value)
+		}
+		seen[port.value] = port.name
 	}
 	return nil
 }
@@ -166,7 +224,7 @@ func (p *QemuProvider) save(metadata *vmMetadata) error {
 }
 
 func freePort() (int, error) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := net.Listen("tcp", net.JoinHostPort(hostLoopbackAlias, "0"))
 	if err != nil {
 		return 0, err
 	}
@@ -248,7 +306,7 @@ func freeVNCDisplay(used map[int]bool) (int, error) {
 		if used[display] {
 			continue
 		}
-		address := net.JoinHostPort("127.0.0.1", strconv.Itoa(5900+display))
+		address := net.JoinHostPort(hostLoopbackAlias, strconv.Itoa(5900+display))
 		listener, err := net.Listen("tcp", address)
 		if err == nil {
 			_ = listener.Close()
@@ -343,7 +401,7 @@ func (p *QemuProvider) CreateVm(ctx context.Context, spec VmSpec) (VmState, erro
 			SSHHostPort:    spec.SSHHostPort,
 			GuestHostPort:  spec.GuestHostPort,
 			WorkerHostPort: spec.WorkerHostPort,
-			ConsoleURL:     fmt.Sprintf("vnc://127.0.0.1:%d", 5900+spec.VNCDisplay),
+			ConsoleURL:     fmt.Sprintf("vnc://%s:%d", hostLoopbackAlias, 5900+spec.VNCDisplay),
 			DiskPath:       diskPath,
 			GuestHealth:    "unknown",
 		},
@@ -413,13 +471,13 @@ func buildQemuArgsWithResolver(metadata *vmMetadata, accelerator string, cpuMode
 		// A stock Windows image has no virtio-block driver. IDE/AHCI works on
 		// q35 out of the box and keeps the golden image free of third-party
 		// drivers; e1000 is also inbox on supported Windows versions.
-		args = append(args, "-drive", "file="+diskPath+",if=ide,format=qcow2")
+		args = append(args, "-drive", "file="+qemuOptionValue(diskPath)+",if=ide,format=qcow2")
 		if spec.SeedImagePath != "" {
 			seedPath, err := resolve(spec.SeedImagePath)
 			if err != nil {
 				return nil, fmt.Errorf("seed image: %w", err)
 			}
-			args = append(args, "-drive", "file="+seedPath+",if=ide,media=cdrom,format=raw,readonly=on")
+			args = append(args, "-drive", "file="+qemuOptionValue(seedPath)+",if=ide,media=cdrom,format=raw,readonly=on")
 		}
 		if spec.Desktop {
 			// Standard VGA uses the Windows inbox display driver. xHCI plus
@@ -428,13 +486,13 @@ func buildQemuArgsWithResolver(metadata *vmMetadata, accelerator string, cpuMode
 			args = append(args, "-vga", "std", "-device", "qemu-xhci", "-device", "usb-tablet")
 		}
 	} else {
-		args = append(args, "-drive", "file="+diskPath+",if=virtio,format=qcow2")
+		args = append(args, "-drive", "file="+qemuOptionValue(diskPath)+",if=virtio,format=qcow2")
 		if spec.SeedImagePath != "" {
 			seedPath, err := resolve(spec.SeedImagePath)
 			if err != nil {
 				return nil, fmt.Errorf("seed image: %w", err)
 			}
-			args = append(args, "-drive", "file="+seedPath+",if=virtio,media=cdrom,format=raw,readonly=on")
+			args = append(args, "-drive", "file="+qemuOptionValue(seedPath)+",if=virtio,media=cdrom,format=raw,readonly=on")
 		}
 		if spec.Desktop {
 			// Remove the default std VGA: leaving it beside virtio-gpu made Xorg
@@ -443,12 +501,12 @@ func buildQemuArgsWithResolver(metadata *vmMetadata, accelerator string, cpuMode
 			args = append(args, "-vga", "none", "-device", "virtio-gpu-pci", "-device", "virtio-tablet-pci")
 		}
 	}
-	network := fmt.Sprintf("user,id=n0,hostfwd=tcp:127.0.0.1:%d-:22", spec.SSHHostPort)
+	network := fmt.Sprintf("user,id=n0,hostfwd=tcp:%s:%d-:22", hostLoopbackAlias, spec.SSHHostPort)
 	if spec.GuestHostPort > 0 {
-		network += fmt.Sprintf(",hostfwd=tcp:127.0.0.1:%d-:7611", spec.GuestHostPort)
+		network += fmt.Sprintf(",hostfwd=tcp:%s:%d-:7611", hostLoopbackAlias, spec.GuestHostPort)
 	}
 	if spec.WorkerHostPort > 0 {
-		network += fmt.Sprintf(",hostfwd=tcp:127.0.0.1:%d-:7612", spec.WorkerHostPort)
+		network += fmt.Sprintf(",hostfwd=tcp:%s:%d-:7612", hostLoopbackAlias, spec.WorkerHostPort)
 	}
 	args = append(args, "-netdev", network)
 	if osFamily == OsWindows {
@@ -458,16 +516,16 @@ func buildQemuArgsWithResolver(metadata *vmMetadata, accelerator string, cpuMode
 	}
 	args = append(args,
 		"-display", "none",
-		"-vnc", fmt.Sprintf("127.0.0.1:%d,share=force-shared", spec.VNCDisplay),
-		"-serial", "file:"+consolePath,
-		"-qmp", fmt.Sprintf("tcp:127.0.0.1:%d,server,nowait", spec.QMPPort),
+		"-vnc", fmt.Sprintf("%s:%d,share=force-shared", hostLoopbackAlias, spec.VNCDisplay),
+		"-serial", "file:"+qemuOptionValue(consolePath),
+		"-qmp", fmt.Sprintf("tcp:%s:%d,server,nowait", hostLoopbackAlias, spec.QMPPort),
 		"-pidfile", pidPath,
 	)
 	return args, nil
 }
 
 func (p *QemuProvider) qmpAddress(metadata *vmMetadata) string {
-	return net.JoinHostPort("127.0.0.1", strconv.Itoa(metadata.Spec.QMPPort))
+	return net.JoinHostPort(hostLoopbackAlias, strconv.Itoa(metadata.Spec.QMPPort))
 }
 
 func (p *QemuProvider) failStart(metadata *vmMetadata, err error) (VmState, error) {
@@ -517,7 +575,7 @@ func (p *QemuProvider) StartVm(ctx context.Context, vmID string) (VmState, error
 			return p.failStart(metadata, displayErr)
 		}
 		metadata.Spec.VNCDisplay = display
-		metadata.State.ConsoleURL = fmt.Sprintf("vnc://127.0.0.1:%d", 5900+display)
+		metadata.State.ConsoleURL = fmt.Sprintf("vnc://%s:%d", hostLoopbackAlias, 5900+display)
 		if err := p.save(metadata); err != nil {
 			p.createMu.Unlock()
 			return p.failStart(metadata, err)

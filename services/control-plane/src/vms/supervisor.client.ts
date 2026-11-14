@@ -15,6 +15,7 @@ const SUPERVISOR_SNAPSHOT_TIMEOUT_MS = 330_000;
 export interface SupervisorOptions {
   baseUrl?: string;
   tokenFile?: string;
+  instanceNonce?: string;
   fetchImpl?: typeof fetch;
   requestTimeoutMs?: number;
 }
@@ -39,7 +40,9 @@ export interface SupervisorCreateSpec {
 
 function normalizeBaseUrl(value: string): string {
   const url = new URL(value);
-  const loopback = ["127.0.0.1", "localhost", "::1"].includes(url.hostname.replace(/^\[|\]$/g, ""));
+  const loopback = ["127.0.0.1", "127.0.0.2", "localhost", "::1"].includes(
+    url.hostname.replace(/^\[|\]$/g, ""),
+  );
   if (url.protocol !== "http:" || !loopback || url.username || url.password) {
     throw new PersistenceError("validation_failed", "Supervisor 地址必须是本机回环 HTTP 地址");
   }
@@ -50,6 +53,7 @@ function normalizeBaseUrl(value: string): string {
 export class SupervisorClient {
   private readonly baseUrl: string;
   private readonly tokenFile: string;
+  private readonly instanceNonce: string | null;
   private readonly fetchImpl: typeof fetch;
   private readonly requestTimeoutMs: number;
 
@@ -58,13 +62,15 @@ export class SupervisorClient {
     @Optional() @Inject(SUPERVISOR_OPTIONS) options: SupervisorOptions = {},
   ) {
     this.baseUrl = normalizeBaseUrl(
-      options.baseUrl ?? process.env.AGENT_IN_BOX_SUPERVISOR_URL?.trim() ?? "http://127.0.0.1:7610",
+      options.baseUrl ?? process.env.AGENT_IN_BOX_SUPERVISOR_URL?.trim() ?? "http://127.0.0.2:7610",
     );
     this.tokenFile =
       options.tokenFile ??
       process.env.AGENT_IN_BOX_SUPERVISOR_TOKEN_FILE?.trim() ??
       path.join(database.dataRoot, "supervisor-acl.token");
     this.fetchImpl = options.fetchImpl ?? fetch;
+    this.instanceNonce =
+      options.instanceNonce ?? process.env.AGENT_IN_BOX_SUPERVISOR_NONCE?.trim() ?? null;
     this.requestTimeoutMs = options.requestTimeoutMs ?? SUPERVISOR_REQUEST_TIMEOUT_MS;
   }
 
@@ -127,6 +133,32 @@ export class SupervisorClient {
     return this.request("DELETE", `/api/v1/vms/${encodeURIComponent(id)}`);
   }
 
+  private async verifyIdentity(): Promise<void> {
+    if (!this.instanceNonce) return;
+    let response: Response;
+    try {
+      response = await this.fetchImpl(`${this.baseUrl}/healthz`, {
+        headers: { accept: "application/json" },
+        signal: AbortSignal.timeout(2000),
+        redirect: "error",
+      });
+    } catch (error) {
+      throw new PersistenceError(
+        "unavailable",
+        `VM Supervisor 身份校验失败：${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    const body = (await response.json().catch(() => null)) as { instanceNonce?: unknown } | null;
+    if (
+      !response.ok ||
+      !body ||
+      typeof body.instanceNonce !== "string" ||
+      body.instanceNonce !== this.instanceNonce
+    ) {
+      throw new PersistenceError("unavailable", "VM Supervisor 实例身份不匹配，已拒绝发送 ACL 令牌");
+    }
+  }
+
   private action(id: string, action: string, body: unknown = {}): Promise<SupervisorVmState> {
     return this.request("POST", `/api/v1/vms/${encodeURIComponent(id)}/${action}`, body);
   }
@@ -137,6 +169,7 @@ export class SupervisorClient {
     body?: unknown,
     timeoutMs: number = this.requestTimeoutMs,
   ): Promise<T> {
+    await this.verifyIdentity();
     let token: string;
     try {
       const info = await lstat(this.tokenFile);

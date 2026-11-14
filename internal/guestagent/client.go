@@ -189,7 +189,20 @@ func (c *Client) Screenshot(ctx context.Context) (image.Image, ScreenshotMetadat
 	if response.StatusCode != http.StatusOK {
 		return nil, ScreenshotMetadata{}, decodeRPCError(response)
 	}
-	capture, err := png.Decode(io.LimitReader(response.Body, 64<<20))
+	captureBytes, err := io.ReadAll(io.LimitReader(response.Body, 64<<20))
+	if err != nil {
+		return nil, ScreenshotMetadata{}, fmt.Errorf("read guest screenshot: %w", err)
+	}
+	config, err := png.DecodeConfig(bytes.NewReader(captureBytes))
+	if err != nil {
+		return nil, ScreenshotMetadata{}, fmt.Errorf("decode guest screenshot header: %w", err)
+	}
+	if config.Width <= 0 || config.Height <= 0 ||
+		config.Width > 16384 || config.Height > 16384 ||
+		int64(config.Width)*int64(config.Height) > 100_000_000 {
+		return nil, ScreenshotMetadata{}, fmt.Errorf("guest screenshot dimensions are not allowed")
+	}
+	capture, err := png.Decode(bytes.NewReader(captureBytes))
 	if err != nil {
 		return nil, ScreenshotMetadata{}, fmt.Errorf("decode guest screenshot: %w", err)
 	}

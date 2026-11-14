@@ -244,7 +244,9 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     } else {
       this.connectorFactory = (target) =>
         new WorkerRpcClient({
-          baseUrl: `http://127.0.0.1:${target.hostPort}`,
+          baseUrl: `http://${
+            process.env.AGENT_IN_BOX_GUEST_LOOPBACK_HOST?.trim() || "127.0.0.2"
+          }:${target.hostPort}`,
           tokenFile:
             process.env.AGENT_IN_BOX_WORKER_TOKEN_FILE?.trim() ||
             `${target.storageRoot}/worker-rpc.token`,
@@ -355,20 +357,23 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
       developmentMode: input.developmentMode === true,
       developmentAutoEnable: input.developmentMode === true && input.aiPluginAutoEnable === true,
     });
-    const token = await this.tokens.issue({
-      workerId: worker.id,
-      vmId: worker.vmId,
-      sessionId: "pending",
-      providerId: model.provider.id,
-      model: model.model.id,
-      taskId: null,
-    });
-    const cuaToken = await this.cuaTokens.issue({
-      workerId: worker.id,
-      vmId: worker.vmId,
-      sessionId: "pending",
-      taskId: null,
-    });
+    let issuedTokens: Awaited<ReturnType<WorkerRuntimeService["issueWorkerTokens"]>>;
+    try {
+      issuedTokens = await this.issueWorkerTokens(
+        worker,
+        model.provider.id,
+        model.model.id,
+      );
+    } catch (error) {
+      await this.workers.updateRuntime(worker.id, {
+        status: "failed",
+        currentTaskId: null,
+        lastErrorCode: "token_issue_failed",
+        lastErrorMessage: errorMessage(error),
+      });
+      throw error;
+    }
+    const { token, cuaToken } = issuedTokens;
     try {
       const pluginSession = await this.newPluginSession(worker.id, worker.projectId);
       const development =
@@ -572,7 +577,13 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
       binding?.guest_workspace_path ?? null,
     );
     const artifacts = await this.collectArtifacts(workerId);
-    await this.workers.updateRuntime(workerId, { status: "archiving", currentTaskId: null });
+    const latest = this.active.get(workerId);
+    if (!latest || latest.taskId || latest.leaseId) {
+      throw new PersistenceError("conflict", "Worker 正在开始执行任务，不能归档");
+    }
+    if (!(await this.workers.markArchivingIfIdle(workerId))) {
+      throw new PersistenceError("conflict", "Worker 已认领任务，不能归档");
+    }
     let archived: { archiveRef: string; summary: string };
     try {
       archived = await active.connection.archive(active.sessionId);
@@ -840,7 +851,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
         this.cuaTokens.bindSession(cuaToken.context.id, handle.sessionId),
       ]);
       await this.workers.updateRuntime(workerId, {
-        status: "idle",
+        status: "restoring",
         currentTaskId: null,
         agentSessionRef: handle.archiveRef ?? nativeRef,
         sessionVersion: handle.sessionVersion ?? worker.sessionVersion,
@@ -865,6 +876,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
       if (archive) await this.archives.markRestored(archive.id);
       if (!context.injected) {
         notice = `${notice ? `${notice}；` : ""}恢复环境注入失败，请在下一回合先调用 vm_screenshot 重新观察`;
+        await this.workers.updateRuntime(workerId, { status: "idle", currentTaskId: null });
       }
       this.logger.log(
         `Worker ${workerId} restored with ${restoreMode} session${notice ? `: ${notice}` : ""}`,
@@ -899,6 +911,29 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
         lastErrorMessage: errorMessage(error),
       });
       throw new PersistenceError("unavailable", `Worker 会话恢复失败：${errorMessage(error)}`);
+    }
+  }
+
+  private async issueWorkerTokens(worker: WorkerRecord, providerId: string, modelId: string) {
+    const token = await this.tokens.issue({
+      workerId: worker.id,
+      vmId: worker.vmId,
+      sessionId: "pending",
+      providerId,
+      model: modelId,
+      taskId: null,
+    });
+    try {
+      const cuaToken = await this.cuaTokens.issue({
+        workerId: worker.id,
+        vmId: worker.vmId,
+        sessionId: "pending",
+        taskId: null,
+      });
+      return { token, cuaToken };
+    } catch (error) {
+      await this.tokens.revoke(token.context.id, "token_issue_failed").catch(() => undefined);
+      throw error;
     }
   }
 
@@ -1362,7 +1397,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     this.lastIdleCheckAt = now;
     const policy = this.lifecyclePolicyOverride ?? (await this.settings.workerLifecyclePolicy());
     if (!policy.autoArchiveEnabled) return;
-    const workers = await this.workers.listActive(undefined, 200);
+    const workers = await this.workers.listForTick(500);
     for (const worker of workers) {
       if (worker.status !== "idle") continue;
       const active = this.active.get(worker.id);
@@ -1598,6 +1633,14 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  private async bestEffort(label: string, operation: () => Promise<unknown>): Promise<void> {
+    try {
+      await operation();
+    } catch (error) {
+      this.logger.warn(`${label} failed: ${errorMessage(error)}`);
+    }
+  }
+
   private async finishTurn(
     workerId: string,
     active: ActiveWorker,
@@ -1614,41 +1657,64 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     active.textBuffer = "";
     active.contextInjection = false;
     if (summary) {
-      await this.appendMessage(worker, taskId, "assistant", "event", summary);
+      await this.bestEffort("append turn summary", () =>
+        this.appendMessage(worker, taskId, "assistant", "event", summary),
+      );
     }
     if (active.leaseId) {
-      await this.leases.release(worker.vmId, active.leaseId);
+      const leaseId = active.leaseId;
+      await this.bestEffort("release execution lease", () =>
+        this.leases.release(worker.vmId, leaseId),
+      );
       active.leaseId = null;
     }
-    if (active.tokenId) await this.tokens.bindTask(active.tokenId, null);
-    if (active.cuaTokenId) await this.cuaTokens.bindTask(active.cuaTokenId, null);
+    if (active.tokenId) {
+      await this.bestEffort("unbind model token", () =>
+        this.tokens.bindTask(active.tokenId!, null),
+      );
+    }
+    if (active.cuaTokenId) {
+      await this.bestEffort("unbind cua token", () =>
+        this.cuaTokens.bindTask(active.cuaTokenId!, null),
+      );
+    }
     active.taskId = null;
     active.completedTaskAt = null;
-    await this.markInputs(workerId, "delivered");
-    await this.workers.updateRuntime(workerId, {
-      status: "idle",
-      currentTaskId: null,
-      lastHeartbeatAt: nowIso(),
-    });
+    await this.bestEffort("mark inputs delivered", () => this.markInputs(workerId, "delivered"));
+    await this.bestEffort("update worker runtime", () =>
+      this.workers.updateRuntime(workerId, {
+        status: "idle",
+        currentTaskId: null,
+        lastHeartbeatAt: nowIso(),
+      }),
+    );
     if (taskId) {
-      const task = await this.tasks.get(taskId);
+      const task = await this.tasks.get(taskId).catch(() => null);
       if (task?.status === "completed") {
-        await this.cua.finishExecution(taskId, "completed");
+        await this.bestEffort("finish cua execution", () =>
+          this.cua.finishExecution(taskId, "completed"),
+        );
         return;
       }
       if (task && (task.status === "running" || task.status === "waiting_approval")) {
-        await this.tasks.recordWorkerEvent(taskId, "worker.turn_finished", {
-          summary: summary || null,
-        });
-        await this.tasks.block(
-          taskId,
-          interruptedCode ?? "awaiting_verification",
-          interruptedCode
-            ? "Worker 回合异常结束，需要重新观察 VM 后再重试"
-            : "Worker 回合结束但没有通过独立完成校验，任务保持 Blocked",
-          summary || undefined,
+        await this.bestEffort("record turn finished", () =>
+          this.tasks.recordWorkerEvent(taskId, "worker.turn_finished", {
+            summary: summary || null,
+          }),
         );
-        await this.cua.finishExecution(taskId, interruptedCode ? "failed" : "blocked");
+        await this.bestEffort("block unverified task", () =>
+          this.tasks.block(
+            taskId,
+            interruptedCode ?? "awaiting_verification",
+            interruptedCode
+              ? "Worker 回合异常结束，需要重新观察 VM 后再重试"
+              : "Worker 回合结束但没有通过独立完成校验，任务保持 Blocked",
+            summary || undefined,
+          ),
+        );
+        await this.bestEffort("finish cua execution", () =>
+          this.cua.finishExecution(taskId, interruptedCode ? "failed" : "blocked"),
+        );
       }
     }
   }
@@ -1665,44 +1731,64 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     active.textBuffer = "";
     active.aborting = true;
     active.contextInjection = false;
-    await this.markInputs(worker.id, "cancelled");
+    await this.bestEffort("mark inputs cancelled", () =>
+      this.markInputs(worker.id, "cancelled"),
+    );
     try {
       await active.connection.abort(active.sessionId);
     } catch (error) {
       this.logger.warn(`Worker abort RPC failed: ${errorMessage(error)}`);
     }
     if (partial) {
-      await this.appendMessage(worker, taskId, "assistant", "event", partial);
+      await this.bestEffort("append aborted turn", () =>
+        this.appendMessage(worker, taskId, "assistant", "event", partial),
+      );
     }
     if (active.leaseId) {
-      await this.leases.release(worker.vmId, active.leaseId);
+      const leaseId = active.leaseId;
+      await this.bestEffort("release execution lease", () =>
+        this.leases.release(worker.vmId, leaseId),
+      );
       active.leaseId = null;
     }
-    if (active.tokenId) await this.tokens.bindTask(active.tokenId, null);
-    if (active.cuaTokenId) await this.cuaTokens.bindTask(active.cuaTokenId, null);
+    if (active.tokenId) {
+      await this.bestEffort("unbind model token", () =>
+        this.tokens.bindTask(active.tokenId!, null),
+      );
+    }
+    if (active.cuaTokenId) {
+      await this.bestEffort("unbind cua token", () =>
+        this.cuaTokens.bindTask(active.cuaTokenId!, null),
+      );
+    }
     active.taskId = null;
     active.completedTaskAt = null;
     if (taskId) {
-      const task = await this.tasks.get(taskId);
-      if (
-        !alreadyTerminal &&
-        task &&
-        (task.status === "running" || task.status === "waiting_approval")
-      ) {
-        await this.tasks.recordWorkerEvent(taskId, "worker.aborted", { code, message });
-        await this.tasks.block(taskId, code, message, partial || undefined);
-        await this.cua.finishExecution(taskId, "blocked");
-      } else if (task?.status === "cancelled") {
-        await this.cua.finishExecution(taskId, "cancelled");
-      } else if (task?.status === "completed") {
-        await this.cua.finishExecution(taskId, "completed");
-      }
+      await this.bestEffort("finish aborted task", async () => {
+        const task = await this.tasks.get(taskId);
+        if (
+          !alreadyTerminal &&
+          task &&
+          (task.status === "running" || task.status === "waiting_approval")
+        ) {
+          await this.tasks.recordWorkerEvent(taskId, "worker.aborted", { code, message });
+          await this.tasks.block(taskId, code, message, partial || undefined);
+          await this.cua.finishExecution(taskId, "blocked");
+        } else if (task?.status === "cancelled") {
+          await this.cua.finishExecution(taskId, "cancelled");
+        } else if (task?.status === "completed") {
+          await this.cua.finishExecution(taskId, "completed");
+        }
+      });
     }
-    await this.workers.updateRuntime(worker.id, {
-      status: "idle",
-      currentTaskId: null,
-      lastHeartbeatAt: nowIso(),
-    });
+    await this.bestEffort("update worker runtime", () =>
+      this.workers.updateRuntime(worker.id, {
+        status: "idle",
+        currentTaskId: null,
+        lastHeartbeatAt: nowIso(),
+      }),
+    );
+    active.aborting = false;
   }
 
   private async failWorker(
@@ -1817,15 +1903,25 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     if (this.ticking || this.stopped) return;
     this.ticking = true;
     try {
-      const workers = await this.workers.listActive(undefined, 200);
+      const workers = await this.workers.listForTick(500);
       for (const worker of workers) {
         const active = this.active.get(worker.id);
         if (!active) continue;
-        await this.reconcileActive(worker, active);
+        try {
+          await this.reconcileActive(worker, active);
+        } catch (error) {
+          this.logger.warn(
+            `Worker ${worker.id} reconcile failed: ${errorMessage(error)}`,
+          );
+        }
       }
       for (const worker of workers) {
         if (worker.status !== "idle" || this.active.get(worker.id)?.taskId) continue;
-        await this.claimAndRun(worker);
+        try {
+          await this.claimAndRun(worker);
+        } catch (error) {
+          this.logger.warn(`Worker ${worker.id} claim failed: ${errorMessage(error)}`);
+        }
       }
       await this.autoArchiveIdle();
     } catch (error) {
@@ -1949,11 +2045,24 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
       .where("id", "=", worker.vmId)
       .executeTakeFirst();
     if (vm?.power_state !== "running") return;
-    const claimed = await this.tasks.claimNext(worker.vmId, worker.id);
-    if (!claimed) return;
+    // Claim the Worker row before claiming a task. Archive transitions from
+    // idle to archiving with the same precondition, so exactly one wins.
+    if (!(await this.workers.claimIdle(worker.id))) return;
+    let claimed: TaskRecord | null;
+    try {
+      claimed = await this.tasks.claimNext(worker.vmId, worker.id);
+    } catch (error) {
+      await this.workers.releaseClaim(worker.id);
+      throw error;
+    }
+    if (!claimed) {
+      await this.workers.releaseClaim(worker.id);
+      return;
+    }
     const active = this.active.get(worker.id);
     if (!active) {
       await this.tasks.fail(claimed.id, "worker_not_connected", "任务认领后 Worker 会话不存在");
+      await this.workers.releaseClaim(worker.id);
       return;
     }
     try {

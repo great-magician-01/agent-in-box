@@ -568,7 +568,9 @@ function inboundDetails(
     const event = asRecord(root.event);
     const message = asRecord(event.message ?? root.message);
     const chatType = stringValue(message.chat_type);
-    const kind = chatType === "group" ? "group" : "p2p";
+    // Feishu has more group variants (e.g. topic_group). Only p2p is a direct
+    // chat; anything else must pass the group whitelist and @-mention checks.
+    const kind = chatType === "p2p" ? "p2p" : "group";
     const mentions = Array.isArray(message.mentions) ? message.mentions : [];
     const mentioned = mentions.some((mention) => {
       const item = asRecord(mention);

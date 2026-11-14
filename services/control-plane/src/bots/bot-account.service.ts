@@ -304,7 +304,14 @@ function normalizeCredentialProviderId(raw: unknown): string {
       "凭据标识必须以小写字母或数字开头，且不超过 40 个字符",
     );
   }
-  return raw.trim();
+  const value = raw.trim();
+  if (!value.startsWith("bot-")) {
+    throw new PersistenceError(
+      "validation_failed",
+      "机器人凭据标识必须以 bot- 开头，以便与模型凭据隔离",
+    );
+  }
+  return value;
 }
 
 function defaultCredentialProviderId(platform: BotPlatform, appId: string): string {

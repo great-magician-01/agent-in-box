@@ -1,5 +1,4 @@
-/* eslint-disable react-hooks/set-state-in-effect -- workspace snapshots refresh from server events */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ProjectView, WorkerView } from "@agent-in-box/protocol";
 import type { AppView } from "./App";
 import { api, subscribeTaskEvents } from "./api";
@@ -41,31 +40,48 @@ export function WorkspaceSidebar({
   const [newSessionOpen, setNewSessionOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [creatingFor, setCreatingFor] = useState<string | null>(null);
+  const loadInFlight = useRef(false);
+  const loadQueued = useRef(false);
 
   const load = useCallback(async (): Promise<void> => {
+    if (loadInFlight.current) {
+      loadQueued.current = true;
+      return;
+    }
+    loadInFlight.current = true;
     try {
-      const [allProjects, nextWorkers] = await Promise.all([api.projects(true), api.workers()]);
-      const nextProjects = allProjects.filter((item) => item.project.archivedAt === null);
-      setProjects(nextProjects);
-      setWorkers(nextWorkers.filter((item) => item.worker.archivedAt === null));
-      setExpanded((current) => {
-        if (current.size > 0) return current;
-        return new Set(nextProjects.slice(0, 1).map((item) => item.project.id));
-      });
-      // Conversation names live on the project detail, not on WorkerRecord.
-      const details = await Promise.all(
-        nextProjects.map((item) => api.project(item.project.id).catch(() => null)),
-      );
-      const titles = new Map<string, string>();
-      for (const detail of details) {
-        for (const conversation of detail?.conversations ?? []) {
-          titles.set(conversation.id, conversation.title || "新会话");
+      do {
+        loadQueued.current = false;
+        try {
+          const [allProjects, nextWorkers] = await Promise.all([
+            api.projects(true),
+            api.workers(),
+          ]);
+          const nextProjects = allProjects.filter((item) => item.project.archivedAt === null);
+          setProjects(nextProjects);
+          setWorkers(nextWorkers.filter((item) => item.worker.archivedAt === null));
+          setExpanded((current) => {
+            if (current.size > 0) return current;
+            return new Set(nextProjects.slice(0, 1).map((item) => item.project.id));
+          });
+          // Conversation names live on the project detail, not on WorkerRecord.
+          const details = await Promise.all(
+            nextProjects.map((item) => api.project(item.project.id).catch(() => null)),
+          );
+          const titles = new Map<string, string>();
+          for (const detail of details) {
+            for (const conversation of detail?.conversations ?? []) {
+              titles.set(conversation.id, conversation.title || "新会话");
+            }
+          }
+          setConversationTitles(titles);
+          setError(null);
+        } catch (cause) {
+          setError(errorMessage(cause));
         }
-      }
-      setConversationTitles(titles);
-      setError(null);
-    } catch (cause) {
-      setError(errorMessage(cause));
+      } while (loadQueued.current);
+    } finally {
+      loadInFlight.current = false;
     }
   }, []);
 

@@ -1,6 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { CredentialSaveRequest, DesktopCredentialStatus } from "@agent-in-box/protocol";
+import type {
+  CredentialKind,
+  CredentialSaveRequest,
+  DesktopCredentialStatus,
+} from "@agent-in-box/protocol";
 import type { LoggerLike } from "./logger";
 
 export interface SafeStoragePort {
@@ -29,8 +33,31 @@ interface CredentialFile {
 }
 
 const PROVIDER_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,39}$/;
+const STORED_KEY_PATTERN = /^(model|bot):([a-z0-9][a-z0-9_-]{0,39})$/;
 const MIN_SECRET_LENGTH = 8;
 const MAX_SECRET_LENGTH = 16_384;
+
+function credentialKey(kind: CredentialKind, providerId: string): string {
+  return `${kind}:${providerId}`;
+}
+
+function legacyKind(providerId: string): CredentialKind {
+  // Bot IDs created by the UI use the bot- prefix. Ambiguous legacy IDs are
+  // treated as model credentials; bot accounts must use the prefix before
+  // their credential can be resolved.
+  return providerId.startsWith("bot-") ? "bot" : "model";
+}
+
+function parseStoredKey(key: string): { kind: CredentialKind; providerId: string } | null {
+  const match = STORED_KEY_PATTERN.exec(key);
+  if (match?.[1] && match[2]) {
+    return { kind: match[1] as CredentialKind, providerId: match[2] };
+  }
+  if (PROVIDER_ID_PATTERN.test(key)) {
+    return { kind: legacyKind(key), providerId: key };
+  }
+  return null;
+}
 
 export class CredentialStore {
   private readonly filePath: string;
@@ -45,6 +72,31 @@ export class CredentialStore {
     this.platform = options.platform ?? process.platform;
     this.now = options.now ?? (() => new Date());
     this.logger = options.logger;
+    this.migrateLegacyKeys();
+  }
+
+  private migrateLegacyKeys(): void {
+    try {
+      const file = this.readFile();
+      let changed = false;
+      for (const [key, value] of Object.entries(file.credentials)) {
+        if (key.includes(":")) continue;
+        const kind = legacyKind(key);
+        const namespaced = credentialKey(kind, key);
+        if (!file.credentials[namespaced]) {
+          file.credentials[namespaced] = value;
+        }
+        delete file.credentials[key];
+        changed = true;
+      }
+      if (changed) {
+        this.writeFile(file);
+        this.logger?.info("已把旧凭据迁移到模型/机器人命名空间");
+      }
+    } catch (error) {
+      // Fail closed: an unreadable file is reported by status/save/decrypt.
+      this.logger?.warn("迁移旧凭据失败", { error: String(error) });
+    }
   }
 
   private availability(): {
@@ -102,7 +154,7 @@ export class CredentialStore {
           record.credentials as Record<string, unknown>,
         )) {
           if (
-            PROVIDER_ID_PATTERN.test(providerId) &&
+            parseStoredKey(providerId) !== null &&
             typeof value === "object" &&
             value !== null &&
             typeof (value as Record<string, unknown>).ciphertext === "string" &&
@@ -166,8 +218,20 @@ export class CredentialStore {
       storageBackend: availability.backend,
       message: null,
       providers: Object.entries(file.credentials)
-        .map(([providerId, value]) => ({ providerId, updatedAt: value.updatedAt }))
-        .sort((left, right) => left.providerId.localeCompare(right.providerId)),
+        .map(([key, value]) => {
+          const parsed = parseStoredKey(key);
+          return parsed
+            ? { kind: parsed.kind, providerId: parsed.providerId, updatedAt: value.updatedAt }
+            : null;
+        })
+        .filter(
+          (item): item is { kind: CredentialKind; providerId: string; updatedAt: string } =>
+            item !== null,
+        )
+        .sort(
+          (left, right) =>
+            left.kind.localeCompare(right.kind) || left.providerId.localeCompare(right.providerId),
+        ),
     };
   }
 
@@ -175,17 +239,18 @@ export class CredentialStore {
     if (
       typeof request !== "object" ||
       request === null ||
+      (request.kind !== "model" && request.kind !== "bot") ||
       typeof request.providerId !== "string" ||
       !PROVIDER_ID_PATTERN.test(request.providerId)
     ) {
-      throw new Error("模型 Provider 标识格式无效");
+      throw new Error("凭据类型或 Provider 标识格式无效");
     }
     if (typeof request.secret !== "string") {
-      throw new Error("模型凭据格式无效");
+      throw new Error("凭据格式无效");
     }
     const secret = request.secret.trim();
     if (secret.length < MIN_SECRET_LENGTH || secret.length > MAX_SECRET_LENGTH) {
-      throw new Error(`模型凭据长度必须在 ${MIN_SECRET_LENGTH} 到 ${MAX_SECRET_LENGTH} 之间`);
+      throw new Error(`凭据长度必须在 ${MIN_SECRET_LENGTH} 到 ${MAX_SECRET_LENGTH} 之间`);
     }
 
     const availability = this.availability();
@@ -195,37 +260,43 @@ export class CredentialStore {
 
     const encrypted = this.safeStorage.encryptString(secret);
     const file = this.readFile();
-    file.credentials[request.providerId] = {
+    file.credentials[credentialKey(request.kind, request.providerId)] = {
       ciphertext: encrypted.toString("base64"),
       updatedAt: this.now().toISOString(),
     };
     this.writeFile(file);
-    this.logger?.info("模型凭据已写入系统安全存储", {
+    this.logger?.info("凭据已写入系统安全存储", {
+      kind: request.kind,
       providerId: request.providerId,
     });
     return this.status();
   }
 
-  remove(providerId: string): DesktopCredentialStatus {
-    if (typeof providerId !== "string" || !PROVIDER_ID_PATTERN.test(providerId)) {
-      throw new Error("模型 Provider 标识格式无效");
+  remove(kind: CredentialKind, providerId: string): DesktopCredentialStatus {
+    if (
+      (kind !== "model" && kind !== "bot") ||
+      typeof providerId !== "string" ||
+      !PROVIDER_ID_PATTERN.test(providerId)
+    ) {
+      throw new Error("凭据类型或 Provider 标识格式无效");
     }
     const file = this.readFile();
-    if (file.credentials[providerId]) {
-      delete file.credentials[providerId];
+    const key = credentialKey(kind, providerId);
+    if (file.credentials[key]) {
+      delete file.credentials[key];
       this.writeFile(file);
-      this.logger?.info("模型凭据已删除", { providerId });
+      this.logger?.info("凭据已删除", { kind, providerId });
     }
     return this.status();
   }
 
-  /** Only used by the (future) Model Broker in the main process. */
-  decrypt(providerId: string): string | null {
+  /** Only reachable from the loopback bridge in the Electron main process. */
+  decrypt(kind: CredentialKind, providerId: string): string | null {
     const availability = this.availability();
     if (!availability.available) {
       return null;
     }
-    const stored = this.readFile().credentials[providerId];
+    const stored = this.readFile().credentials[credentialKey(kind, providerId)];
     if (!stored) {
       return null;
     }

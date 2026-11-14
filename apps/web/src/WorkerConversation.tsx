@@ -1,7 +1,7 @@
 /* eslint-disable react-hooks/set-state-in-effect -- worker snapshots refresh from server events */
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ConversationMessageRecord, WorkerView } from "@agent-in-box/protocol";
-import { api } from "./api";
+import { api, subscribeTaskEvents } from "./api";
 
 interface WorkerConversationProps {
   workerId: string | null;
@@ -55,6 +55,15 @@ export function WorkerConversation({
   useEffect(() => {
     void load();
   }, [load, revision]);
+
+  useEffect(
+    () =>
+      subscribeTaskEvents(
+        () => void load(),
+        () => undefined,
+      ),
+    [load],
+  );
 
   async function submit(): Promise<void> {
     if (!workerId || !text.trim() || !worker) return;

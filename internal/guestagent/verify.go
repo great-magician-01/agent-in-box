@@ -128,7 +128,16 @@ func (s *Server) verifyFile(check VerifyCheck) VerifyCheckResult {
 	if info.Mode()&os.ModeSymlink != 0 {
 		return verifyFailure(result, "symlink_rejected", "symlink evidence is not accepted")
 	}
-	if !info.Mode().IsRegular() {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return verifyFailure(result, "file_unreadable", "could not resolve evidence path")
+	}
+	if !s.resolvedPathAllowedByRoots(resolved) {
+		return verifyFailure(result, "path_outside_roots", "resolved evidence path is outside the configured verification roots")
+	}
+	path = resolved
+	info, err = os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() {
 		return verifyFailure(result, "not_regular_file", "evidence path is not a regular file")
 	}
 	result.SizeBytes = info.Size()
@@ -160,6 +169,30 @@ func (s *Server) pathAllowedByRoots(path string) bool {
 	}
 	for _, root := range s.verifyRoots {
 		relative, err := filepath.Rel(root, path)
+		if err != nil || relative == "." || strings.HasPrefix(relative, "..") || filepath.IsAbs(relative) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+// resolvedPathAllowedByRoots compares fully resolved paths so a symlinked
+// parent directory cannot escape the configured roots.
+func (s *Server) resolvedPathAllowedByRoots(path string) bool {
+	if len(s.verifyRoots) == 0 {
+		return false
+	}
+	candidate := path
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		candidate = resolved
+	}
+	for _, root := range s.verifyRoots {
+		resolvedRoot := root
+		if evaluated, err := filepath.EvalSymlinks(root); err == nil {
+			resolvedRoot = evaluated
+		}
+		relative, err := filepath.Rel(resolvedRoot, candidate)
 		if err != nil || relative == "." || strings.HasPrefix(relative, "..") || filepath.IsAbs(relative) {
 			continue
 		}

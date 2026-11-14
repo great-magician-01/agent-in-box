@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "id": "{{PLUGIN_ID}}",
+  "version": "0.1.0",
+  "displayName": "{{DISPLAY_NAME}}",
+  "apiVersion": 1,
+  "targets": ["worker"],
+  "entrypoints": {
+    "worker": "src/extension.js"
+  },
+  "runtime": {
+    "kind": "pi-extension",
+    "minPiVersion": "1.5.1",
+    "minAppVersion": "0.1.0"
+  },
+  "permissions": [],
+  "tools": [
+    {
+      "name": "{{PLUGIN_ID}}.echo",
+      "description": "Return the supplied text without side effects"
+    }
+  ],
+  "dependencies": [],
+  "description": "A minimal Agent-in-Box Worker plugin"
+}

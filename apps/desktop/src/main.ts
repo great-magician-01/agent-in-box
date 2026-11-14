@@ -230,6 +230,61 @@ function controlPlaneEntry(): {
   };
 }
 
+function packagedRouterPiCli(): string {
+  return path.join(
+    process.resourcesPath,
+    "router-runtime",
+    "pi",
+    "node_modules",
+    "@earendil-works",
+    "pi-coding-agent",
+    "dist",
+    "bundle",
+    "cli.js",
+  );
+}
+
+/**
+ * Resolve the Control Plane's Router Pi launch environment. The packaged app
+ * ships a pinned ESM Pi CLI and uses Electron's Node runtime instead of a PATH
+ * `pi`. The Router runtime currently consumes PI_BINARY/PI_ARGS, so the CLI
+ * path is also passed as an argument prefix; PI_SCRIPT mirrors the Worker
+ * runtime convention. Explicit AGENT_IN_BOX_ROUTER_PI_* settings always win,
+ * and development keeps its existing PATH/process.env behavior.
+ */
+function routerPiRuntimeEnvironment(): NodeJS.ProcessEnv {
+  if (!app.isPackaged) {
+    return {};
+  }
+
+  const explicitScript = process.env.AGENT_IN_BOX_ROUTER_PI_SCRIPT?.trim();
+  const explicitBinary = process.env.AGENT_IN_BOX_ROUTER_PI_BINARY?.trim();
+  const explicitArgs = process.env.AGENT_IN_BOX_ROUTER_PI_ARGS?.trim();
+
+  // A native binary override keeps its original meaning; never append the
+  // bundled JavaScript entry unless a script was requested explicitly.
+  if (explicitBinary && !explicitScript) {
+    return {
+      AGENT_IN_BOX_ROUTER_PI_BINARY: explicitBinary,
+      ...(explicitArgs ? { AGENT_IN_BOX_ROUTER_PI_ARGS: explicitArgs } : {}),
+      ELECTRON_RUN_AS_NODE: "1",
+    };
+  }
+
+  const script = explicitScript ?? packagedRouterPiCli();
+  if (!fs.existsSync(script)) {
+    logger.warn("Router Pi CLI 未随安装包提供", { script });
+  }
+  return {
+    AGENT_IN_BOX_ROUTER_PI_SCRIPT: script,
+    AGENT_IN_BOX_ROUTER_PI_BINARY: explicitBinary ?? process.execPath,
+    AGENT_IN_BOX_ROUTER_PI_ARGS: explicitArgs ?? JSON.stringify([script]),
+    // The Control Plane is already spawned with ELECTRON_RUN_AS_NODE; Pi
+    // inherits it, so process.execPath runs the ESM CLI as Node everywhere.
+    ELECTRON_RUN_AS_NODE: "1",
+  };
+}
+
 const controlPlaneLocation = controlPlaneEntry();
 const desktopDataRoot = resolveDesktopDataRoot({ configPath: paths.configPath });
 const qemuManager = new QemuToolchainManager({
@@ -298,6 +353,7 @@ const supervisor = new ControlPlaneSupervisor({
     ...(controlPlaneLocation.webRoot
       ? { AGENT_IN_BOX_WEB_ROOT: controlPlaneLocation.webRoot }
       : {}),
+    ...routerPiRuntimeEnvironment(),
     ...(app.isPackaged
       ? {
           NODE_PATH: [
@@ -905,6 +961,10 @@ async function bootstrap(): Promise<void> {
     setPreferences: updatePreferences,
     updates: updateActions,
     vm: vmActions,
+    beforeControlPlaneRestart: async () => {
+      const { rootChanged } = await refreshVmRuntime();
+      if (rootChanged) await vmSupervisor.restart();
+    },
     showNotification: showDesktopNotification,
     quit: requestQuit,
     openLogs: async () => {

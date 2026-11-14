@@ -14,6 +14,8 @@ export interface CreateWorkerInput {
   engineType: string;
   engineVersion: string;
   capabilitySet: string[];
+  developmentMode?: boolean;
+  developmentAutoEnable?: boolean;
 }
 
 export class WorkerRepository {
@@ -36,6 +38,9 @@ export class WorkerRepository {
       archivedAt: null,
       agentSessionRef: null,
       sessionVersion: null,
+      pluginSnapshotId: null,
+      developmentMode: input.developmentMode === true,
+      developmentAutoEnable: input.developmentAutoEnable === true,
       lastHeartbeatAt: null,
       archiveSummary: null,
       lastErrorCode: null,
@@ -61,6 +66,9 @@ export class WorkerRepository {
         archived_at: null,
         agent_session_ref: null,
         session_version: null,
+        plugin_snapshot_id: null,
+        development_mode: input.developmentMode === true ? 1 : 0,
+        development_auto_enable: input.developmentAutoEnable === true ? 1 : 0,
         last_heartbeat_at: null,
         archive_summary: null,
         last_error_code: null,
@@ -153,6 +161,7 @@ export class WorkerRepository {
       currentTaskId?: string | null;
       agentSessionRef?: string | null;
       sessionVersion?: string | null;
+      pluginSnapshotId?: string | null;
       lastHeartbeatAt?: string | null;
       lastErrorCode?: string | null;
       lastErrorMessage?: string | null;
@@ -172,6 +181,9 @@ export class WorkerRepository {
           ? { agent_session_ref: patch.agentSessionRef }
           : {}),
         ...(patch.sessionVersion !== undefined ? { session_version: patch.sessionVersion } : {}),
+        ...(patch.pluginSnapshotId !== undefined
+          ? { plugin_snapshot_id: patch.pluginSnapshotId }
+          : {}),
         ...(patch.lastHeartbeatAt !== undefined
           ? { last_heartbeat_at: patch.lastHeartbeatAt }
           : {}),

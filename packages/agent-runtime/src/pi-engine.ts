@@ -3,12 +3,18 @@ import { constants } from "node:fs";
 import { copyFile, lstat, mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
+  inspectPluginPackage,
+  isSafeRelativeEntryPath,
+  resolvePluginEntry,
+} from "@agent-in-box/plugin-runtime";
+import {
   PI_ENGINE_VERSION,
   PI_SESSION_FORMAT_VERSION,
   type WorkerEngine,
   type WorkerEngineEvent,
   type WorkerInlineImage,
   type WorkerInput,
+  type WorkerPluginPackageSpec,
   type WorkerSessionHandle,
   type WorkerSessionSpec,
 } from "./index";
@@ -19,6 +25,8 @@ export interface PiWorkerEngineOptions {
   piBinary?: string;
   /** Built-in Worker subagent support. Its path is never forwarded to children. */
   subagentExtensionPath?: string;
+  /** Built-in plugin development tools, loaded only for Development Workers. */
+  developmentExtensionPath?: string;
   /** Additional extensions, loaded before the legacy extensionPath. */
   extensionPaths?: readonly string[];
   extensionPath?: string;
@@ -31,12 +39,21 @@ export interface PiWorkerEngineOptions {
   argsPrefix?: readonly string[];
 }
 
+interface SessionPlugin {
+  pluginId: string;
+  version: string;
+  packageSha256: string;
+  packageRoot: string;
+  entryPath: string;
+}
+
 interface PiSession {
   process: PiRpcProcess;
   workerId: string;
   sessionFile: string | null;
   closing: boolean;
   homeDirectory: string;
+  plugins?: SessionPlugin[];
 }
 
 interface PiState {
@@ -57,6 +74,7 @@ interface SessionManifest {
   sizeBytes?: number;
   sha256?: string;
   spec?: WorkerSessionSpec;
+  plugins?: SessionPlugin[];
   createdAt: string;
 }
 
@@ -127,6 +145,9 @@ export class PiWorkerEngine implements WorkerEngine {
     await mkdir(path.join(directory, "sessions"), { recursive: true, mode: 0o700 });
     await mkdir(homeDirectory, { recursive: true, mode: 0o700 });
     if (spec?.modelBroker) await this.writeModelsConfig(homeDirectory, spec);
+    const sessionPlugins = spec?.pluginPackages
+      ? await materializePluginPackages(directory, spec.pluginPackages)
+      : await verifySessionPlugins(directory, resumed?.manifest.plugins);
 
     const args: string[] = [
       ...(this.options.argsPrefix ?? []),
@@ -157,11 +178,15 @@ export class PiWorkerEngine implements WorkerEngine {
     const extensionPaths = [
       ...new Set([
         ...(this.options.extensionPaths ?? []),
+        ...sessionPlugins.map((plugin) => plugin.entryPath),
         ...(this.options.extensionPath ? [this.options.extensionPath] : []),
       ]),
     ];
     for (const extensionPath of [
       ...(this.options.subagentExtensionPath ? [this.options.subagentExtensionPath] : []),
+      ...(effectiveSpec?.pluginDevelopment && this.options.developmentExtensionPath
+        ? [this.options.developmentExtensionPath]
+        : []),
       ...extensionPaths,
     ]) {
       args.push("--extension", extensionPath);
@@ -199,6 +224,12 @@ export class PiWorkerEngine implements WorkerEngine {
               AGENT_IN_BOX_CUA_TOKEN: spec.computerUse.token,
             }
           : {}),
+        ...(spec?.pluginDevelopment
+          ? {
+              AGENT_IN_BOX_PLUGIN_DEV_URL: spec.pluginDevelopment.baseUrl,
+              AGENT_IN_BOX_PLUGIN_DEV_TOKEN: spec.pluginDevelopment.token,
+            }
+          : {}),
       },
     });
     await process.start();
@@ -212,7 +243,15 @@ export class PiWorkerEngine implements WorkerEngine {
         engineVersion: this.engineVersion,
         sessionVersion: this.sessionVersion,
       };
-      const session = { process, workerId, sessionFile, closing: false, homeDirectory, ...handle };
+      const session = {
+        process,
+        workerId,
+        sessionFile,
+        closing: false,
+        homeDirectory,
+        plugins: sessionPlugins,
+        ...handle,
+      };
       await this.writeSessionManifest(session, spec ?? resumed?.manifest.spec);
       return session;
     } catch (error) {
@@ -272,6 +311,7 @@ export class PiWorkerEngine implements WorkerEngine {
       sessionVersion: this.sessionVersion,
       sessionFile: session.sessionFile,
       ...(spec ? { spec: sanitizeSpec(spec) } : {}),
+      ...(session.plugins ? { plugins: session.plugins } : {}),
       createdAt: new Date().toISOString(),
     };
     await atomicWrite(
@@ -588,6 +628,116 @@ function summarizeMessages(messages: unknown[], sessionId: string): string {
   return `Pi Worker session ${sessionId} archived with ${messages.length} messages; no assistant text summary available.`;
 }
 
+async function materializePluginPackages(
+  sessionDirectory: string,
+  packages: readonly WorkerPluginPackageSpec[],
+): Promise<SessionPlugin[]> {
+  if (packages.length > 32) throw new Error("Too many Worker plugin packages");
+  const result: SessionPlugin[] = [];
+  for (const plugin of packages) {
+    assertSafeId(plugin.pluginId, "Worker plugin ID");
+    if (!/^[A-Za-z0-9][A-Za-z0-9.+-]{0,127}$/.test(plugin.version)) {
+      throw new Error("Invalid Worker plugin version");
+    }
+    if (!/^[a-f0-9]{64}$/.test(plugin.packageSha256)) {
+      throw new Error("Invalid Worker plugin package hash");
+    }
+    if (!Array.isArray(plugin.files) || plugin.files.length > 2048) {
+      throw new Error("Invalid Worker plugin file list");
+    }
+    const finalRoot = path.join(sessionDirectory, "plugins", plugin.pluginId, plugin.version);
+    const staging = path.join(
+      sessionDirectory,
+      "plugins",
+      ".staging",
+      `${process.pid}-${randomUUID()}`,
+    );
+    await mkdir(staging, { recursive: true, mode: 0o700 });
+    try {
+      let totalBytes = 0;
+      for (const file of plugin.files) {
+        if (!isSafeRelativeEntryPath(file.path) || typeof file.dataBase64 !== "string") {
+          throw new Error("Unsafe Worker plugin file path or content");
+        }
+        const bytes = Buffer.from(file.dataBase64, "base64");
+        if (bytes.toString("base64") !== file.dataBase64 || bytes.byteLength > 2 * 1024 * 1024) {
+          throw new Error("Invalid Worker plugin base64 content");
+        }
+        totalBytes += bytes.byteLength;
+        if (totalBytes > 4 * 1024 * 1024) throw new Error("Worker plugin package is too large");
+        const target = path.join(staging, ...file.path.split("/"));
+        assertInside(staging, target);
+        await mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
+        await writeFile(target, bytes, { flag: "wx", mode: 0o700 });
+      }
+      const inspected = await inspectPluginPackage(staging, {
+        maxFileBytes: 2 * 1024 * 1024,
+        maxTotalBytes: 4 * 1024 * 1024,
+      });
+      if (
+        inspected.packageSha256 !== plugin.packageSha256 ||
+        inspected.manifest.id !== plugin.pluginId ||
+        inspected.manifest.version !== plugin.version ||
+        inspected.manifest.entrypoints.worker !== plugin.entryPath
+      ) {
+        throw new Error("Worker plugin package identity or hash mismatch");
+      }
+      const existing = await inspectPluginPackage(finalRoot, {
+        maxFileBytes: 2 * 1024 * 1024,
+        maxTotalBytes: 4 * 1024 * 1024,
+      }).catch(() => null);
+      if (existing?.packageSha256 === plugin.packageSha256) {
+        await rm(staging, { recursive: true, force: true });
+      } else {
+        // This is a derived, per-Worker cache directory, never a caller path.
+        await rm(finalRoot, { recursive: true, force: true });
+        await mkdir(path.dirname(finalRoot), { recursive: true, mode: 0o700 });
+        await rename(staging, finalRoot);
+      }
+      result.push({
+        pluginId: plugin.pluginId,
+        version: plugin.version,
+        packageSha256: plugin.packageSha256,
+        packageRoot: finalRoot,
+        entryPath: await resolvePluginEntry(finalRoot, "worker"),
+      });
+    } finally {
+      await rm(staging, { recursive: true, force: true });
+    }
+  }
+  return result;
+}
+
+async function verifySessionPlugins(
+  sessionDirectory: string,
+  plugins: SessionPlugin[] | undefined,
+): Promise<SessionPlugin[]> {
+  if (!plugins) return [];
+  const result: SessionPlugin[] = [];
+  for (const plugin of plugins) {
+    assertSafeId(plugin.pluginId, "Worker plugin ID");
+    const packageRoot = path.join(sessionDirectory, "plugins", plugin.pluginId, plugin.version);
+    assertInside(sessionDirectory, packageRoot);
+    const inspected = await inspectPluginPackage(packageRoot, {
+      maxFileBytes: 2 * 1024 * 1024,
+      maxTotalBytes: 4 * 1024 * 1024,
+    });
+    if (
+      inspected.packageSha256 !== plugin.packageSha256 ||
+      inspected.manifest.id !== plugin.pluginId ||
+      inspected.manifest.version !== plugin.version
+    ) {
+      throw new Error(`Worker plugin ${plugin.pluginId} failed session integrity verification`);
+    }
+    result.push({
+      ...plugin,
+      packageRoot,
+      entryPath: await resolvePluginEntry(packageRoot, "worker"),
+    });
+  }
+  return result;
+}
+
 function sanitizeSpec(spec: WorkerSessionSpec): WorkerSessionSpec {
   // Never write short-lived broker tokens into the persistent session manifest.
   return {
@@ -601,6 +751,7 @@ function sanitizeSpec(spec: WorkerSessionSpec): WorkerSessionSpec {
     systemPrompt: spec.systemPrompt,
     capabilities: [...spec.capabilities],
     mcpEnabled: spec.mcpEnabled === true,
+    ...(spec.pluginSnapshotId ? { pluginSnapshotId: spec.pluginSnapshotId } : {}),
     ...(spec.provider !== undefined ? { provider: spec.provider } : {}),
     ...(spec.model !== undefined ? { model: spec.model } : {}),
   };

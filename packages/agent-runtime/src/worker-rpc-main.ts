@@ -12,12 +12,19 @@ async function main(): Promise<void> {
   const sessionRoot = path.resolve(required("AGENT_IN_BOX_SESSION_ROOT"));
   const extensionPath = process.env.AGENT_IN_BOX_CUA_EXTENSION?.trim();
   const subagentExtensionPath = path.join(__dirname, "..", "extensions", "subagent-extension.js");
+  const developmentExtensionPath = path.join(
+    __dirname,
+    "..",
+    "extensions",
+    "plugin-development-extension.js",
+  );
   const piLaunch = resolvePiLaunch();
   const engine = new PiWorkerEngine({
     sessionRoot,
     piBinary: piLaunch.command,
     argsPrefix: piLaunch.argsPrefix,
     subagentExtensionPath,
+    developmentExtensionPath,
     ...(extensionPath ? { extensionPaths: [extensionPath] } : {}),
     engineVersion: process.env.AGENT_IN_BOX_PI_VERSION?.trim() || PI_ENGINE_VERSION,
     sessionVersion: PI_SESSION_FORMAT_VERSION,

@@ -195,6 +195,9 @@ export interface WorkerRecord {
   archivedAt: IsoTimestamp | null;
   agentSessionRef: string | null;
   sessionVersion: string | null;
+  pluginSnapshotId?: string | null;
+  developmentMode?: boolean;
+  developmentAutoEnable?: boolean;
   lastHeartbeatAt: IsoTimestamp | null;
   archiveSummary: string | null;
   lastErrorCode: string | null;
@@ -633,6 +636,119 @@ export interface OnboardingCompleteResult {
   state: OnboardingState;
   restartRequired: boolean;
   storageMigration: StorageMigrationResult | null;
+}
+
+export type BootstrapStatus =
+  | "not_started"
+  | "running"
+  | "waiting_user_action"
+  | "retryable_failed"
+  | "blocked"
+  | "cancelled"
+  | "execution_ready";
+
+export type BootstrapStage =
+  | "not_started"
+  | "preferences_saved"
+  | "validating_model"
+  | "checking_host"
+  | "preparing_runtime"
+  | "preparing_image"
+  | "creating_default_vm"
+  | "provisioning_guest"
+  | "creating_default_workspace"
+  | "verifying_execution"
+  | "execution_ready";
+
+export type BootstrapRequiredAction =
+  "configure_model" | "install_runtime" | "enable_virtualization" | "retry";
+
+export interface BootstrapResourceRefs {
+  imageId: Id | null;
+  vmId: Id | null;
+  projectId: Id | null;
+  bindingId: Id | null;
+}
+
+export interface BootstrapState {
+  status: BootstrapStatus;
+  stage: BootstrapStage;
+  conversationReady: boolean;
+  executionReady: boolean;
+  requiredAction: BootstrapRequiredAction | null;
+  progress: {
+    downloadedBytes?: number;
+    totalBytes?: number;
+    message?: string;
+  };
+  resources: BootstrapResourceRefs;
+  error: { code: string; message: string } | null;
+  createdAt: IsoTimestamp;
+  updatedAt: IsoTimestamp;
+  completedAt: IsoTimestamp | null;
+}
+
+export type PluginSource = "builtin" | "user" | "ai";
+export type PluginVersionStatus =
+  | "validating"
+  | "testing"
+  | "registered"
+  | "invalid"
+  | "test_failed"
+  | "load_failed"
+  | "quarantined";
+export type PluginScopeType = "project" | "worker";
+
+export interface PluginVersionView {
+  pluginId: string;
+  displayName: string;
+  version: string;
+  status: PluginVersionStatus;
+  source: PluginSource;
+  packageSha256: string;
+  manifest: Record<string, unknown>;
+  testReport: Record<string, unknown> | null;
+  errorMessage: string | null;
+  createdAt: IsoTimestamp;
+  registeredAt: IsoTimestamp | null;
+}
+
+export interface PluginEnablementView {
+  id: Id;
+  pluginId: string;
+  version: string;
+  scopeType: PluginScopeType;
+  scopeId: Id;
+  enabled: boolean;
+  updatedAt: IsoTimestamp;
+}
+
+export interface PluginSessionExtension {
+  pluginId: string;
+  version: string;
+  packageSha256: string;
+  target: "worker";
+  entryPath: string;
+}
+
+export interface PluginSessionSnapshot {
+  id: Id;
+  workerId: Id;
+  projectId: Id;
+  extensions: PluginSessionExtension[];
+  createdAt: IsoTimestamp;
+}
+
+export interface PluginRegisterRequest {
+  sourcePath: string;
+  source: "user" | "ai";
+  testReport?: Record<string, unknown>;
+}
+
+export interface PluginEnableRequest {
+  version: string;
+  scopeType: PluginScopeType;
+  scopeId: Id;
 }
 
 export interface SettingsView {
@@ -1823,6 +1939,10 @@ export interface WorkerCreateRequest {
   restoreArchiveId?: Id;
   /** Skip reuse of an existing Worker in the same conversation (used by model switching). */
   forceNew?: boolean;
+  /** Explicitly create a Guest-side plugin development Worker. */
+  developmentMode?: boolean;
+  /** Allow the built-in development tool to enable tested plugins in this project only. */
+  aiPluginAutoEnable?: boolean;
 }
 
 export type WorkerRestoreMode = "native" | "summary";
@@ -2356,6 +2476,57 @@ export interface ModelConfigurationView {
 export interface ModelConfigurationUpdate {
   worker?: ModelSelection | null;
   router?: ModelSelection | null;
+}
+
+/** Stable reasons returned by POST /api/v1/models/validate. */
+export type ModelValidationErrorCode =
+  | "model_not_configured"
+  | "credential_missing"
+  | "credential_unavailable"
+  | "provider_authentication_failed"
+  | "provider_access_denied"
+  | "model_not_found"
+  | "model_invalid_request"
+  | "provider_rate_limited"
+  | "provider_timeout"
+  | "provider_unreachable"
+  | "provider_unavailable"
+  | "provider_response_too_large";
+
+/** Coarse classification that mirrors the API error code for a failed validation. */
+export type ModelValidationCategory = "validation_failed" | "unavailable";
+
+export interface ModelValidationError {
+  code: ModelValidationErrorCode;
+  category: ModelValidationCategory;
+  /** Chinese, user-safe text. Never contains a credential or a raw upstream body. */
+  message: string;
+}
+
+export interface ModelValidationRequest {
+  /** Explicit provider. Omit to use the current Worker selection. */
+  providerId?: string;
+  /** Explicit model. Omit to use the selected or first model of the provider. */
+  model?: string;
+}
+
+export interface ModelValidationResult {
+  /** True only when the provider accepted the minimal upstream request. */
+  ok: boolean;
+  /** Resolved provider id, or the requested id when resolution failed. */
+  providerId: string | null;
+  /** Resolved model id, or the requested id when resolution failed. */
+  model: string | null;
+  /**
+   * From the model's declared `input` modalities, not from an image probe.
+   * Undeclared models default to text+image, matching ModelDefinition.
+   */
+  supportsImage: boolean;
+  checkedAt: IsoTimestamp;
+  latencyMs: number | null;
+  /** HTTP status of the minimal upstream request, when one was made. */
+  upstreamStatus: number | null;
+  error: ModelValidationError | null;
 }
 
 export interface WorkerModelSwitchRequest {

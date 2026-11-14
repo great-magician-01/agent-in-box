@@ -16,6 +16,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@agent-in-box/domain": "workspace:*"
+    "@agent-in-box/domain": "workspace:*",
+    "@agent-in-box/plugin-runtime": "workspace:*"
   }
 }

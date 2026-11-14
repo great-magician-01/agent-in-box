@@ -28,6 +28,10 @@ extraResources:
     to: guest-runtime
     filter:
       - "**/*"
+  - from: ../../release/router-runtime
+    to: router-runtime
+    filter:
+      - "**/*"
 
 asar: true
 compression: normal

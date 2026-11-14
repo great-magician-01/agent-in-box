@@ -4,13 +4,21 @@ import { ModelsModule } from "../models/models.module";
 import { PersistenceModule } from "../persistence/persistence.module";
 import { SettingsModule } from "../settings/settings.module";
 import { VmModule } from "../vms/vm.module";
+import { PluginModule } from "../plugins/plugin.module";
 import { WorkerController } from "./worker.controller";
 import { WorkerRegistryController } from "./worker-registry.controller";
 import { WorkerRegistryService } from "./worker-registry.service";
 import { WorkerRuntimeService } from "./worker-runtime.service";
 
 @Module({
-  imports: [PersistenceModule, VmModule, ModelsModule, ComputerUseModule, SettingsModule],
+  imports: [
+    PersistenceModule,
+    VmModule,
+    ModelsModule,
+    ComputerUseModule,
+    SettingsModule,
+    PluginModule,
+  ],
   controllers: [WorkerController, WorkerRegistryController],
   providers: [WorkerRuntimeService, WorkerRegistryService],
   exports: [WorkerRuntimeService, WorkerRegistryService],

@@ -14,6 +14,7 @@ import type {
   BotOutboundTestRequest,
   BotOverview,
   BotPlatform,
+  BootstrapState,
   HealthResponse,
   HostInspectionReport,
   ImageCatalog,
@@ -84,6 +85,12 @@ import type {
   ModelConfigurationView,
   ModelProviderUpsert,
   ModelProviderView,
+  ModelValidationRequest,
+  ModelValidationResult,
+  PluginEnableRequest,
+  PluginEnablementView,
+  PluginRegisterRequest,
+  PluginVersionView,
   ActiveRosterView,
   RouterConfigUpdate,
   RouterMessageRecord,
@@ -388,6 +395,13 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  bootstrap: () => apiFetch<BootstrapState>("/api/v1/bootstrap"),
+  startBootstrap: () =>
+    apiFetch<BootstrapState>("/api/v1/bootstrap/start", { method: "POST", body: "{}" }),
+  retryBootstrap: () =>
+    apiFetch<BootstrapState>("/api/v1/bootstrap/retry", { method: "POST", body: "{}" }),
+  cancelBootstrap: () =>
+    apiFetch<BootstrapState>("/api/v1/bootstrap/cancel", { method: "POST", body: "{}" }),
   settings: () => apiFetch<SettingsView>("/api/v1/settings"),
   updateSettings: (body: {
     resourcePolicy?: ResourcePolicy;
@@ -470,6 +484,35 @@ export const api = {
     apiFetch<ModelProviderView>(`/api/v1/models/providers/${encodeURIComponent(id)}`, {
       method: "PUT",
       body: JSON.stringify(body),
+    }),
+  validateModel: (body: ModelValidationRequest = {}) =>
+    apiFetch<ModelValidationResult>("/api/v1/models/validate", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  plugins: () => apiFetch<PluginVersionView[]>("/api/v1/plugins"),
+  pluginEnablements: (scopeType?: string, scopeId?: string) => {
+    const query = new URLSearchParams();
+    if (scopeType) query.set("scopeType", scopeType);
+    if (scopeId) query.set("scopeId", scopeId);
+    return apiFetch<PluginEnablementView[]>(
+      `/api/v1/plugins/enablements${query.size ? `?${query.toString()}` : ""}`,
+    );
+  },
+  registerPlugin: (body: PluginRegisterRequest) =>
+    apiFetch<PluginVersionView>("/api/v1/plugins/register", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  enablePlugin: (id: string, body: PluginEnableRequest) =>
+    apiFetch<PluginEnablementView>(`/api/v1/plugins/${encodeURIComponent(id)}/enable`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  disablePlugin: (id: string, scopeType: "project" | "worker", scopeId: string) =>
+    apiFetch<{ disabled: true }>(`/api/v1/plugins/${encodeURIComponent(id)}/disable`, {
+      method: "POST",
+      body: JSON.stringify({ scopeType, scopeId }),
     }),
   workers: (projectId?: string) =>
     apiFetch<WorkerView[]>(

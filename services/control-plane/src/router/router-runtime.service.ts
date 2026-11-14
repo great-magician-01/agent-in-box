@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -190,6 +191,56 @@ export class RouterRuntimeService implements OnModuleInit, OnModuleDestroy {
       .where("conversation_id", "=", this.conversationId ?? "")
       .execute()
       .catch(() => undefined);
+  }
+
+  /**
+   * A bounded liveness check for the host Router Pi runtime. It proves the
+   * configured executable/script exists and reports its version without
+   * starting a model session or touching provider credentials.
+   */
+  async preflight(timeoutMs = 10_000): Promise<{ ok: boolean; message: string | null }> {
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (result: { ok: boolean; message: string | null }): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(result);
+      };
+      const child = spawn(this.piBinary, [...this.piArgsPrefix, "--version"], {
+        shell: false,
+        stdio: ["ignore", "pipe", "pipe"],
+        env: this.env,
+        windowsHide: true,
+      });
+      let output = "";
+      const timer = setTimeout(() => {
+        child.kill("SIGKILL");
+        finish({ ok: false, message: "宿主 Router Pi 启动检查超时" });
+      }, timeoutMs);
+      child.stdout.on("data", (chunk) => {
+        output = `${output}${chunk.toString()}`.slice(-4_096);
+      });
+      child.stderr.on("data", (chunk) => {
+        output = `${output}${chunk.toString()}`.slice(-4_096);
+      });
+      child.once("error", (error) => {
+        finish({
+          ok: false,
+          message: `找不到可运行的宿主 Router Pi：${errorMessage(error)}`,
+        });
+      });
+      child.once("exit", (code) => {
+        finish(
+          code === 0
+            ? { ok: true, message: null }
+            : {
+                ok: false,
+                message: `宿主 Router Pi 无法启动（exit ${code ?? "unknown"}）：${output.trim().slice(-500)}`,
+              },
+        );
+      });
+    });
   }
 
   async view(): Promise<RouterView> {

@@ -4242,3 +4242,128 @@ button.link-button,
     display: none;
   }
 }
+
+/* Conversation-first bootstrap: one quiet status surface, no internal setup pages. */
+.app-main.session-active {
+  flex-direction: column;
+}
+
+.bootstrap-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem 1rem;
+  width: min(920px, calc(100% - 2rem));
+  margin: 0.85rem auto 0;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface) 96%, var(--accent) 4%);
+  box-shadow: 0 6px 24px color-mix(in srgb, #000 8%, transparent);
+}
+
+.app-main.session-active > .bootstrap-banner {
+  flex: 0 0 auto;
+}
+
+.bootstrap-summary,
+.bootstrap-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.bootstrap-summary p {
+  margin: 0.18rem 0 0;
+}
+
+.bootstrap-indicator {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.bootstrap-banner.running .bootstrap-indicator {
+  animation: bootstrap-pulse 1.8s ease-in-out infinite;
+}
+
+.bootstrap-banner.blocked .bootstrap-indicator,
+.bootstrap-banner.retryable_failed .bootstrap-indicator {
+  background: var(--danger);
+}
+
+.bootstrap-message {
+  flex: 1 1 100%;
+  margin: 0;
+  color: var(--text-2);
+  font-size: 0.78rem;
+}
+
+@keyframes bootstrap-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (max-width: 560px) {
+  .bootstrap-banner {
+    width: calc(100% - 20px);
+    align-items: flex-start;
+  }
+
+  .bootstrap-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+}
+
+.plugin-list {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.plugin-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.7rem;
+  border: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.plugin-list li > div {
+  display: grid;
+  min-width: 0;
+  gap: 0.2rem;
+}
+
+.plugin-list code {
+  width: fit-content;
+  color: var(--text-2);
+  font-size: 0.7rem;
+}
+
+@media (max-width: 560px) {
+  .plugin-list li {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+/* Keep the narrow workspace single-column after all desktop shell variants. */
+@media (max-width: 900px) {
+  .app-shell,
+  .app-shell.observer-open,
+  .app-shell.sidebar-collapsed,
+  .app-shell.sidebar-collapsed.observer-open {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

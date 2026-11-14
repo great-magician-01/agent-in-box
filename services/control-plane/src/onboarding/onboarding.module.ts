@@ -1,12 +1,11 @@
 import { Module } from "@nestjs/common";
-import { HostModule } from "../host/host.module";
 import { SettingsModule } from "../settings/settings.module";
 import { StorageModule } from "../storage/storage.module";
 import { OnboardingController } from "./onboarding.controller";
 import { OnboardingService } from "./onboarding.service";
 
 @Module({
-  imports: [SettingsModule, StorageModule, HostModule],
+  imports: [SettingsModule, StorageModule],
   controllers: [OnboardingController],
   providers: [OnboardingService],
 })

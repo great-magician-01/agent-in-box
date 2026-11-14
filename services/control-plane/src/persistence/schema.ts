@@ -87,6 +87,9 @@ export interface WorkersTable {
   archived_at: string | null;
   agent_session_ref: string | null;
   session_version: string | null;
+  plugin_snapshot_id: string | null;
+  development_mode: number;
+  development_auto_enable: number;
   last_heartbeat_at: string | null;
   archive_summary: string | null;
   last_error_code: string | null;
@@ -683,6 +686,74 @@ export interface InboxFilesTable {
   deleted_at: string | null;
 }
 
+export interface BootstrapStatesTable {
+  id: string;
+  status: string;
+  stage: string;
+  conversation_ready: number;
+  progress_json: string;
+  resource_ids_json: string;
+  required_action: string | null;
+  error_code: string | null;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+}
+
+export interface PluginsTable {
+  id: string;
+  display_name: string;
+  source: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PluginVersionsTable {
+  plugin_id: string;
+  version: string;
+  status: string;
+  manifest_json: string;
+  package_root: string;
+  package_sha256: string;
+  source: string;
+  test_report_json: string | null;
+  error_message: string | null;
+  created_at: string;
+  registered_at: string | null;
+}
+
+export interface PluginEnablementsTable {
+  id: string;
+  plugin_id: string;
+  version: string;
+  scope_type: string;
+  scope_id: string;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PluginSessionSnapshotsTable {
+  id: string;
+  worker_id: string;
+  project_id: string;
+  extensions_json: string;
+  created_at: string;
+}
+
+export interface PluginDevelopmentTokensTable {
+  id: string;
+  token_hash: string;
+  worker_id: string;
+  project_id: string;
+  auto_enable: number;
+  expires_at: string;
+  revoked_at: string | null;
+  created_at: string;
+  last_used_at: string | null;
+}
+
 export interface DatabaseSchema {
   schema_migrations: SchemaMigrationsTable;
   images: ImagesTable;
@@ -737,4 +808,10 @@ export interface DatabaseSchema {
   auth_sessions: AuthSessionsTable;
   notifications: NotificationsTable;
   inbox_files: InboxFilesTable;
+  bootstrap_states: BootstrapStatesTable;
+  plugins: PluginsTable;
+  plugin_versions: PluginVersionsTable;
+  plugin_enablements: PluginEnablementsTable;
+  plugin_session_snapshots: PluginSessionSnapshotsTable;
+  plugin_development_tokens: PluginDevelopmentTokensTable;
 }

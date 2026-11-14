@@ -93,6 +93,9 @@ importers:
       '@agent-in-box/domain':
         specifier: workspace:*
         version: link:../domain
+      '@agent-in-box/plugin-runtime':
+        specifier: workspace:*
+        version: link:../plugin-runtime
 
   packages/bot-connector:
     dependencies:
@@ -116,6 +119,8 @@ importers:
       '@agent-in-box/protocol':
         specifier: workspace:*
         version: link:../protocol
+
+  packages/plugin-runtime: {}
 
   packages/protocol: {}
 
@@ -142,6 +147,9 @@ importers:
       '@agent-in-box/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@agent-in-box/plugin-runtime':
+        specifier: workspace:*
+        version: link:../../packages/plugin-runtime
       '@agent-in-box/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol

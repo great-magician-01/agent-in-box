@@ -31,6 +31,24 @@ export interface WorkerComputerUseSpec {
   token: string;
 }
 
+export interface WorkerPluginPackageFile {
+  path: string;
+  dataBase64: string;
+}
+
+export interface WorkerPluginPackageSpec {
+  pluginId: string;
+  version: string;
+  packageSha256: string;
+  entryPath: string;
+  files: readonly WorkerPluginPackageFile[];
+}
+
+export interface WorkerPluginDevelopmentSpec {
+  baseUrl: string;
+  token: string;
+}
+
 export interface WorkerSessionSpec {
   workerId: string;
   projectId: string;
@@ -47,6 +65,11 @@ export interface WorkerSessionSpec {
   model?: string;
   modelBroker?: WorkerModelBrokerSpec;
   computerUse?: WorkerComputerUseSpec;
+  /** Immutable, host-validated plugin package set for this Worker session. */
+  pluginSnapshotId?: string;
+  pluginPackages?: readonly WorkerPluginPackageSpec[];
+  /** Present only for an explicitly created Development Worker. */
+  pluginDevelopment?: WorkerPluginDevelopmentSpec;
 }
 
 export interface WorkerInlineImage {

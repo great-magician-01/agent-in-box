@@ -196,7 +196,10 @@ async function runTests(root, signal) {
     delete testEnv.AGENT_IN_BOX_PLUGIN_DEV_TOKEN;
     const child = spawn(command, ["test"], {
       cwd: root,
-      shell: false,
+      // Windows npm is npm.cmd; Node cannot spawn that shim with shell:false.
+      // Arguments are fixed, and the package's own test script is the code
+      // being deliberately executed in this authorized Development Worker.
+      shell: process.platform === "win32",
       env: testEnv,
       stdio: ["ignore", "pipe", "pipe"],
     });

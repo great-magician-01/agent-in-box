@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -107,8 +107,10 @@ describe("PiWorkerEngine plugin materialization", () => {
     };
   }
 
-  function expectedEntry(workerId: string): string {
-    return path.join(sessionRoot, workerId, "plugins", PLUGIN_ID, PLUGIN_VERSION, ENTRY);
+  async function expectedEntry(workerId: string): Promise<string> {
+    // Windows temp paths may use an 8.3 short name; the engine resolves the
+    // package root through realpath before returning the extension entry.
+    return realpath(path.join(sessionRoot, workerId, "plugins", PLUGIN_ID, PLUGIN_VERSION, ENTRY));
   }
 
   function materializedRoot(workerId: string): string {
@@ -135,9 +137,10 @@ describe("PiWorkerEngine plugin materialization", () => {
     expect(session.sessionId).toBe("fake-session");
 
     const args = await readArgs(argsLog);
-    expect(extensionArgs(args)).toEqual([expectedEntry("worker-plugin")]);
+    const entry = await expectedEntry("worker-plugin");
+    expect(extensionArgs(args)).toEqual([entry]);
 
-    expect(await readFile(expectedEntry("worker-plugin"), "utf8")).toBe(entryContent);
+    expect(await readFile(entry, "utf8")).toBe(entryContent);
     expect(
       JSON.parse(
         await readFile(path.join(materializedRoot("worker-plugin"), "lib", "data.json"), "utf8"),
@@ -151,7 +154,7 @@ describe("PiWorkerEngine plugin materialization", () => {
       version: PLUGIN_VERSION,
       packageSha256: spec.packageSha256,
       packageRoot: materializedRoot("worker-plugin"),
-      entryPath: expectedEntry("worker-plugin"),
+      entryPath: entry,
     });
 
     // Inspection and delivery only move bytes; plugin code must never run.
@@ -186,16 +189,17 @@ describe("PiWorkerEngine plugin materialization", () => {
     expect(resumed).toMatchObject({ sessionId: "resumed-session", mode: "native" });
 
     const args = await readArgs(argsLog);
+    const entry = await expectedEntry("worker-resume");
     expect(args).toContain("--session");
-    expect(extensionArgs(args)).toEqual([expectedEntry("worker-resume")]);
-    expect(await readFile(expectedEntry("worker-resume"), "utf8")).toBe(entryContent);
+    expect(extensionArgs(args)).toEqual([entry]);
+    expect(await readFile(entry, "utf8")).toBe(entryContent);
 
     const manifest = await readSessionManifest("worker-resume");
     expect(manifest.plugins?.[0]).toMatchObject({
       pluginId: PLUGIN_ID,
       version: PLUGIN_VERSION,
       packageSha256: spec.packageSha256,
-      entryPath: expectedEntry("worker-resume"),
+      entryPath: entry,
     });
     await expect(access(sentinel)).rejects.toMatchObject({ code: "ENOENT" });
   });
@@ -204,7 +208,7 @@ describe("PiWorkerEngine plugin materialization", () => {
     const spec = await pluginSpec();
     const session = await engine.startSession(sessionSpec("worker-tampered", [spec]));
     const archive = await engine.archive(session.sessionId);
-    await writeFile(expectedEntry("worker-tampered"), 'export default "tampered";\n');
+    await writeFile(await expectedEntry("worker-tampered"), 'export default "tampered";\n');
 
     await expect(engine.resume(archive.archiveRef)).rejects.toThrow(
       "failed session integrity verification",

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -36,6 +36,29 @@ try {
     path.join(runtimeRoot, "extensions", "subagent-extension.js"),
     path.join(staging, "extensions", "subagent-extension.js"),
   );
+  await copyFile(
+    path.join(runtimeRoot, "extensions", "plugin-development-extension.js"),
+    path.join(staging, "extensions", "plugin-development-extension.js"),
+  );
+  await cp(
+    path.join(repository, "packages", "plugin-runtime", "template"),
+    path.join(staging, "plugin-template"),
+    { recursive: true },
+  );
+  const pluginRuntimeDestination = path.join(
+    staging,
+    "node_modules",
+    "@agent-in-box",
+    "plugin-runtime",
+  );
+  await mkdir(path.dirname(pluginRuntimeDestination), { recursive: true });
+  await cp(path.join(repository, "packages", "plugin-runtime"), pluginRuntimeDestination, {
+    recursive: true,
+    filter: (source) =>
+      !source.includes(`${path.sep}node_modules${path.sep}`) &&
+      !source.includes(`${path.sep}.git${path.sep}`) &&
+      !source.includes(`${path.sep}src${path.sep}`),
+  });
   await writeFile(
     path.join(staging, "package.json"),
     `${JSON.stringify(
@@ -44,6 +67,7 @@ try {
         version,
         private: true,
         main: "dist/worker-rpc-main.js",
+        dependencies: { "@agent-in-box/plugin-runtime": "0.1.0" },
       },
       null,
       2,

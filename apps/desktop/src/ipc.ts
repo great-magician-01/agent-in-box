@@ -42,6 +42,7 @@ export interface DesktopIpcDependencies {
   setPreferences(patch: DesktopPreferencesPatch): DesktopPreferences;
   updates: DesktopUpdateActions;
   vm: DesktopVmActions;
+  beforeControlPlaneRestart?(): Promise<void>;
   showNotification(request: DesktopNotificationRequest): boolean;
   quit(): void;
   openLogs(): Promise<void>;
@@ -96,6 +97,7 @@ export function registerDesktopIpc(dependencies: DesktopIpcDependencies): Deskto
   ipcMain.handle(IPC_CHANNELS.restartControlPlane, async (event) => {
     assertTrustedSender(event);
     dependencies.logger.info("渲染进程请求重启本地控制平面");
+    await dependencies.beforeControlPlaneRestart?.();
     await dependencies.supervisor.restart();
     return status();
   });

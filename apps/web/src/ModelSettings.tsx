@@ -251,6 +251,33 @@ export function ModelSettings({
     }
   }
 
+  async function validateSelected(): Promise<void> {
+    const selected = selectionFrom(workerProvider, workerModel);
+    if (!selected) {
+      setError("请选择要验证的 Worker Provider 和模型");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const result = await api.validateModel(selected);
+      if (!result.ok) {
+        setError(result.error?.message ?? "模型验证失败");
+      } else {
+        setMessage(
+          `模型验证通过（${result.latencyMs ?? 0} ms）${
+            result.supportsImage ? "，支持虚拟机图片输入" : "；该模型仅适合文本对话"
+          }`,
+        );
+      }
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function providerOptions(): ModelProviderView[] {
     return (configuration?.providers ?? []).filter((provider) => provider.enabled);
   }
@@ -572,6 +599,14 @@ export function ModelSettings({
           </div>
         </div>
         <div className="action-row">
+          <button
+            type="button"
+            className="secondary"
+            disabled={busy || !workerProvider || !workerModel}
+            onClick={() => void validateSelected()}
+          >
+            验证 Worker 默认模型
+          </button>
           <button
             type="button"
             className="secondary"

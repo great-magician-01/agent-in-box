@@ -1705,6 +1705,131 @@ const migrations: Record<string, MigrationDefinition> = {
       await db.schema.dropTable("human_verifications").ifExists().execute();
     },
   },
+  "015_bootstrap_and_plugins": {
+    async up(db: Kysely<DatabaseSchema>): Promise<void> {
+      await db.schema
+        .createTable("bootstrap_states")
+        .addColumn("id", "text", (column) => column.primaryKey())
+        .addColumn("status", "text", (column) => column.notNull())
+        .addColumn("stage", "text", (column) => column.notNull())
+        .addColumn("conversation_ready", "integer", (column) => column.notNull().defaultTo(0))
+        .addColumn("progress_json", "text", (column) => column.notNull().defaultTo("{}"))
+        .addColumn("resource_ids_json", "text", (column) => column.notNull().defaultTo("{}"))
+        .addColumn("required_action", "text")
+        .addColumn("error_code", "text")
+        .addColumn("error_message", "text")
+        .addColumn("created_at", "text", (column) => column.notNull())
+        .addColumn("updated_at", "text", (column) => column.notNull())
+        .addColumn("completed_at", "text")
+        .execute();
+
+      await db.schema
+        .createTable("plugins")
+        .addColumn("id", "text", (column) => column.primaryKey())
+        .addColumn("display_name", "text", (column) => column.notNull())
+        .addColumn("source", "text", (column) => column.notNull())
+        .addColumn("created_at", "text", (column) => column.notNull())
+        .addColumn("updated_at", "text", (column) => column.notNull())
+        .execute();
+      await db.schema
+        .createTable("plugin_versions")
+        .addColumn("plugin_id", "text", (column) => column.notNull())
+        .addColumn("version", "text", (column) => column.notNull())
+        .addColumn("status", "text", (column) => column.notNull())
+        .addColumn("manifest_json", "text", (column) => column.notNull())
+        .addColumn("package_root", "text", (column) => column.notNull())
+        .addColumn("package_sha256", "text", (column) => column.notNull())
+        .addColumn("source", "text", (column) => column.notNull())
+        .addColumn("test_report_json", "text")
+        .addColumn("error_message", "text")
+        .addColumn("created_at", "text", (column) => column.notNull())
+        .addColumn("registered_at", "text")
+        .addPrimaryKeyConstraint("plugin_versions_pk", ["plugin_id", "version"])
+        .addForeignKeyConstraint(
+          "plugin_versions_plugin_fk",
+          ["plugin_id"],
+          "plugins",
+          ["id"],
+          (constraint) => constraint.onDelete("cascade"),
+        )
+        .execute();
+      await db.schema
+        .createTable("plugin_enablements")
+        .addColumn("id", "text", (column) => column.primaryKey())
+        .addColumn("plugin_id", "text", (column) => column.notNull())
+        .addColumn("version", "text", (column) => column.notNull())
+        .addColumn("scope_type", "text", (column) => column.notNull())
+        .addColumn("scope_id", "text", (column) => column.notNull())
+        .addColumn("enabled", "integer", (column) => column.notNull())
+        .addColumn("created_at", "text", (column) => column.notNull())
+        .addColumn("updated_at", "text", (column) => column.notNull())
+        .addForeignKeyConstraint(
+          "plugin_enablements_plugin_fk",
+          ["plugin_id"],
+          "plugins",
+          ["id"],
+          (constraint) => constraint.onDelete("cascade"),
+        )
+        .execute();
+      await db.schema
+        .createIndex("plugin_enablements_scope_idx")
+        .unique()
+        .on("plugin_enablements")
+        .columns(["scope_type", "scope_id", "plugin_id"])
+        .execute();
+      await db.schema
+        .createTable("plugin_session_snapshots")
+        .addColumn("id", "text", (column) => column.primaryKey())
+        .addColumn("worker_id", "text", (column) => column.notNull())
+        .addColumn("project_id", "text", (column) => column.notNull())
+        .addColumn("extensions_json", "text", (column) => column.notNull())
+        .addColumn("created_at", "text", (column) => column.notNull())
+        .execute();
+      await db.schema
+        .createIndex("plugin_session_snapshots_worker_idx")
+        .on("plugin_session_snapshots")
+        .columns(["worker_id", "created_at"])
+        .execute();
+      await db.schema
+        .createTable("plugin_development_tokens")
+        .addColumn("id", "text", (column) => column.primaryKey())
+        .addColumn("token_hash", "text", (column) => column.notNull().unique())
+        .addColumn("worker_id", "text", (column) => column.notNull())
+        .addColumn("project_id", "text", (column) => column.notNull())
+        .addColumn("auto_enable", "integer", (column) => column.notNull().defaultTo(0))
+        .addColumn("expires_at", "text", (column) => column.notNull())
+        .addColumn("revoked_at", "text")
+        .addColumn("created_at", "text", (column) => column.notNull())
+        .addColumn("last_used_at", "text")
+        .execute();
+      await db.schema
+        .createIndex("plugin_development_tokens_worker_idx")
+        .on("plugin_development_tokens")
+        .columns(["worker_id", "revoked_at"])
+        .execute();
+      await db.schema.alterTable("workers").addColumn("plugin_snapshot_id", "text").execute();
+      await db.schema
+        .alterTable("workers")
+        .addColumn("development_mode", "integer", (column) => column.notNull().defaultTo(0))
+        .execute();
+      await db.schema
+        .alterTable("workers")
+        .addColumn("development_auto_enable", "integer", (column) => column.notNull().defaultTo(0))
+        .execute();
+    },
+
+    async down(db: Kysely<DatabaseSchema>): Promise<void> {
+      await db.schema.alterTable("workers").dropColumn("development_auto_enable").execute();
+      await db.schema.alterTable("workers").dropColumn("development_mode").execute();
+      await db.schema.alterTable("workers").dropColumn("plugin_snapshot_id").execute();
+      await db.schema.dropTable("plugin_development_tokens").ifExists().execute();
+      await db.schema.dropTable("plugin_session_snapshots").ifExists().execute();
+      await db.schema.dropTable("plugin_enablements").ifExists().execute();
+      await db.schema.dropTable("plugin_versions").ifExists().execute();
+      await db.schema.dropTable("plugins").ifExists().execute();
+      await db.schema.dropTable("bootstrap_states").ifExists().execute();
+    },
+  },
 };
 
 /** Migration ids in the order the runner applies them. */

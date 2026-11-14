@@ -21,6 +21,8 @@ import { BotsModule } from "./bots/bots.module";
 import { NotificationsModule } from "./notifications/notifications.module";
 import { InboxModule } from "./inbox/inbox.module";
 import { DiagnosticsModule } from "./diagnostics/diagnostics.module";
+import { BootstrapModule } from "./bootstrap/bootstrap.module";
+import { PluginModule } from "./plugins/plugin.module";
 
 @Module({
   imports: [
@@ -44,6 +46,8 @@ import { DiagnosticsModule } from "./diagnostics/diagnostics.module";
     NotificationsModule,
     InboxModule,
     DiagnosticsModule,
+    BootstrapModule,
+    PluginModule,
   ],
   controllers: [HealthController, RuntimeController],
 })

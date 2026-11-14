@@ -1,16 +1,29 @@
-import { Body, Controller, Get, Param, Post, Put, Query } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Post,
+  Put,
+  Query,
+} from "@nestjs/common";
 import type {
   ModelConfigurationUpdate,
   ModelConfigurationView,
   ModelProviderUpsert,
   ModelProviderView,
   ModelRequestRecord,
+  ModelValidationRequest,
+  ModelValidationResult,
 } from "@agent-in-box/protocol";
 import { PersistenceError } from "../persistence/errors";
 import { SettingsService } from "../settings/settings.service";
 import { ModelBrokerService } from "./model-broker.service";
 import { ModelProviderService } from "./model-provider.service";
 import { ModelTokenService } from "./model-token.service";
+import { ModelValidationService } from "./model-validation.service";
 
 /**
  * Provider configuration contains no secret. The long-lived key stays in the
@@ -23,6 +36,7 @@ export class ModelController {
     private readonly broker: ModelBrokerService,
     private readonly tokens: ModelTokenService,
     private readonly settings: SettingsService,
+    private readonly validation: ModelValidationService,
   ) {}
 
   @Get("providers")
@@ -73,6 +87,17 @@ export class ModelController {
     };
   }
 
+  /**
+   * Validates the selected (or explicitly supplied) provider and model with one
+   * minimal upstream request. Upstream validation failures are returned as a
+   * structured result; malformed request bodies still use the API error shape.
+   */
+  @Post("validate")
+  @HttpCode(HttpStatus.OK)
+  validateModel(@Body() body: unknown): Promise<ModelValidationResult> {
+    return this.validation.validate(validationRequest(body));
+  }
+
   @Put("providers/:id")
   upsertProvider(
     @Param("id") id: string,
@@ -104,6 +129,27 @@ export class ModelController {
       revoked: await this.tokens.revoke(id, body?.reason?.trim() || "manual_revoke"),
     };
   }
+}
+
+function validationRequest(body: unknown): ModelValidationRequest {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    throw new PersistenceError("validation_failed", "请求体必须是 JSON 对象");
+  }
+  const input = body as Record<string, unknown>;
+  const request: ModelValidationRequest = {};
+  if (input.providerId !== undefined) {
+    if (typeof input.providerId !== "string") {
+      throw new PersistenceError("validation_failed", "Provider 标识必须是字符串");
+    }
+    request.providerId = input.providerId;
+  }
+  if (input.model !== undefined) {
+    if (typeof input.model !== "string") {
+      throw new PersistenceError("validation_failed", "模型 ID 必须是字符串");
+    }
+    request.model = input.model;
+  }
+  return request;
 }
 
 function routerSelectionLockedByEnv(): boolean {

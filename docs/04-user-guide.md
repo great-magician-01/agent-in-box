@@ -6,11 +6,11 @@
 ## 1. 安装与首次启动
 
 1. 在 Windows Host 上运行安装包。当前为 per-user 安装，不需要管理员权限。
-2. 首次启动会检查 CPU 虚拟化、内存、磁盘和数据目录；按提示选择**非系统盘**上的数据根目录。
-3. 设置 Host Reserve、VM 自动启动策略、本机管理员名称和敏感操作审批。
-4. 模型 Provider 凭据保存在宿主 OS 安全存储（Electron `safeStorage`），不会写入 VM。
-5. 安装完成后可选择桌面、开始菜单或托盘启动。关闭窗口默认继续在托盘运行，可在设置中改为退出。
-6. Electron 会托管 VM Supervisor；QEMU 不随安装包捆绑。首次使用 VM 前，在“设置 → 虚拟机运行组件”下载托管 QEMU，或选择已有 QEMU 的 `bin` 目录。状态会显示 Supervisor、QEMU 路径和托管版本。
+2. 首次启动只需确认或改选数据保存目录，然后选择服务商、填写 API Key 和默认模型。保存时会执行一次最小模型验证；长期凭据保存在宿主 OS 安全存储（Electron `safeStorage`），不会写入 VM。
+3. 验证通过后直接进入主会话。应用在后台自动准备 QEMU、默认 Linux VM、Guest Runtime 和“我的工作区”；可对话与可执行状态分开显示，任务可以提前排队。
+4. 资源、自动启动、敏感操作审批和关闭行为使用安全默认值，可在高级设置中修改。关闭窗口默认继续在托盘运行。
+5. 只有虚拟化功能、管理员授权、系统重启、网络或模型配置需要用户处理时，后台状态条才显示对应操作。高级“运行环境”页仍可选择已有 QEMU、查看 Supervisor 和执行恢复。
+6. 桌面发布包内置宿主 Router Pi 运行时；普通用户不需要全局安装 Node、Pi 或开发工具。
 
 首次启动后，控制平面在配置目录生成 0600 的 `web-access-key`。浏览器打开本机地址时需要粘贴该密钥；Electron 由 Main 自动登录，Renderer 不接触密钥。
 
@@ -26,7 +26,7 @@
 
 ## 3. 下载镜像与创建 Linux/Windows VM
 
-1. 打开“虚拟机”，使用“一键创建 Linux 工作 VM”即可下载并校验版本化 Ubuntu 24.04 Cloud Image、创建 4 vCPU / 8 GiB / 40 GiB VM、启动并通过 cloud-init 安装 XFCE、Guest Agent、Node/Pi 与 Worker。首次初始化通常需要 5～20 分钟，页面会显示当前阶段。
+1. 首次初始化会自动创建默认 Linux VM 和项目绑定；高级“虚拟机”页仍可使用“一键创建 Linux 工作 VM”手动下载并校验版本化 Ubuntu 24.04 Cloud Image、创建 4 vCPU / 8 GiB / 40 GiB VM、启动并通过 cloud-init 安装 XFCE、Guest Agent、Node/Pi 与 Worker。首次初始化通常需要 5～20 分钟，页面会显示当前阶段。
 2. 也可以手动下载镜像、创建 VM 后再启动。下载显示进度、速度和错误；中断后重新开始会从已下载部分续传，校验不通过的文件不会启用。
 3. 默认 Manifest 只包含 Linux 基线；Windows Golden Image 需要通过 `AGENT_IN_BOX_IMAGE_MANIFEST` 指向内部 Manifest。Windows Guest 至少需要 4 GiB 内存和 32 GiB 磁盘。
 4. Linux 项目默认 Guest 工作目录为 `/home/aib-worker/workspace`，与 Worker runtime 的安装目录一致；如使用自定义镜像，请在项目绑定中改为实际路径。
@@ -53,6 +53,14 @@
 - 归档不会删除任务或 Router 历史消息；恢复后仍需重新观察桌面。
 - “设置 → 模型与 API 配置”可以保存多套 Provider（配置名、Base URL、API 类型、模型白名单、凭据引用），并分别选择新 Worker 默认模型和 Router 模型。Router 空闲时可“应用并重启会话”，下一次发送使用新模型；已有 Worker 需要“切换模型（归档并新建会话）”。运行中的 Router 不能切换。
 - 长期 API Key 只通过桌面应用保存到系统安全存储；设置页只显示凭据是否已保存，不读取或回显密钥。
+
+### 插件与 AI 插件开发模式
+
+- “设置 → 插件”可以导入包含 `manifest.json` 的本地插件目录。导入只读取、校验并复制文件，不执行插件；注册版本不可变，启用按项目或 Worker 授权。
+- 新建或恢复 Worker 时生成扩展快照；插件变更只影响后续会话，不热替换正在执行的任务。恢复原 Worker 时继续使用其原快照。
+- 需要 AI 开发插件时，在插件页选择项目并显式创建 Development Worker。AI 可在 Guest 内使用模板、文件和 Shell 编写插件，并通过内置工具实际执行 `npm test` 后注册。
+- “允许 AI 在当前项目自动启用”是创建 Development Worker 时的单独选项。未开启时，AI 只能完成开发、测试和注册，启用由本机用户操作；任何模式都不允许 AI 跨项目或申请任意宿主权限。
+- 插件测试代码只在显式授权的 Guest Development Worker 中运行，不在 Electron 或宿主 Control Plane 中执行。插件仍共享该 VM 的系统和项目环境，不构成独立安全沙箱。
 
 ## 6. 实时控制台与观察栏
 

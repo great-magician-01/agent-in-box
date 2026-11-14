@@ -6,6 +6,7 @@ import { ModelBrokerService } from "./model-broker.service";
 import { ModelController } from "./model.controller";
 import { ModelProviderService } from "./model-provider.service";
 import { ModelTokenService } from "./model-token.service";
+import { ModelValidationService } from "./model-validation.service";
 import { MODEL_CREDENTIAL_PROVIDER } from "./tokens";
 
 @Module({
@@ -19,7 +20,14 @@ import { MODEL_CREDENTIAL_PROVIDER } from "./tokens";
       useFactory: () => new HostCredentialProvider(),
     },
     ModelBrokerService,
+    ModelValidationService,
   ],
-  exports: [ModelProviderService, ModelTokenService, ModelBrokerService, MODEL_CREDENTIAL_PROVIDER],
+  exports: [
+    ModelProviderService,
+    ModelTokenService,
+    ModelBrokerService,
+    ModelValidationService,
+    MODEL_CREDENTIAL_PROVIDER,
+  ],
 })
 export class ModelsModule {}

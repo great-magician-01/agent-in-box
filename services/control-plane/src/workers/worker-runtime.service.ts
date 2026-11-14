@@ -66,6 +66,8 @@ import { TaskService } from "../persistence/services/task-service";
 import { SettingsService } from "../settings/settings.service";
 import { SupervisorClient } from "../vms/supervisor.client";
 import { GuestService } from "../vms/guest.service";
+import { PluginService } from "../plugins/plugin.service";
+import { PluginDevelopmentService } from "../plugins/plugin-development.service";
 import { WorkerRegistryService } from "./worker-registry.service";
 
 export const WORKER_RUNTIME_OPTIONS = Symbol("AGENT_IN_BOX_WORKER_RUNTIME_OPTIONS");
@@ -161,6 +163,11 @@ function systemPromptForOs(base: string, osFamily: string): string {
     : base;
 }
 
+function developmentSystemPrompt(base: string, enabled: boolean): string {
+  if (!enabled) return base;
+  return `${base}\nYou are an explicitly authorized plugin Development Worker. Use guest files and shell to create a self-contained Pi plugin with manifest.json, package.json and npm-testable tests. Call plugin_development_scaffold first when creating a new plugin. Keep the plugin within the requested workspace. When implementation is ready, call plugin_development_register with the package root; the built-in tool validates the package, runs npm test, registers the exact tested bytes, and enables it only if this Worker was granted current-project auto-enable. Never request host credentials, broaden plugin scope, or bypass the development broker.`;
+}
+
 /**
  * A Computer Use Worker must see screenshots. The default preserves the legacy
  * text+image behavior for models saved before input modalities were exposed.
@@ -218,6 +225,8 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     private readonly database: DatabaseService,
     private readonly settings: SettingsService,
     @Optional() @Inject(WORKER_RUNTIME_OPTIONS) options: WorkerRuntimeOptions = {},
+    @Optional() private readonly plugins?: PluginService,
+    @Optional() private readonly development?: PluginDevelopmentService,
   ) {
     this.tickIntervalMs = Math.max(250, options.tickIntervalMs ?? 750);
     this.heartbeatIntervalMs = Math.max(1000, options.heartbeatIntervalMs ?? 10_000);
@@ -266,6 +275,9 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
       .executeTakeFirst();
     if (!project) throw new PersistenceError("not_found", `项目不存在：${input?.projectId}`);
     if (project.archived_at) throw new PersistenceError("conflict", "已归档项目不能创建 Worker");
+    if (input.developmentMode === true && !this.development) {
+      throw new PersistenceError("unavailable", "插件开发 Broker 不可用");
+    }
     const mcpEnabled = toProjectRecord(project).agentConfig.mcpEnabled;
     const binding = await this.db
       .selectFrom("project_vm_bindings")
@@ -338,7 +350,10 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
       conversationId,
       engineType: "pi-rpc",
       engineVersion: handshake.engineVersion,
-      capabilitySet: ["computer_use"],
+      capabilitySet:
+        input.developmentMode === true ? ["computer_use", "filesystem", "shell"] : ["computer_use"],
+      developmentMode: input.developmentMode === true,
+      developmentAutoEnable: input.developmentMode === true && input.aiPluginAutoEnable === true,
     });
     const token = await this.tokens.issue({
       workerId: worker.id,
@@ -355,6 +370,15 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
       taskId: null,
     });
     try {
+      const pluginSession = await this.newPluginSession(worker.id, worker.projectId);
+      const development =
+        input.developmentMode === true
+          ? await this.development!.issue({
+              workerId: worker.id,
+              projectId: worker.projectId,
+              autoEnable: input.aiPluginAutoEnable === true,
+            })
+          : null;
       const handle = await connection.startSession({
         workerId: worker.id,
         projectId: worker.projectId,
@@ -365,8 +389,14 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
         sessionVersion: PI_SESSION_FORMAT_VERSION,
         systemPrompt: archive
           ? summarySystemPrompt(systemPromptForOs(this.systemPrompt, vm.osFamily), archive.summary)
-          : systemPromptForOs(this.systemPrompt, vm.osFamily),
-        capabilities: ["computer_use"],
+          : developmentSystemPrompt(
+              systemPromptForOs(this.systemPrompt, vm.osFamily),
+              input.developmentMode === true,
+            ),
+        capabilities:
+          input.developmentMode === true
+            ? ["computer_use", "filesystem", "shell"]
+            : ["computer_use"],
         mcpEnabled,
         provider: model.provider.id,
         model: model.model.id,
@@ -383,6 +413,15 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
           baseUrl: this.cuaBrokerBaseUrl(),
           token: cuaToken.token,
         },
+        ...pluginSession,
+        ...(development
+          ? {
+              pluginDevelopment: {
+                baseUrl: this.development!.guestBaseUrl(),
+                token: development.token,
+              },
+            }
+          : {}),
       });
       await Promise.all([
         this.tokens.bindSession(token.context.id, handle.sessionId),
@@ -392,6 +431,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
         status: "idle",
         agentSessionRef: handle.archiveRef ?? null,
         sessionVersion: handle.sessionVersion ?? handshake.sessionVersion,
+        pluginSnapshotId: pluginSession.pluginSnapshotId ?? null,
         lastHeartbeatAt: nowIso(),
         lastErrorCode: null,
         lastErrorMessage: null,
@@ -412,6 +452,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
       await Promise.all([
         this.tokens.revoke(token.context.id, "worker_start_failed"),
         this.cuaTokens.revoke(cuaToken.context.id, "worker_start_failed"),
+        this.development?.revokeWorker(worker.id) ?? Promise.resolve(),
       ]);
       await this.workers.updateRuntime(worker.id, {
         status: "failed",
@@ -548,6 +589,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     await Promise.all([
       this.tokens.revoke(active.tokenId, "worker_archived"),
       this.cuaTokens.revoke(active.cuaTokenId, "worker_archived"),
+      this.development?.revokeWorker(workerId) ?? Promise.resolve(),
     ]);
     if (active.leaseId) await this.leases.release(worker.vmId, active.leaseId);
     let updated: WorkerRecord | undefined;
@@ -741,21 +783,41 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
       taskId: null,
     });
     try {
-      const baseSpec = this.sessionSpec(
+      const development =
+        worker.developmentMode === true
+          ? await this.development?.issue({
+              workerId,
+              projectId: worker.projectId,
+              autoEnable: worker.developmentAutoEnable === true,
+            })
+          : null;
+      if (worker.developmentMode === true && !development) {
+        throw new PersistenceError("unavailable", "插件开发 Broker 不可用");
+      }
+      const baseSpec = await this.existingPluginSession(
         worker,
-        binding.guest_workspace_path,
-        model.provider.id,
-        model.model.id,
-        token.token,
-        cuaToken.token,
-        model.provider.api,
-        model.model.reasoning === true,
-        restoreMode === "summary" && summaryText
-          ? summarySystemPrompt(this.systemPrompt, summaryText)
-          : undefined,
-        toProjectRecord(project).agentConfig.mcpEnabled,
-        modelInputs(model),
+        this.sessionSpec(
+          worker,
+          binding.guest_workspace_path,
+          model.provider.id,
+          model.model.id,
+          token.token,
+          cuaToken.token,
+          model.provider.api,
+          model.model.reasoning === true,
+          restoreMode === "summary" && summaryText
+            ? summarySystemPrompt(this.systemPrompt, summaryText)
+            : undefined,
+          toProjectRecord(project).agentConfig.mcpEnabled,
+          modelInputs(model),
+        ),
       );
+      if (development) {
+        baseSpec.pluginDevelopment = {
+          baseUrl: this.development!.guestBaseUrl(),
+          token: development.token,
+        };
+      }
       let handle: WorkerSessionHandle;
       if (restoreMode === "native" && nativeRef) {
         try {
@@ -829,6 +891,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
       await Promise.all([
         this.tokens.revoke(token.context.id, "worker_resume_failed"),
         this.cuaTokens.revoke(cuaToken.context.id, "worker_resume_failed"),
+        this.development?.revokeWorker(workerId) ?? Promise.resolve(),
       ]);
       await this.workers.updateRuntime(workerId, {
         status: "failed",
@@ -837,6 +900,32 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
       });
       throw new PersistenceError("unavailable", `Worker 会话恢复失败：${errorMessage(error)}`);
     }
+  }
+
+  private async newPluginSession(
+    workerId: string,
+    projectId: string,
+  ): Promise<Pick<WorkerSessionSpec, "pluginSnapshotId" | "pluginPackages">> {
+    if (!this.plugins) return {};
+    const snapshot = await this.plugins.snapshot(workerId, projectId);
+    return {
+      pluginSnapshotId: snapshot.id,
+      pluginPackages: await this.plugins.packages(snapshot),
+    };
+  }
+
+  private async existingPluginSession(
+    worker: WorkerRecord,
+    spec: WorkerSessionSpec,
+  ): Promise<WorkerSessionSpec> {
+    if (!this.plugins || !worker.pluginSnapshotId) return spec;
+    const snapshot = await this.plugins.snapshotById(worker.pluginSnapshotId);
+    if (!snapshot) throw new PersistenceError("conflict", "Worker 的插件会话快照不存在");
+    return {
+      ...spec,
+      pluginSnapshotId: snapshot.id,
+      pluginPackages: await this.plugins.packages(snapshot),
+    };
   }
 
   private detachActive(workerId: string): void {
@@ -1398,8 +1487,14 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
       engineType: "pi-rpc",
       engineVersion: PI_ENGINE_VERSION,
       sessionVersion: PI_SESSION_FORMAT_VERSION,
-      systemPrompt: systemPrompt ?? this.systemPrompt,
-      capabilities: ["computer_use"],
+      systemPrompt: developmentSystemPrompt(
+        systemPrompt ?? this.systemPrompt,
+        worker.developmentMode === true,
+      ),
+      capabilities:
+        worker.developmentMode === true
+          ? ["computer_use", "filesystem", "shell"]
+          : ["computer_use"],
       mcpEnabled,
       provider: providerId,
       model: modelId,

@@ -24,6 +24,7 @@ import { WorkManager, type WorkView } from "./WorkManager";
 import { BotManager } from "./BotManager";
 import { ModelSettings } from "./ModelSettings";
 import { VmRuntimeSettings } from "./VmRuntimeSettings";
+import { PluginManager } from "./PluginManager";
 import {
   THEME_LABELS,
   applyThemePreference,
@@ -48,12 +49,13 @@ export interface RestartRequest {
 }
 
 type SettingsSection =
-  "models" | "general" | "runtime" | "bots" | "storage" | "security" | "diagnostics";
+  "models" | "general" | "runtime" | "plugins" | "bots" | "storage" | "security" | "diagnostics";
 
 const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string }> = [
   { id: "models", label: "模型" },
   { id: "general", label: "通用" },
   { id: "runtime", label: "运行环境" },
+  { id: "plugins", label: "插件" },
   { id: "bots", label: "机器人" },
   { id: "storage", label: "存储" },
   { id: "security", label: "安全" },
@@ -574,6 +576,9 @@ export function Dashboard({
       )}
 
       {view === "settings" && settingsSection === "models" && <ModelSettings bridge={bridge} />}
+      {view === "settings" && settingsSection === "plugins" && (
+        <PluginManager bridge={bridge} onOpenWorker={onOpenWorker} />
+      )}
       {view === "settings" && settingsSection === "runtime" && (
         <VmRuntimeSettings bridge={bridge} />
       )}

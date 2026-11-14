@@ -16,6 +16,7 @@
     "@agent-in-box/config": "workspace:*",
     "@agent-in-box/domain": "workspace:*",
     "@agent-in-box/protocol": "workspace:*",
+    "@agent-in-box/plugin-runtime": "workspace:*",
     "@nestjs/common": "12.4.2",
     "@nestjs/core": "12.4.2",
     "@nestjs/platform-express": "12.4.2",

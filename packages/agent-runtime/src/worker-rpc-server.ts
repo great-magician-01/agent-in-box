@@ -439,6 +439,30 @@ function validateSpec(value: unknown): WorkerSessionSpec {
       throw new RpcHttpError(400, "bad_request", "computerUse is invalid", false);
     }
   }
+  if (spec.pluginDevelopment !== undefined) {
+    const development = spec.pluginDevelopment as Record<string, unknown>;
+    if (
+      typeof development !== "object" ||
+      development === null ||
+      typeof development.baseUrl !== "string" ||
+      !development.baseUrl.trim() ||
+      typeof development.token !== "string" ||
+      !development.token ||
+      !spec.capabilities.includes("shell") ||
+      !spec.capabilities.includes("filesystem")
+    ) {
+      throw new RpcHttpError(400, "bad_request", "pluginDevelopment is invalid", false);
+    }
+  }
+  if (spec.pluginSnapshotId !== undefined && typeof spec.pluginSnapshotId !== "string") {
+    throw new RpcHttpError(400, "bad_request", "pluginSnapshotId must be a string", false);
+  }
+  if (
+    spec.pluginPackages !== undefined &&
+    (!Array.isArray(spec.pluginPackages) || spec.pluginPackages.length > 32)
+  ) {
+    throw new RpcHttpError(400, "bad_request", "pluginPackages must be a bounded array", false);
+  }
   return spec as unknown as WorkerSessionSpec;
 }
 

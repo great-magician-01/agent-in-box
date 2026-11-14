@@ -10,7 +10,6 @@ import type {
   WorkerLifecyclePolicy,
 } from "@agent-in-box/protocol";
 import { PersistenceError } from "../persistence/errors";
-import { HostInspectionService } from "../host/host-inspection.service";
 import { SettingsService } from "../settings/settings.service";
 import {
   normalizeDisplayName,
@@ -39,7 +38,6 @@ export class OnboardingService {
   constructor(
     private readonly settings: SettingsService,
     private readonly storage: StorageService,
-    private readonly host: HostInspectionService,
   ) {}
 
   async state(): Promise<OnboardingState> {
@@ -72,13 +70,6 @@ export class OnboardingService {
       });
     }
     const targetRoot = validation.resolvedPath;
-
-    const inspection = await this.host.inspect(targetRoot);
-    if (!inspection.ready) {
-      throw new PersistenceError("validation_failed", "宿主机检查未通过", {
-        checks: inspection.checks.filter((check) => check.status === "error"),
-      });
-    }
 
     const currentRoot = this.storage.currentRoot();
     const moving = !samePath(currentRoot, targetRoot);

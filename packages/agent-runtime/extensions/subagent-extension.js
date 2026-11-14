@@ -247,10 +247,16 @@ async function runAgent(agentName, task, defaults, signal, onUpdate) {
 
     try {
       const invocation = piInvocation(args);
+      // A delegated child must not inherit the Development Worker capability;
+      // only the explicitly loaded development extension may use that token.
+      const childEnv = { ...process.env };
+      delete childEnv.AGENT_IN_BOX_PLUGIN_DEV_URL;
+      delete childEnv.AGENT_IN_BOX_PLUGIN_DEV_TOKEN;
       child = spawn(invocation.command, invocation.args, {
         cwd: defaults.cwd,
         shell: false,
         stdio: ["ignore", "pipe", "pipe"],
+        env: childEnv,
       });
     } catch (error) {
       finish({ spawnError: error });

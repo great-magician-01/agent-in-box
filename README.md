@@ -39,17 +39,17 @@
 
 ## ✨ 一眼看懂
 
-| 模块 | 你能得到什么 |
-| --- | --- |
-| 🖥️ **工作区** | Codex 式三栏：左侧项目 / Worker 会话，中间 Router 或 Worker 主会话，右侧可展开只读观察栏；通知中心、文件投递和原生桌面通知 |
-| 📁 **项目与任务** | 多项目、项目与 Linux / Windows VM 多对多绑定、持久任务队列、依赖与优先级、跨项目串行、任务看板、Trace / 截图 / 审批 / 产物 |
-| 📦 **虚拟机** | Ubuntu 24.04 一键创建、Windows Golden Image、QEMU / WHPX 生命周期、快照、项目目录备份、共享 VM 影响确认、资源预算与空闲休眠 |
-| 🤖 **Agent** | 宿主 Router + Guest Worker、Pi 运行时、原生 / 摘要恢复、自动归档、Active Roster、可搜索 Archive Registry、按项目开启 MCP / 默认 Subagent |
+| 模块                | 你能得到什么                                                                                                                                                           |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 🖥️ **工作区**       | Codex 式三栏：左侧项目 / Worker 会话，中间 Router 或 Worker 主会话，右侧可展开只读观察栏；通知中心、文件投递和原生桌面通知                                             |
+| 📁 **项目与任务**   | 多项目、项目与 Linux / Windows VM 多对多绑定、持久任务队列、依赖与优先级、跨项目串行、任务看板、Trace / 截图 / 审批 / 产物                                             |
+| 📦 **虚拟机**       | Ubuntu 24.04 一键创建、Windows Golden Image、QEMU / WHPX 生命周期、快照、项目目录备份、共享 VM 影响确认、资源预算与空闲休眠                                            |
+| 🤖 **Agent**        | 宿主 Router + Guest Worker、Pi 运行时、原生 / 摘要恢复、自动归档、Active Roster、可搜索 Archive Registry、按项目开启 MCP / 默认 Subagent                               |
 | 🖱️ **Computer Use** | 截图、点击 / 双击、移动、输入、按键、滚动、拖拽、等待、完成；每一步动作与前后截图入库，受步数 / 时长 / 无进展保护；遇到扫码 / CAPTCHA / 手机验证码会暂停并通知人工处理 |
-| 🔐 **安全** | 只监听回环、本机访问密钥、HttpOnly 会话、CSRF / Origin 校验、Per-VM Lease、人工审批、Guest 证据校验、日志与诊断脱敏 |
-| 🧠 **模型** | 多 Provider 配置、Worker 默认模型与 Router 模型、OpenAI-compatible / Anthropic Messages 流式转发、用量记录、短期令牌 |
-| 💬 **机器人** | 飞书官方 SDK 长连接、QQ Bot API v2、身份 / 群白名单、绑定码、任务 / 审批通知、敏感操作二次确认 |
-| 🚀 **运维** | 首次启动向导、自定义数据根、存储迁移与备份、诊断报告、托盘 / 开机启动、更新检查 / 校验 / 回滚、Windows NSIS 与 Linux AppImage 打包 |
+| 🔐 **安全**         | 只监听回环、本机访问密钥、HttpOnly 会话、CSRF / Origin 校验、Per-VM Lease、人工审批、Guest 证据校验、日志与诊断脱敏                                                    |
+| 🧠 **模型**         | 多 Provider 配置、Worker 默认模型与 Router 模型、OpenAI-compatible / Anthropic Messages 流式转发、用量记录、短期令牌                                                   |
+| 💬 **机器人**       | 飞书官方 SDK 长连接、QQ Bot API v2、身份 / 群白名单、绑定码、任务 / 审批通知、敏感操作二次确认                                                                         |
+| 🚀 **运维**         | 首次启动向导、自定义数据根、存储迁移与备份、诊断报告、托盘 / 开机启动、更新检查 / 校验 / 回滚、Windows NSIS 与 Linux AppImage 打包                                     |
 
 <table>
 <tr>
@@ -81,39 +81,39 @@ Electron + NestJS + React + Go + QEMU，没有隐藏云服务。数据目录、�
 
 主会话（Router）和 Worker 是两个不同的 Pi 运行时。Router 在宿主，只拿结构化工具：查项目、查看板、建任务、分派 Worker、归档和检索归档；它没有 Shell、宿主文件系统、VM 输入或 Supervisor 接口。Worker 在 Guest，拥有自己的 HOME、Pi 会话、工具和生命周期；它通过 Computer Use Broker 操作桌面，每个动作都要先确认 Lease 和最新截图。
 
-| 角色 | 住在哪里 | 主要职责 |
-| --- | --- | --- |
-| 🧭 **Router** | 宿主 Pi 进程 | 主会话、项目 / 看板 / 归档查询、任务创建与 Worker 分派；不接触 Shell 和 VM 输入 |
-| 🛠️ **Worker** | Guest 内的 Pi + Worker Runtime | 认领任务、观察桌面、调用 Computer Use、提交产物；独立会话，可归档 / 恢复 |
-| 🖱️ **Guest Agent** | Linux / Windows Guest | 认证管理通道、GDI / X11 截图、鼠标键盘、心跳、workspace 归档 / 恢复 |
-| 📦 **VM Supervisor** | 宿主 Go 服务 | ACL、QEMU / WHPX 生命周期、QMP 对账、快照；不向模型开放任意指令 |
-| 🧠 **Control Plane** | 宿主 NestJS | 项目、任务、Worker、Lease、审批、Model Broker、机器人、通知和持久化 |
+| 角色                 | 住在哪里                       | 主要职责                                                                        |
+| -------------------- | ------------------------------ | ------------------------------------------------------------------------------- |
+| 🧭 **Router**        | 宿主 Pi 进程                   | 主会话、项目 / 看板 / 归档查询、任务创建与 Worker 分派；不接触 Shell 和 VM 输入 |
+| 🛠️ **Worker**        | Guest 内的 Pi + Worker Runtime | 认领任务、观察桌面、调用 Computer Use、提交产物；独立会话，可归档 / 恢复        |
+| 🖱️ **Guest Agent**   | Linux / Windows Guest          | 认证管理通道、GDI / X11 截图、鼠标键盘、心跳、workspace 归档 / 恢复             |
+| 📦 **VM Supervisor** | 宿主 Go 服务                   | ACL、QEMU / WHPX 生命周期、QMP 对账、快照；不向模型开放任意指令                 |
+| 🧠 **Control Plane** | 宿主 NestJS                    | 项目、任务、Worker、Lease、审批、Model Broker、机器人、通知和持久化             |
 
 > 一次任务长这样：你说目标 → Router 建持久任务 → 队列按 VM 认领 → Worker 在 Guest 里观察 / 操作 → 每步写入 Trace 与截图 → Guest 证据或 completion 截图通过校验 → 任务完成。模型自述和「看起来像完成了」都不算数。
 
 ## 🛡️ 盒子里的安全边界
 
-| 边界 | 做法 |
-| --- | --- |
-| 🔑 **长期秘密** | Provider Key 只经 Electron `safeStorage` 解密，由宿主 Model Broker 持有；机器人 Secret 只在宿主；Guest 拿不到长期凭据 |
-| 🎫 **短期令牌** | Worker RPC、Model Broker、Computer Use Broker、noVNC 各自使用绑定 VM / Worker / 任务 / 会话的短期令牌，可轮换、可撤销 |
-| 🕹️ **执行锁** | Per-VM Execution Lease 让 AI 与人工互斥；只读观察不取锁、不转发输入；人工接管显式抢占 |
-| ✅ **审批与保护** | 项目级审批动作、步数 / 时长上限、无进展与重复动作检测、最新截图 / 分辨率校验；等待审批时占用该 VM 执行位 |
-| 🧾 **完成校验** | Guest 文件 / 进程证据（大小、SHA-256、PID）或重新截图；连续失败会阻塞任务 |
-| 🚫 **系统安全桌面** | Windows 锁屏 / UAC 返回 `session_locked` / `secure_desktop`，任务转 `blocked`；不绕过系统机制 |
-| 🌐 **本机 Web** | 只允许回环监听；访问密钥 0600；HttpOnly + SameSite=Strict 会话；CSRF、Host、Origin、Sec-Fetch-Site 校验；无宽松 CORS |
-| 🧹 **可观测与脱敏** | 动作 / 截图 Trace、任务事件、诊断报告；访问密钥、Bearer、Provider Key、机器人 Secret、Cookie 在日志和诊断中脱敏 |
+| 边界                | 做法                                                                                                                  |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| 🔑 **长期秘密**     | Provider Key 只经 Electron `safeStorage` 解密，由宿主 Model Broker 持有；机器人 Secret 只在宿主；Guest 拿不到长期凭据 |
+| 🎫 **短期令牌**     | Worker RPC、Model Broker、Computer Use Broker、noVNC 各自使用绑定 VM / Worker / 任务 / 会话的短期令牌，可轮换、可撤销 |
+| 🕹️ **执行锁**       | Per-VM Execution Lease 让 AI 与人工互斥；只读观察不取锁、不转发输入；人工接管显式抢占                                 |
+| ✅ **审批与保护**   | 项目级审批动作、步数 / 时长上限、无进展与重复动作检测、最新截图 / 分辨率校验；等待审批时占用该 VM 执行位              |
+| 🧾 **完成校验**     | Guest 文件 / 进程证据（大小、SHA-256、PID）或重新截图；连续失败会阻塞任务                                             |
+| 🚫 **系统安全桌面** | Windows 锁屏 / UAC 返回 `session_locked` / `secure_desktop`，任务转 `blocked`；不绕过系统机制                         |
+| 🌐 **本机 Web**     | 只允许回环监听；访问密钥 0600；HttpOnly + SameSite=Strict 会话；CSRF、Host、Origin、Sec-Fetch-Site 校验；无宽松 CORS  |
+| 🧹 **可观测与脱敏** | 动作 / 截图 Trace、任务事件、诊断报告；访问密钥、Bearer、Provider Key、机器人 Secret、Cookie 在日志和诊断中脱敏       |
 
 ## 📦 一台电脑，几个盒子
 
-| 能力 | 说明 |
-| --- | --- |
-| 🐧 **一键 Linux VM** | 版本化 Ubuntu 24.04 Cloud Image，默认 4 vCPU / 8 GiB / 40 GiB；QEMU NoCloud + cloud-init 自动装 XFCE、Guest Agent、Node / Pi 与 Worker，首次初始化通常 5～20 分钟 |
-| 🪟 **Windows VM** | 合法 ISO 或内部 Golden Image；IDE 磁盘、e1000、标准 VGA、xHCI + USB tablet，不依赖 stock Windows 缺少的 VirtIO；最低建议 4 GiB / 32 GiB |
-| 🧩 **混合项目** | 一个项目可同时绑定 Linux 和 Windows VM；同 VM 串行、跨 VM 并发，看板显示 `vmOsFamily` |
-| ⚖️ **资源调度** | Host Reserve、Soft Memory Budget、按需自动启动 / 恢复、`waiting_resources`；空闲休眠只作用于无任务、无 Worker、无 Lease 的 VM |
-| 🧷 **共享与快照** | 多项目共享 VM 时明确展示桌面 / 软件 / 系统状态；整机快照只允许 stopped VM，恢复前列出受影响项目并二次确认；项目目录备份独立校验 |
-| 💾 **存储与迁移** | 应用配置与数据根分离；迁移在存储锁下复制、校验哈希、在线备份 SQLite；失败保留旧目录；旧目录不自动删除 |
+| 能力                 | 说明                                                                                                                                              |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 🐧 **一键 Linux VM** | 首次初始化自动准备 QEMU、版本化 Ubuntu 24.04 镜像和默认工作区；资源档位按宿主能力选择，cloud-init 自动安装 XFCE、Guest Agent、Node / Pi 与 Worker |
+| 🪟 **Windows VM**    | 合法 ISO 或内部 Golden Image；IDE 磁盘、e1000、标准 VGA、xHCI + USB tablet，不依赖 stock Windows 缺少的 VirtIO；最低建议 4 GiB / 32 GiB           |
+| 🧩 **混合项目**      | 一个项目可同时绑定 Linux 和 Windows VM；同 VM 串行、跨 VM 并发，看板显示 `vmOsFamily`                                                             |
+| ⚖️ **资源调度**      | Host Reserve、Soft Memory Budget、按需自动启动 / 恢复、`waiting_resources`；空闲休眠只作用于无任务、无 Worker、无 Lease 的 VM                     |
+| 🧷 **共享与快照**    | 多项目共享 VM 时明确展示桌面 / 软件 / 系统状态；整机快照只允许 stopped VM，恢复前列出受影响项目并二次确认；项目目录备份独立校验                   |
+| 💾 **存储与迁移**    | 应用配置与数据根分离；迁移在存储锁下复制、校验哈希、在线备份 SQLite；失败保留旧目录；旧目录不自动删除                                             |
 
 ## 🧠 模型与入口
 
@@ -127,7 +127,7 @@ Electron + NestJS + React + Go + QEMU，没有隐藏云服务。数据目录、�
 - 任务、审批和 Router 回合事件会回到来源会话；取消、重试、批准 / 拒绝等敏感操作需要管理员二次确认。
 - 首版不发附件；QQ 被动回复窗口外发送失败会明确报错。没有产品方机器人中继。
 
-> Agent 扩展：Subagent 随 Worker Runtime 默认安装；MCP 默认关闭，可在项目设置中按项目开启，只影响新建 / 恢复的 Worker 会话，不热改运行中的 Pi，也不会自动安装 Server 或注入凭据。
+> Agent 扩展：Subagent 随 Worker Runtime 默认安装；MCP 默认关闭，可在项目设置中按项目开启。高级设置的“插件”支持本地包校验、不可变注册、按项目启用和版本快照；AI 插件开发使用显式创建的 Guest Development Worker，测试通过后才能注册，当前项目自动启用需单独授权。所有扩展变更只影响新建／恢复的 Worker 会话，不热改运行中的 Pi，也不会自动安装 MCP Server 或注入凭据。
 
 ## 🏗️ 架构与几条不肯让步的原则
 
@@ -164,15 +164,15 @@ Electron + NestJS + React + Go + QEMU，没有隐藏云服务。数据目录、�
 
 ### 环境要求
 
-| 依赖 | 版本 / 说明 |
-| --- | --- |
-| 操作系统 | Windows 11 + WHPX 是首要目标；Linux / WSL 可开发、跑测试和 Smoke，真实 Hypervisor 验收需对应环境 |
-| Node.js | 22.19 或更高（当前验证环境为 24） |
-| pnpm | 11.22（由根 `packageManager` 固定） |
-| Go | 1.26 或更高（以 `go.mod` 为准） |
-| QEMU | Electron 可托管下载到数据根，也可在设置中选择已有 QEMU；Windows 用 WHPX，Linux 用 KVM |
-| 模型与机器人 | 至少一套 OpenAI-compatible 或 Anthropic Messages Provider；飞书 / QQ 凭据可选 |
-| Windows Guest | 需要合法 ISO 或内部 Golden Image；建议至少 4 GiB 内存 / 32 GiB 磁盘 |
+| 依赖          | 版本 / 说明                                                                                      |
+| ------------- | ------------------------------------------------------------------------------------------------ |
+| 操作系统      | Windows 11 + WHPX 是首要目标；Linux / WSL 可开发、跑测试和 Smoke，真实 Hypervisor 验收需对应环境 |
+| Node.js       | 22.19 或更高（当前验证环境为 24）                                                                |
+| pnpm          | 11.22（由根 `packageManager` 固定）                                                              |
+| Go            | 1.26 或更高（以 `go.mod` 为准）                                                                  |
+| QEMU          | Electron 可托管下载到数据根，也可在设置中选择已有 QEMU；Windows 用 WHPX，Linux 用 KVM            |
+| 模型与机器人  | 至少一套 OpenAI-compatible 或 Anthropic Messages Provider；飞书 / QQ 凭据可选                    |
+| Windows Guest | 需要合法 ISO 或内部 Golden Image；建议至少 4 GiB 内存 / 32 GiB 磁盘                              |
 
 启用 Corepack 后可自动使用固定 pnpm 版本：
 
@@ -218,11 +218,10 @@ Supervisor 与控制平面读取同一个 `AGENT_IN_BOX_DATA_ROOT` 或首次向�
 
 ### 第二步：走一遍首次启动
 
-1. 在首次启动向导里选择**非系统盘**上的数据根目录，确认 Host Reserve、VM 自动启动策略、本机管理员和敏感操作审批。
-2. 在“设置 → 模型与 API 配置”里保存 Provider 凭据，并选择 Worker 默认模型和 Router 模型。长期 Key 只进系统安全存储。
-3. 在“设置 → 虚拟机运行组件”下载托管 QEMU，或选择已有 QEMU 的 `bin` 目录。托管下载依赖发布 Manifest；开发环境可用 `AGENT_IN_BOX_RUNTIME_MANIFEST` 指向本地或自建 Manifest。
-4. 打开“虚拟机”，使用“一键创建 Linux 工作 VM”；等待下载、创建、cloud-init 初始化和就绪。首次通常需要 5～20 分钟。开发环境首次使用前先执行 `pnpm package:guest-runtime`，发布包已内置这些资产。
-5. 新建项目，绑定一台或多台 VM，设置 Guest 工作目录；然后在项目页创建任务，或直接在 Router 主会话里描述目标。
+1. 在首次启动向导里确认或改选数据保存目录；资源、自动启动和敏感操作审批使用安全默认值。
+2. 选择服务商、填写凭据并选择默认模型；保存时自动注册 Provider、应用 Router/Worker 默认选择并执行一次最小上游验证。
+3. 进入主会话后即可对话。后台会自动准备 QEMU、默认 Linux VM、Guest Runtime 和“我的工作区”；任务可提前持久化排队，只有确实需要系统授权或人工处理时才提示。
+4. 多项目、多 VM、自定义资源、模型拆分、QEMU 路径和存储迁移仍保留在高级设置中。开发环境首次使用前先执行 `pnpm package:guest-runtime`，发布包同时内置 Guest 与宿主 Router Pi 运行时资产。
 
 ### 第三步：确认服务真的活了
 
@@ -248,6 +247,7 @@ pnpm package:desktop:dir      # 当前平台目录包
 pnpm package:desktop:win:portable
 pnpm package:desktop:win      # Windows 或可用的 wine；NSIS 安装包
 pnpm package:guest-runtime    # Linux Guest Agent / Worker / Node / Pi / cloud-init 资产
+pnpm package:router-runtime   # 宿主 Router Pi 与 Windows/Linux 生产依赖
 pnpm package:vm-supervisor    # Windows / Linux Supervisor 二进制
 pnpm release:checksums        # release/SHA256SUMS 与 build-manifest.json
 ```
@@ -321,19 +321,20 @@ agent-in-box/
 
 所有需求与设计决策以 [`docs/`](docs) 和 [`tests/`](tests) 为准，聊天记录不作为最终依据。
 
-| 文档 | 它回答什么问题 |
-| --- | --- |
-| [`01-product-solution.md`](docs/01-product-solution.md) | 产品定位、核心原则、概念模型与功能范围 |
-| [`02-technical-design.md`](docs/02-technical-design.md) | 进程、协议、数据、VM、Worker、Computer Use 与安全设计 |
-| [`03-development-plan.md`](docs/03-development-plan.md) | 阶段划分、交付顺序与验收口径 |
-| [`04-user-guide.md`](docs/04-user-guide.md) | 安装、首次启动、VM / 项目 / 任务 / 模型 / 机器人 / 更新排障 |
-| [`05-bot-guide.md`](docs/05-bot-guide.md) | 飞书与 QQ 应用创建、凭据、白名单和绑定流程 |
-| [`06-storage-guide.md`](docs/06-storage-guide.md) | 数据根、迁移、备份、恢复与磁盘空间 |
-| [`07-privacy.md`](docs/07-privacy.md) | 本地数据、模型请求、机器人消息与诊断信息边界 |
-| [`tests/phase0/`](tests/phase0/README.md) | 高风险技术验证：WHPX、QEMU、Pi、真实模型 CUA |
-| [`tests/phase2` ～ `phase14`](tests) | 各阶段验收记录、任务集、安全矩阵与未关闭门槛 |
-| [`images/linux/`](images/linux/README.md) | Guest Worker Runtime 安装、systemd 与 cloud-init 资产 |
-| [`images/windows/`](images/windows/README.md) | Windows Golden Image 构建、Manifest 与 token 注入 |
+| 文档                                                                                | 它回答什么问题                                                |
+| ----------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| [`01-product-solution.md`](docs/01-product-solution.md)                             | 产品定位、核心原则、概念模型与功能范围                        |
+| [`02-technical-design.md`](docs/02-technical-design.md)                             | 进程、协议、数据、VM、Worker、Computer Use 与安全设计         |
+| [`03-development-plan.md`](docs/03-development-plan.md)                             | 阶段划分、交付顺序与验收口径                                  |
+| [`04-user-guide.md`](docs/04-user-guide.md)                                         | 安装、首次启动、VM / 项目 / 任务 / 模型 / 机器人 / 更新排障   |
+| [`05-bot-guide.md`](docs/05-bot-guide.md)                                           | 飞书与 QQ 应用创建、凭据、白名单和绑定流程                    |
+| [`06-storage-guide.md`](docs/06-storage-guide.md)                                   | 数据根、迁移、备份、恢复与磁盘空间                            |
+| [`07-privacy.md`](docs/07-privacy.md)                                               | 本地数据、模型请求、机器人消息与诊断信息边界                  |
+| [`08-onboarding-and-plugin-platform.md`](docs/08-onboarding-and-plugin-platform.md) | 零门槛初始化、默认工作区、内置/用户/AI 插件生命周期与安全边界 |
+| [`tests/phase0/`](tests/phase0/README.md)                                           | 高风险技术验证：WHPX、QEMU、Pi、真实模型 CUA                  |
+| [`tests/phase2` ～ `phase14`](tests)                                                | 各阶段验收记录、任务集、安全矩阵与未关闭门槛                  |
+| [`images/linux/`](images/linux/README.md)                                           | Guest Worker Runtime 安装、systemd 与 cloud-init 资产         |
+| [`images/windows/`](images/windows/README.md)                                       | Windows Golden Image 构建、Manifest 与 token 注入             |
 
 阶段 13 的真实 Windows 宿主 + Linux Guest 验收记录见 [`tests/phase13/real-verification-2026-11-12.md`](tests/phase13/real-verification-2026-11-12.md)。
 
@@ -374,7 +375,7 @@ pnpm smoke:phase2     # 或与改动对应的阶段 Smoke
 
 <div align="center">
 
-**Agent-in-Box** — *让 Agent 住进虚拟机，虚拟机住进你自己的电脑。*
+**Agent-in-Box** — _让 Agent 住进虚拟机，虚拟机住进你自己的电脑。_
 
 <img src="apps/web/public/logo.svg" alt="Agent-in-Box 图标" width="56">
 

@@ -3,13 +3,11 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { readAppConfig, storageLayout, writeAppConfig } from "@agent-in-box/config";
-import type { HostInspectionReport } from "@agent-in-box/protocol";
 import { AppDatabase } from "../persistence/database";
 import type { DatabaseService } from "../persistence/database.service";
 import { SettingsService, normalizeResourcePolicy } from "../settings/settings.service";
 import { StorageService } from "../storage/storage.service";
 import { OnboardingService } from "./onboarding.service";
-import type { HostInspectionService } from "../host/host-inspection.service";
 
 const GIB = 1024 * 1024 * 1024;
 
@@ -35,7 +33,6 @@ interface Fixture {
   settings: SettingsService;
   storage: StorageService;
   onboarding: OnboardingService;
-  setHostReady(ready: boolean): void;
 }
 
 async function createFixture(source: "config" | "environment" = "config"): Promise<Fixture> {
@@ -71,31 +68,7 @@ async function createFixture(source: "config" | "environment" = "config"): Promi
     lockPath: path.join(dir, "storage.lock"),
   });
   const settings = new SettingsService(app.db);
-
-  let ready = true;
-  const host = {
-    inspect: async (dataRoot?: string): Promise<HostInspectionReport> => ({
-      platform: "linux",
-      release: "test",
-      architecture: "x64",
-      supported: true,
-      totalMemoryBytes: 16 * GIB,
-      freeMemoryBytes: 8 * GIB,
-      dataRoot: dataRoot ?? root,
-      freeDiskBytes: 100 * GIB,
-      ready,
-      recommendedProvider: ready ? "qemu-kvm" : null,
-      checks: [
-        {
-          id: "cpu_virtualization",
-          status: ready ? "ok" : "error",
-          message: ready ? "ok" : "未通过",
-        },
-      ],
-      inspectedAt: "2026-11-10T00:00:00.000Z",
-    }),
-  } as unknown as HostInspectionService;
-  const onboarding = new OnboardingService(settings, storage, host);
+  const onboarding = new OnboardingService(settings, storage);
 
   return {
     dir,
@@ -105,9 +78,6 @@ async function createFixture(source: "config" | "environment" = "config"): Promi
     settings,
     storage,
     onboarding,
-    setHostReady(value: boolean) {
-      ready = value;
-    },
   };
 }
 
@@ -176,14 +146,13 @@ describe("onboarding", () => {
     expect(await readFile(path.join(target, "agent-in-box.sqlite"))).toBeDefined();
   });
 
-  it("does not complete when the host check fails", async () => {
+  it("completes storage and model setup without requiring a working hypervisor", async () => {
     const fixture = await createFixture();
-    fixture.setHostReady(false);
 
-    await expect(fixture.onboarding.complete(request(fixture.root))).rejects.toMatchObject({
-      code: "validation_failed",
-    });
-    expect((await fixture.onboarding.state()).required).toBe(true);
+    const result = await fixture.onboarding.complete(request(fixture.root));
+
+    expect(result.state.required).toBe(false);
+    expect(result.restartRequired).toBe(false);
   });
 
   it("refuses to move an environment-managed root", async () => {

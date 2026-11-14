@@ -17,6 +17,7 @@ import { LoginScreen } from "./LoginScreen";
 import { NotificationCenter, useNotificationCenter } from "./NotificationCenter";
 import { ObserverSidebar, type ObserverTab } from "./ObserverSidebar";
 import { OnboardingWizard } from "./OnboardingWizard";
+import { BootstrapMonitor } from "./BootstrapMonitor";
 import { WorkerConversation } from "./WorkerConversation";
 import { WorkspaceSidebar } from "./WorkspaceSidebar";
 
@@ -635,41 +636,44 @@ function AuthenticatedApp({
               </div>
             </section>
           ) : onboarding && runtime && online ? (
-            onboarding.required ? (
-              <OnboardingWizard
-                initialState={onboarding}
-                bridge={bridge}
-                onCompleted={(result) => void completed(result)}
-              />
-            ) : view === "notifications" ? (
-              <NotificationCenter state={notifications} onNavigate={navigate} />
-            ) : selectedWorker ? (
-              <section className="conversation-page worker-main" aria-label="项目会话">
-                <WorkerConversation
-                  workerId={selectedWorker.workerId}
-                  revision={workspaceRevision}
-                  onChanged={onWorkspaceChanged}
+            <>
+              {!onboarding.required && <BootstrapMonitor bridge={bridge} />}
+              {onboarding.required ? (
+                <OnboardingWizard
+                  initialState={onboarding}
+                  bridge={bridge}
+                  onCompleted={(result) => void completed(result)}
                 />
-              </section>
-            ) : (
-              <Dashboard
-                view={view}
-                onboarding={onboarding}
-                runtime={runtime}
-                health={online}
-                bridge={bridge}
-                authInfo={authInfo}
-                controlPlaneState={desktopStatus?.controlPlane.state ?? "running"}
-                onNavigate={navigate}
-                onChanged={async () => {
-                  await refresh(true);
-                  setWorkspaceRevision((value) => value + 1);
-                }}
-                onRestartRequired={restartRequired}
-                onOpenWorker={openWorkerFromBoard}
-                initialProjectId={selectedProjectId}
-              />
-            )
+              ) : view === "notifications" ? (
+                <NotificationCenter state={notifications} onNavigate={navigate} />
+              ) : selectedWorker ? (
+                <section className="conversation-page worker-main" aria-label="项目会话">
+                  <WorkerConversation
+                    workerId={selectedWorker.workerId}
+                    revision={workspaceRevision}
+                    onChanged={onWorkspaceChanged}
+                  />
+                </section>
+              ) : (
+                <Dashboard
+                  view={view}
+                  onboarding={onboarding}
+                  runtime={runtime}
+                  health={online}
+                  bridge={bridge}
+                  authInfo={authInfo}
+                  controlPlaneState={desktopStatus?.controlPlane.state ?? "running"}
+                  onNavigate={navigate}
+                  onChanged={async () => {
+                    await refresh(true);
+                    setWorkspaceRevision((value) => value + 1);
+                  }}
+                  onRestartRequired={restartRequired}
+                  onOpenWorker={openWorkerFromBoard}
+                  initialProjectId={selectedProjectId}
+                />
+              )}
+            </>
           ) : (
             <section className="panel loading-panel" aria-live="polite">
               <span className="spinner" aria-hidden="true" />

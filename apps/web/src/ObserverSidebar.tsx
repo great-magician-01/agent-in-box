@@ -39,6 +39,7 @@ export function ObserverSidebar({
   const [error, setError] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [connectNonce, setConnectNonce] = useState(0);
+  const [takeoverMode, setTakeoverMode] = useState(false);
   const [router, setRouter] = useState<RouterView | null>(null);
   const [worker, setWorker] = useState<WorkerView | null>(null);
   const [tools, setTools] = useState<RouterToolDefinition[]>([]);
@@ -94,6 +95,10 @@ export function ObserverSidebar({
   }, [open, tab, preferredVmId, vms]);
 
   useEffect(() => {
+    setTakeoverMode(false);
+  }, [open, tab, selectedVmId]);
+
+  useEffect(() => {
     if (!open || tab !== "vm" || !selectedVmId) {
       setSession(null);
       return;
@@ -103,7 +108,7 @@ export function ObserverSidebar({
     setError(null);
     setSession(null);
     void api
-      .openVmConsole(selectedVmId, { viewOnly: true })
+      .openVmConsole(selectedVmId, { viewOnly: !takeoverMode })
       .then((next) => {
         if (!cancelled) setSession(next);
       })
@@ -116,7 +121,7 @@ export function ObserverSidebar({
     return () => {
       cancelled = true;
     };
-  }, [open, tab, selectedVmId, connectNonce]);
+  }, [open, tab, selectedVmId, connectNonce, takeoverMode]);
 
   async function takeover(): Promise<void> {
     if (!selectedVmId) return;
@@ -126,13 +131,8 @@ export function ObserverSidebar({
     if (!confirmed) return;
     setConnecting(true);
     setError(null);
-    try {
-      setSession(await api.openVmConsole(selectedVmId));
-    } catch (cause) {
-      setError(errorMessage(cause));
-    } finally {
-      setConnecting(false);
-    }
+    setTakeoverMode(true);
+    setConnectNonce((value) => value + 1);
   }
 
   if (!open) return null;

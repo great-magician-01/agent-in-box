@@ -151,7 +151,7 @@ export class ConsoleService implements OnModuleDestroy {
     this.sockets.add(websocket);
     const target = new URL(ticket.consoleUrl);
     const upstream = net.connect({
-      host: "127.0.0.1",
+      host: target.hostname,
       port: Number(target.port),
       noDelay: true,
     });
@@ -257,6 +257,11 @@ export class ConsoleService implements OnModuleDestroy {
       closed = true;
       upstream.destroy();
       this.sockets.delete(websocket);
+      if (ticket.leaseId) {
+        // Do not make the AI wait for the 15s TTL after the human closes the
+        // console; releasing is idempotent and a takeover already removed it.
+        void this.leases.release(ticket.vmId, ticket.leaseId).catch(() => undefined);
+      }
     });
     websocket.on("error", () => close());
   }
@@ -272,7 +277,11 @@ export class ConsoleService implements OnModuleDestroy {
 function validConsoleUrl(value: string): boolean {
   try {
     const url = new URL(value);
-    return url.protocol === "vnc:" && url.hostname === "127.0.0.1" && validPort(url.port);
+    return (
+      url.protocol === "vnc:" &&
+      (url.hostname === "127.0.0.1" || url.hostname === "127.0.0.2") &&
+      validPort(url.port)
+    );
   } catch {
     return false;
   }

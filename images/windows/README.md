@@ -139,6 +139,8 @@ pwsh -File C:\AgentInBox\scripts\Provision-Tokens.ps1 `
 
 `Provision-Tokens.ps1` 拒绝空值、空白字符、reparse point 和异常大小，并把目标目录 ACL 限制为 SYSTEM/Administrators/目标用户只读。token 值不会打印。
 
+Guest Agent 额外使用 `-allowed-client-cidrs 10.0.2.2/32`：只有经 QEMU 宿主机转发（在 Guest 内显示为网关 `10.0.2.2`）的请求才被接受，Guest 内进程即使读到 token 也不能直接调用 `127.0.0.1:7611`。宿主机侧 VNC/QMP、Guest Agent 与 Worker RPC 的转发端口统一绑定 `127.0.0.2`，Guest 经 `10.0.2.2` 无法访问这些管理面。仍应把交互用户视为不可信：不要给 `aib` 用户额外的管理员权限，也不要在镜像中保留示例密码。
+
 当前产品没有自动把 token 注入 Windows Guest 的介质生成器；这是阶段 13 真实环境验收仍待关闭的发布门槛。不得用镜像内固定 token 规避该边界。
 
 ## 4. 安全桌面与人工接管

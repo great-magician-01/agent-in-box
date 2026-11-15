@@ -25,7 +25,7 @@ export const DEFAULT_CUA_POLICY: CuaPolicy = {
   duplicateActionLimit: 3,
   approvalTimeoutMs: 2 * 60_000,
   approvalActionTypes: [],
-  network: { mode: "broker_only", allowedHosts: [] },
+  network: { mode: "unrestricted", allowedHosts: [] },
   fileExchange: {
     enabled: true,
     maxBytes: 256 * 1024 * 1024,
@@ -132,7 +132,9 @@ export class CuaPolicyService {
     return {
       ...defaults,
       ...stored,
-      network: { ...defaults.network, ...(stored.network ?? {}) },
+      // Legacy rows may still say broker_only. It was never enforced, so never
+      // present it to the UI as an active security control.
+      network: { ...defaults.network, ...(stored.network ?? {}), mode: "unrestricted" },
       fileExchange: { ...defaults.fileExchange, ...(stored.fileExchange ?? {}) },
       credentials: { ...defaults.credentials, ...(stored.credentials ?? {}) },
     };
@@ -241,7 +243,13 @@ function normalizeNetwork(
   base: CuaPolicy["network"],
 ): CuaPolicy["network"] {
   const mode = input?.mode ?? base.mode;
-  if (mode !== "broker_only" && mode !== "unrestricted") {
+  if (mode === "broker_only") {
+    throw new PersistenceError(
+      "validation_failed",
+      "当前版本尚未实现网络隔离，network.mode 只能使用 unrestricted",
+    );
+  }
+  if (mode !== "unrestricted") {
     throw new PersistenceError("validation_failed", "network.mode 无效");
   }
   const allowedHosts = input?.allowedHosts ?? base.allowedHosts;

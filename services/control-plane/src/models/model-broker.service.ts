@@ -16,6 +16,7 @@ import { PersistenceError } from "../persistence/errors";
 import type { DatabaseSchema } from "../persistence/schema";
 import { nowIso } from "../persistence/time";
 import { KYSELY } from "../persistence/tokens";
+import { assertSafeOutboundUrl } from "../security/outbound";
 import type { ModelCredentialProvider } from "./credential-provider";
 import { MODEL_CREDENTIAL_PROVIDER } from "./tokens";
 import { ModelProviderService } from "./model-provider.service";
@@ -87,6 +88,9 @@ export class ModelBrokerService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleInit(): Promise<void> {
+    if (!["127.0.0.1", "127.0.0.2", "localhost", "::1"].includes(this.host)) {
+      throw new Error(`Model Broker 只允许绑定回环地址，当前为 ${this.host}`);
+    }
     await new Promise<void>((resolve, reject) => {
       this.server.once("error", reject);
       this.server.listen(this.requestedPort, this.host, () => {
@@ -195,6 +199,7 @@ export class ModelBrokerService implements OnModuleInit, OnModuleDestroy {
       throw new PersistenceError("bad_request", "Provider API 与请求端点不匹配");
     }
     if (token.kind === "worker" && token.taskId) await this.assertTaskActive(token);
+    await assertSafeOutboundUrl(provider.baseUrl, { allowLoopback: true });
     const secret = await this.credentials.getSecret(provider.credentialProviderId);
     const state: RequestState = {
       id: randomUUID(),

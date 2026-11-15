@@ -50,6 +50,9 @@ type Config struct {
 
 	ServiceName string
 	Version     string
+	// InstanceNonce is echoed from the public health endpoints so the desktop
+	// shell can verify that this process is its own child.
+	InstanceNonce string
 
 	// HostInspector defaults to vmprovider.InspectHost using QemuConfig.
 	HostInspector func(context.Context) vmprovider.HostInspection
@@ -114,7 +117,7 @@ func New(config Config) (*Server, error) {
 	server := &Server{
 		config:          config,
 		logger:          config.Logger,
-		health:          health.NewHandler(config.ServiceName, config.Version),
+		health:          health.NewHandler(config.ServiceName, config.Version, config.InstanceNonce),
 		inspectHost:     config.HostInspector,
 		maxBodyBytes:    config.MaxBodyBytes,
 		createTimeout:   config.CreateTimeout,

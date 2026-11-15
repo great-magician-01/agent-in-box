@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import type { ControlPlaneState, ControlPlaneStatus, HealthResponse } from "@agent-in-box/protocol";
 import type { LoggerLike } from "./logger";
@@ -20,6 +21,12 @@ export interface ControlPlaneSupervisorOptions {
   spawnProcess?: typeof spawn;
   fetchHealth?: (url: string, timeoutMs: number) => Promise<HealthResponse | null>;
   now?: () => number;
+  /**
+   * Installation nonce persisted by the desktop shell. The spawned control
+   * plane echoes it from /api/v1/health; a process that cannot echo it is never
+   * treated as ours and never receives the local access key.
+   */
+  instanceNonce?: string;
 }
 
 interface SupervisorInternalState {
@@ -93,6 +100,7 @@ export class ControlPlaneSupervisor {
   private readonly listeners = new Set<StatusListener>();
   private readonly logger: LoggerLike;
   private readonly now: () => number;
+  private readonly instanceNonce: string;
 
   constructor(options: ControlPlaneSupervisorOptions) {
     this.options = {
@@ -106,6 +114,7 @@ export class ControlPlaneSupervisor {
     };
     this.logger = options.logger;
     this.now = options.now ?? (() => Date.now());
+    this.instanceNonce = options.instanceNonce ?? randomBytes(32).toString("base64url");
   }
 
   getStatus(): ControlPlaneStatus {
@@ -195,9 +204,23 @@ export class ControlPlaneSupervisor {
 
     const existing = await this.checkHealth();
     if (existing) {
+      if (!this.isOurs(existing)) {
+        // Never adopt a process that merely claims to be a control plane: it
+        // could collect the access key or serve attacker-controlled HTML into
+        // a window that carries the preload bridge.
+        this.setState("failed", {
+          health: existing,
+          message: "端口已被其他进程占用，已拒绝连接；请关闭该进程后重试",
+        });
+        this.logger.error("检测到未通过实例身份校验的控制平面", {
+          port: this.options.port,
+          protocolVersion: existing.protocolVersion,
+        });
+        return;
+      }
       this.setState("external", {
         health: existing,
-        message: "已连接正在运行的本地控制平面（外部进程）",
+        message: "已连接正在运行的本地控制平面（本安装实例）",
       });
       return;
     }
@@ -212,6 +235,7 @@ export class ControlPlaneSupervisor {
       ...this.options.env,
       CONTROL_PLANE_HOST: this.options.host,
       CONTROL_PLANE_PORT: String(this.options.port),
+      AGENT_IN_BOX_INSTANCE_NONCE: this.instanceNonce,
     };
     if (this.options.runAsNode) {
       env.ELECTRON_RUN_AS_NODE = "1";
@@ -339,12 +363,20 @@ export class ControlPlaneSupervisor {
         return null;
       }
       const health = await this.checkHealth();
-      if (health) {
+      if (health && this.isOurs(health)) {
         return health;
       }
       await delay(250);
     }
     return null;
+  }
+
+  private isOurs(health: HealthResponse): boolean {
+    return (
+      typeof health.instanceNonce === "string" &&
+      health.instanceNonce.length > 0 &&
+      health.instanceNonce === this.instanceNonce
+    );
   }
 
   private async checkHealth(): Promise<HealthResponse | null> {

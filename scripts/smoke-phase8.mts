@@ -139,6 +139,7 @@ async function startControlPlane(): Promise<void> {
         AGENT_IN_BOX_DATA_ROOT: temporary,
         AGENT_IN_BOX_CONFIG_DIR: configDirectory,
         AGENT_IN_BOX_SUPERVISOR_URL: `http://127.0.0.1:${supervisorPort}`,
+        AGENT_IN_BOX_GUEST_LOOPBACK_HOST: "127.0.0.1",
         AGENT_IN_BOX_SUPERVISOR_TOKEN_FILE: path.join(temporary, "supervisor-acl.token"),
         AGENT_IN_BOX_MODEL_BROKER_PORT: String(modelBrokerPort),
         AGENT_IN_BOX_CUA_BROKER_PORT: String(cuaBrokerPort),

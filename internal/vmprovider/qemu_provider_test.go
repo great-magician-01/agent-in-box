@@ -88,8 +88,8 @@ func TestBuildQemuArgsWindows(t *testing.T) {
 		"qemu-xhci",
 		"usb-tablet",
 		"e1000,netdev=n0",
-		"hostfwd=tcp:127.0.0.1:17621-:7611",
-		"hostfwd=tcp:127.0.0.1:17622-:7612",
+		"hostfwd=tcp:127.0.0.2:17621-:7611",
+		"hostfwd=tcp:127.0.0.2:17622-:7612",
 	} {
 		if !strings.Contains(args, expected) {
 			t.Fatalf("Windows args missing %q: %s", expected, args)
@@ -132,11 +132,11 @@ func TestBuildQemuArgs(t *testing.T) {
 		"-vga none",
 		"virtio-gpu-pci",
 		"virtio-tablet-pci",
-		"hostfwd=tcp:127.0.0.1:10023-:22",
-		"hostfwd=tcp:127.0.0.1:17611-:7611",
-		"hostfwd=tcp:127.0.0.1:17612-:7612",
-		"-vnc 127.0.0.1:1",
-		"-qmp tcp:127.0.0.1:14445,server,nowait",
+		"hostfwd=tcp:127.0.0.2:10023-:22",
+		"hostfwd=tcp:127.0.0.2:17611-:7611",
+		"hostfwd=tcp:127.0.0.2:17612-:7612",
+		"-vnc 127.0.0.2:1",
+		"-qmp tcp:127.0.0.2:14445,server,nowait",
 		"seed.iso,if=virtio,media=cdrom,format=raw,readonly=on",
 	} {
 		if !strings.Contains(args, expected) {
@@ -285,7 +285,7 @@ func TestQemuProviderCreateSnapshotAndDelete(t *testing.T) {
 		t.Fatalf("get state: %+v %v", state, err)
 	}
 	console, err := provider.AttachConsole(ctx, "vm-1")
-	if err != nil || !strings.HasPrefix(console, "vnc://127.0.0.1:") {
+	if err != nil || !strings.HasPrefix(console, "vnc://127.0.0.2:") {
 		t.Fatalf("console: %q %v", console, err)
 	}
 

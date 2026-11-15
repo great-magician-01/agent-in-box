@@ -147,8 +147,20 @@ export function normalizeGuestWorkspacePath(value: string): string {
     return normalized.replace(/\/+$/, "") || "/";
   }
   const drive = normalized.slice(0, 2).toUpperCase();
-  const relative = normalized.slice(2).replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/+$/, "");
-  return `${drive}\\${relative.replace(/\//g, "\\")}`;
+  const relative = normalized
+    .slice(2)
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "")
+    .replace(/\/+$/, "");
+  const segments = relative.split("/").filter(Boolean).map((segment) => {
+    // Win32 treats "work." and "work " as "work"; reject/normalize aliases.
+    const trimmed = segment.replace(/[ .]+$/g, "");
+    if (!trimmed) {
+      throw new Error("Guest workspace path contains an invalid segment");
+    }
+    return trimmed;
+  });
+  return `${drive}\\${segments.join("\\")}`;
 }
 
 function normalizeGuestPathForCompare(value: string): { normalized: string; windows: boolean } {
@@ -161,7 +173,8 @@ function normalizeGuestPathForCompare(value: string): { normalized: string; wind
   let normalized: string;
   if (windows) {
     const drive = parts.shift() ?? "C:";
-    normalized = `${drive}/${parts.join("/")}`;
+    const cleaned = parts.map((segment) => segment.replace(/[ .]+$/g, ""));
+    normalized = `${drive}/${cleaned.join("/")}`;
   } else {
     normalized = `/${parts.join("/")}`;
   }

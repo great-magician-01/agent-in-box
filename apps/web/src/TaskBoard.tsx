@@ -54,8 +54,8 @@ export function TaskBoard({
   const [trace, setTrace] = useState<TaskTraceView | null>(null);
 
   useEffect(() => {
+    setTrace(null);
     if (!selectedTaskId) {
-      setTrace(null);
       return;
     }
     let active = true;
@@ -399,9 +399,7 @@ export function TaskBoard({
                 <div>
                   <dt>目标 VM</dt>
                   <dd>
-                    <a href={`#vm-${detail.task.vmId}`}>
-                      {vms.get(detail.task.vmId)?.name ?? detail.task.vmId}
-                    </a>
+                    <span>{vms.get(detail.task.vmId)?.name ?? detail.task.vmId}</span>
                     {" · "}
                     <button
                       type="button"
@@ -744,7 +742,11 @@ function TaskRow({
               type="button"
               className="secondary"
               disabled={busy}
-              onClick={() => void onAction(() => api.cancelTask(task.id, "用户从看板取消"))}
+              onClick={() => {
+                if (window.confirm("取消这个正在运行的任务？当前桌面操作会被中止。")) {
+                  void onAction(() => api.cancelTask(task.id, "用户从看板取消"));
+                }
+              }}
             >
               取消
             </button>

@@ -28,7 +28,7 @@ type fakeQMP struct {
 
 func startFakeQMP(t *testing.T, initialStatus string) *fakeQMP {
 	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := net.Listen("tcp", "127.0.0.2:0")
 	if err != nil {
 		t.Fatalf("listen fake qmp: %v", err)
 	}
@@ -268,7 +268,7 @@ func TestSuspendResumeStoppedVM(t *testing.T) {
 
 func TestSuspendQmpUnavailable(t *testing.T) {
 	root := t.TempDir()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := net.Listen("tcp", "127.0.0.2:0")
 	if err != nil {
 		t.Fatal(err)
 	}

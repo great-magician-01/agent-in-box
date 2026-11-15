@@ -67,8 +67,12 @@ describe("AuthService", () => {
     for (let index = 0; index < 6; index += 1) {
       await auth.login({ accessKey: "wrong-key-value" }).catch(() => undefined);
     }
-    await expect(auth.login({ accessKey: readKey() })).rejects.toMatchObject({
-      code: "rate_limited",
+    // A correct key must still work while the loopback bucket is blocked,
+    // otherwise any local process could lock the legitimate user out.
+    const success = await auth.login({ accessKey: readKey() });
+    expect(success.token).toBeTruthy();
+    await expect(auth.login({ accessKey: "wrong-key-value" })).rejects.toMatchObject({
+      code: "unauthorized",
     });
   });
 

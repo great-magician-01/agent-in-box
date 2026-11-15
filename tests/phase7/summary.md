@@ -53,7 +53,7 @@
 - `cua_approvals` 记录待审批、批准、拒绝、超时、取消、上下文摘要、解析人和备注；审批绑定具体动作行（`action_id` + `action_json`）。
 - 审批通过只执行原存储动作；拒绝/超时/任务取消返回明确工具错误并写入 `task.approval_requested` / `task.approval_resolved` 任务事件。
 - 文件证据必须位于项目允许根目录并通过 Guest 只读校验；Guest 拒绝符号链接和根目录外路径；完成摘要不允许明显凭据文本。
-- 网络策略默认 `broker_only`，CUA/Model Broker 只监听 Host 回环；项目可维护上游主机白名单基础。VM 级出网隔离仍属于真实 QEMU/WHPX 验收项。
+- 网络隔离尚未实现：`network.mode=broker_only` 会被控制平面拒绝并报告为 `unrestricted`；CUA/Model Broker 只监听 Host 回环。VNC、QMP、Guest Agent 与 Worker RPC 的宿主机转发绑定 `127.0.0.2`，Guest 经 `10.0.2.2` 无法访问这些管理端口；VM 级出网隔离仍属于后续实现项。
 
 逐项验收：
 

@@ -173,7 +173,7 @@ async function mapWithConcurrencyLimit(items, concurrency, fn) {
 }
 
 async function runAgent(agentName, task, defaults, signal, onUpdate) {
-  const agent = AGENTS[agentName];
+  const agent = Object.hasOwn(AGENTS, agentName) ? AGENTS[agentName] : undefined;
   const result = {
     agent: agentName,
     task,

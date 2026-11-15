@@ -289,7 +289,7 @@ func (s *Server) resolveWorkspacePath(raw string) (string, error) {
 			continue
 		}
 		relative, err := filepath.Rel(realRoot, resolved)
-		if err != nil || filepath.IsAbs(relative) || relative == ".." ||
+		if err != nil || filepath.IsAbs(relative) || relative == "." || relative == ".." ||
 			strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
 			continue
 		}

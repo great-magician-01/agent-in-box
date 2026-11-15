@@ -457,9 +457,13 @@ export function WorkerPanel({
                 type="button"
                 className="secondary"
                 disabled={busy || !connected || !running}
-                onClick={() =>
-                  void run(() => api.workerAbort(selected?.worker.id ?? "", "用户中止 Worker 回合"))
-                }
+                onClick={() => {
+                  if (window.confirm("中止当前 Worker 回合？正在进行的桌面操作会被停止。")) {
+                    void run(() =>
+                      api.workerAbort(selected?.worker.id ?? "", "用户中止 Worker 回合"),
+                    );
+                  }
+                }}
               >
                 中止回合
               </button>

@@ -28,6 +28,7 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
   private pollTimer: NodeJS.Timeout | null = null;
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private publishing = false;
+  private lastOutboxPruneAt = 0;
 
   constructor(
     private readonly outbox: OutboxRepository,
@@ -56,7 +57,10 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
         return;
       }
       if (pathname !== EVENTS_PATH) return;
-      void this.upgrade(request, socket, head);
+      void this.upgrade(request, socket, head).catch((error: unknown) => {
+        this.logger.warn(`Event stream upgrade failed: ${String(error)}`);
+        rejectUpgrade(socket, 500, "Event stream upgrade failed");
+      });
     };
     server.on("upgrade", listener);
     return () => server.off("upgrade", listener);
@@ -76,33 +80,49 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
     try {
       const pending = await this.outbox.listPending(200);
       if (pending.length === 0) return;
+      const published: number[] = [];
       for (const message of pending) {
-        const context = await this.eventContext(message.payload);
-        const event = {
-          type: "invalidate",
-          eventId: message.id,
-          topic: message.topic,
-          eventVersion: 1,
-          protocolVersion: PROTOCOL_VERSION,
-          occurredAt: message.createdAt,
-          ...context,
-          payload: message.payload,
-        };
-        const encoded = JSON.stringify(event);
-        for (const socket of this.sockets) {
-          if (socket.readyState !== WebSocket.OPEN) continue;
-          try {
-            socket.send(encoded);
-          } catch {
-            this.sockets.delete(socket);
-            socket.terminate();
+        if (message.parseError) {
+          await this.outbox.markFailed(message.id, `invalid outbox payload: ${message.parseError}`);
+          continue;
+        }
+        try {
+          const context = await this.eventContext(message.payload);
+          const event = {
+            type: "invalidate",
+            eventId: message.id,
+            topic: message.topic,
+            eventVersion: 1,
+            protocolVersion: PROTOCOL_VERSION,
+            occurredAt: message.createdAt,
+            ...context,
+            payload: message.payload,
+          };
+          const encoded = JSON.stringify(event);
+          for (const socket of this.sockets) {
+            if (socket.readyState !== WebSocket.OPEN) continue;
+            try {
+              socket.send(encoded);
+            } catch {
+              this.sockets.delete(socket);
+              socket.terminate();
+            }
           }
+          published.push(message.id);
+        } catch (error) {
+          await this.outbox.markFailed(
+            message.id,
+            error instanceof Error ? error.message : String(error),
+          );
         }
       }
-      await this.outbox.markPublished(
-        pending.map((message) => message.id),
-        nowIso(),
-      );
+      await this.outbox.markPublished(published, nowIso());
+      const now = Date.now();
+      if (now - this.lastOutboxPruneAt > 60 * 60_000) {
+        this.lastOutboxPruneAt = now;
+        const cutoff = new Date(now - 7 * 24 * 60 * 60_000).toISOString();
+        await this.outbox.prunePublished(cutoff).catch(() => 0);
+      }
     } catch (error) {
       this.logger.error(
         "Outbox publish failed; pending rows will be retried",

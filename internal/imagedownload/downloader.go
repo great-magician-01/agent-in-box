@@ -393,7 +393,7 @@ func (d *Downloader) fetch(
 	if writeOffset > 0 {
 		flags = os.O_WRONLY | os.O_CREATE | os.O_APPEND
 	}
-	file, err := os.OpenFile(partialPath, flags, 0o644)
+	file, err := os.OpenFile(partialPath, flags, 0o600)
 	if err != nil {
 		return Result{}, fmt.Errorf("imagedownload: open partial %s: %w", partialPath, err)
 	}
@@ -606,10 +606,10 @@ func (d *Downloader) httpClient() *http.Client {
 				if len(via) > maxRedirects {
 					return fmt.Errorf("%w: stopped after %d redirects", ErrTooManyRedirects, maxRedirects)
 				}
-				if request.URL.Scheme != "http" && request.URL.Scheme != "https" {
+				if !secureImageURL(request.URL) {
 					return fmt.Errorf(
-						"%w: redirect to unsupported scheme %q",
-						ErrTooManyRedirects, request.URL.Scheme,
+						"%w: redirect to insecure URL %q",
+						ErrTooManyRedirects, request.URL.String(),
 					)
 				}
 				return nil
@@ -745,11 +745,21 @@ func parseContentRange(value string) (start, end, total int64, err error) {
 	return start, end, total, nil
 }
 
+func secureImageURL(value *url.URL) bool {
+	if value.Scheme == "https" {
+		return true
+	}
+	if value.Scheme != "http" {
+		return false
+	}
+	host := strings.ToLower(value.Hostname())
+	return host == "127.0.0.1" || host == "localhost" || host == "::1"
+}
+
 func normalizeManifest(manifest Manifest, maxSize int64) (Manifest, error) {
 	parsedURL, err := url.Parse(manifest.URL)
-	if err != nil || parsedURL.Host == "" ||
-		(parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
-		return Manifest{}, fmt.Errorf("%w: URL must be http(s) with a host: %q", ErrInvalidManifest, manifest.URL)
+	if err != nil || parsedURL.Host == "" || !secureImageURL(parsedURL) {
+		return Manifest{}, fmt.Errorf("%w: URL must be HTTPS (loopback HTTP allowed): %q", ErrInvalidManifest, manifest.URL)
 	}
 
 	name := manifest.FileName

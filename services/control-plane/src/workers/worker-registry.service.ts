@@ -369,6 +369,7 @@ export class WorkerRegistryService {
         .select(["id", "task_id"])
         .where("vm_id", "=", worker.vmId)
         .where("owner", "=", "worker")
+        .where("expires_at", ">", nowIso())
         .executeTakeFirst(),
     ]);
     const reasons: string[] = [];

@@ -33,6 +33,9 @@ import { toHumanVerificationRecord } from "../persistence/mappers";
 import { redactText } from "../security/redaction";
 import { PersistenceError } from "../persistence/errors";
 import type { DatabaseSchema } from "../persistence/schema";
+
+const MAX_TASK_SCREENSHOT_BYTES = 512 * 1024 * 1024;
+const MAX_SCREENSHOT_BYTES = 64 * 1024 * 1024;
 import { nowIso } from "../persistence/time";
 import { KYSELY } from "../persistence/tokens";
 import { LeaseRepository } from "../persistence/repositories/lease-repository";
@@ -1054,7 +1057,14 @@ export class CuaExecutionService {
       }
     }
     try {
-      await this.insertAction(binding, actionId, action, source ?? null);
+      // Rejected payloads are attacker-controlled. Keep only the action type
+      // when a malformed request is oversized, so it cannot fill SQLite.
+      const serialized = JSON.stringify(action);
+      const safeAction =
+        Buffer.byteLength(serialized, "utf8") > 32 * 1024
+          ? ({ type: action.type } as ComputerAction)
+          : action;
+      await this.insertAction(binding, actionId, safeAction, source ?? null);
     } catch {
       // A rejected attempt must never mask the original validation error.
       return;
@@ -1240,8 +1250,19 @@ export class CuaExecutionService {
     scaleFactor: number | null,
   ): Promise<CuaScreenshotRecord> {
     const bytes = Buffer.from(dataBase64, "base64");
-    if (bytes.byteLength === 0 || bytes.byteLength > 64 * 1024 * 1024) {
+    if (bytes.byteLength === 0 || bytes.byteLength > MAX_SCREENSHOT_BYTES) {
       throw new PersistenceError("validation_failed", "截图数据为空或超过大小限制");
+    }
+    const usage = await this.db
+      .selectFrom("cua_screenshots")
+      .select(sql<number>`coalesce(sum(size_bytes), 0)`.as("total"))
+      .where("task_id", "=", binding.task.id)
+      .executeTakeFirst();
+    if (Number(usage?.total ?? 0) + bytes.byteLength > MAX_TASK_SCREENSHOT_BYTES) {
+      throw new PersistenceError(
+        "conflict",
+        "该任务的截图证据已超过 512 MiB，请归档任务并重新开始",
+      );
     }
     const id = `${kind}-${randomUUID()}`;
     const directory = path.join(binding.storageRoot, "trace", binding.task.id);
@@ -1338,7 +1359,7 @@ function toGuestAction(action: ComputerAction): GuestInputAction {
 function approvalSummary(task: TaskRecord, action: ComputerAction): string {
   let detail: string = action.type;
   if (action.type === "type_text")
-    detail = `type_text(${JSON.stringify(action.text.slice(0, 80))})`;
+    detail = `type_text(${action.text.length} 字符，内容已隐藏，避免 OTP/密码进入通知)`;
   if (action.type === "keypress") detail = `keypress(${action.keys.join("+")})`;
   if (action.type === "click" || action.type === "move") {
     detail = `${action.type}(${action.point.x},${action.point.y})`;

@@ -36,6 +36,7 @@ while ($true) {
         $arguments = @(
             "-addr", "0.0.0.0:7611",
             "-token-file", $token,
+            "-allowed-client-cidrs", "10.0.2.2/32",
             "-verify-roots", $verifyRoots,
             "-workspace-roots", $workspaceRoots,
             "-update-dir", $config.updateRoot

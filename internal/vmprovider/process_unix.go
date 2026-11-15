@@ -33,7 +33,14 @@ func processAlive(pid int) bool {
 	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
+func processImage(pid int) (string, error) {
+	return os.Readlink("/proc/" + strconv.Itoa(pid) + "/exe")
+}
+
 func killProcess(pid int) error {
+	if err := assertQemuProcess(pid); err != nil {
+		return err
+	}
 	process, err := os.FindProcess(pid)
 	if err != nil {
 		return err

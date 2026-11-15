@@ -50,13 +50,18 @@ export default function registerPluginDevelopment(pi) {
         process.env.AGENT_IN_BOX_PLUGIN_TEMPLATE?.trim() ||
         path.join(EXTENSION_DIRECTORY, "..", "plugin-template");
       const files = await readPackage(template);
+      // Escape values as JSON string fragments so quotes/newlines cannot break
+      // the generated manifest or TypeScript sources.
+      const escapeFragment = (value) => JSON.stringify(String(value)).slice(1, -1);
+      const pluginIdFragment = escapeFragment(params.pluginId);
+      const displayNameFragment = escapeFragment(params.displayName);
       for (const file of files) {
         const output = path.join(target, ...file.path.split("/"));
         await mkdir(path.dirname(output), { recursive: true, mode: 0o700 });
         const text = Buffer.from(file.dataBase64, "base64")
           .toString("utf8")
-          .replaceAll("{{PLUGIN_ID}}", params.pluginId)
-          .replaceAll("{{DISPLAY_NAME}}", params.displayName);
+          .replaceAll("{{PLUGIN_ID}}", pluginIdFragment)
+          .replaceAll("{{DISPLAY_NAME}}", displayNameFragment);
         await writeFile(output, text, { flag: "wx", mode: 0o700 });
       }
       return toolResult({

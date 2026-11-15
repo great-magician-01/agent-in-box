@@ -82,6 +82,7 @@ export class ResourceManagerService implements OnModuleInit, OnModuleDestroy {
   private timer: NodeJS.Timeout | null = null;
   private ticking = false;
   private stopped = false;
+  private reconcilePromise: Promise<ResourceReconcileResult> | null = null;
 
   constructor(
     @Inject(KYSELY) private readonly db: Kysely<DatabaseSchema>,
@@ -119,6 +120,14 @@ export class ResourceManagerService implements OnModuleInit, OnModuleDestroy {
   }
 
   async reconcile(): Promise<ResourceReconcileResult> {
+    if (this.reconcilePromise) return this.reconcilePromise;
+    this.reconcilePromise = this.reconcileOnce().finally(() => {
+      this.reconcilePromise = null;
+    });
+    return this.reconcilePromise;
+  }
+
+  private async reconcileOnce(): Promise<ResourceReconcileResult> {
     const now = this.now();
     const totalMemory = this.totalMemoryBytes();
     const policy = await this.settings.resourcePolicy(totalMemory);
@@ -396,6 +405,12 @@ export class ResourceManagerService implements OnModuleInit, OnModuleDestroy {
         const state = await this.supervisor.suspend(vm.id);
         await this.persistPower(vm.id, state, "resource_idle_suspend");
         suspendedVmIds.push(vm.id);
+        // A task may have been queued between the snapshot above and the
+        // suspend. Move it to waiting_vm instead of leaving it queued behind a
+        // suspended VM that claimNext will never accept.
+        await this.tasks.reconcileVm(vm.id).catch((error: unknown) => {
+          this.logger.warn(`Post-suspend task reconcile failed for VM ${vm.id}: ${String(error)}`);
+        });
         await this.outbox.append(
           "resource.vm_idle_suspended",
           {

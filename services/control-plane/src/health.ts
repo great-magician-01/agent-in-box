@@ -4,6 +4,7 @@ import { PROTOCOL_VERSION } from "@agent-in-box/protocol";
 export function buildHealthResponse(
   startedAt: Date = new Date(),
   now: Date = new Date(),
+  instanceNonce?: string,
 ): HealthResponse {
   return {
     status: "ok",
@@ -11,5 +12,8 @@ export function buildHealthResponse(
     protocolVersion: PROTOCOL_VERSION,
     startedAt: startedAt.toISOString() as IsoTimestamp,
     now: now.toISOString() as IsoTimestamp,
+    ...(instanceNonce
+      ? { instanceNonce }
+      : {}),
   };
 }

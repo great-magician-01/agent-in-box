@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import {
   app,
   BrowserWindow,
@@ -39,6 +39,7 @@ import { registerDesktopIpc, type DesktopIpcHandle, type DesktopUpdateActions } 
 import { IPC_CHANNELS } from "./ipc-channels";
 import { JsonLineLogger } from "./logger";
 import { applyLoginItem } from "./login-item";
+import { loadOrCreateInstanceNonce } from "./instance-nonce";
 import {
   cleanUninstallData,
   isUninstallCleanupInvocation,
@@ -69,6 +70,15 @@ const paths = resolveDesktopPaths();
 app.setName("Agent-in-Box");
 app.setPath("userData", paths.electronDataDirectory);
 
+// The nonce is persisted so the shell can recognise its own control plane
+// after a crash; a process that cannot echo it never receives the access key.
+const controlPlaneNonce = loadOrCreateInstanceNonce(
+  path.join(paths.configDirectory, "control-plane-instance.nonce"),
+);
+const vmSupervisorNonce = loadOrCreateInstanceNonce(
+  path.join(paths.configDirectory, "vm-supervisor-instance.nonce"),
+);
+
 const logger = new JsonLineLogger({
   directory: paths.logDirectory,
   scope: "main",
@@ -94,11 +104,32 @@ if (uninstallCleanup) {
 }
 
 const updatesDirectory = path.join(paths.configDirectory, "updates");
+
+function updatePublicKey(): string | undefined {
+  const inline = process.env.AGENT_IN_BOX_UPDATE_PUBLIC_KEY?.trim();
+  if (inline) return inline;
+  try {
+    return fs.readFileSync(path.join(process.resourcesPath, "update-public-key.pem"), "utf8");
+  } catch {
+    return undefined;
+  }
+}
+
+function configuredUpdateFeed(): string | null {
+  if (process.env.AGENT_IN_BOX_ALLOW_CUSTOM_UPDATE_FEED === "1") {
+    return (
+      currentPreferences().updateFeedUrl ?? process.env.AGENT_IN_BOX_UPDATE_FEED?.trim() ?? null
+    );
+  }
+  return process.env.AGENT_IN_BOX_UPDATE_FEED?.trim() || null;
+}
+
+const updateVerificationKey = updatePublicKey();
 const updateManager = new UpdateManager({
   currentVersion: app.getVersion(),
   directory: updatesDirectory,
-  feedUrl: () =>
-    currentPreferences().updateFeedUrl ?? (process.env.AGENT_IN_BOX_UPDATE_FEED?.trim() || null),
+  ...(updateVerificationKey ? { publicKey: updateVerificationKey } : {}),
+  feedUrl: configuredUpdateFeed,
   rollbackAvailable: () => {
     const rollback = readRollback(paths.configPath);
     return rollback
@@ -143,6 +174,14 @@ function applySystemPreferences(preferences: DesktopPreferences): void {
 }
 
 function updatePreferences(patch: DesktopPreferencesPatch): DesktopPreferences {
+  if (
+    patch.updateFeedUrl !== undefined &&
+    process.env.AGENT_IN_BOX_ALLOW_CUSTOM_UPDATE_FEED !== "1"
+  ) {
+    throw new Error(
+      "更新源只能由安装包资源或 AGENT_IN_BOX_UPDATE_FEED 配置；开发环境可设置 AGENT_IN_BOX_ALLOW_CUSTOM_UPDATE_FEED=1",
+    );
+  }
   const next = setDesktopPreferences(paths.configPath, patch);
   applySystemPreferences(next);
   updateTrayMenu();
@@ -305,8 +344,10 @@ function vmSupervisorEntry(): { entryPath: string; workingDirectory: string } {
 const vmSupervisorLocation = vmSupervisorEntry();
 const vmSupervisor = new VmSupervisor({
   ...vmSupervisorLocation,
+  host: "127.0.0.2",
   storageRoot: path.join(desktopDataRoot, "vms"),
   qemuBinDirectory: "",
+  instanceNonce: vmSupervisorNonce,
   env: {
     AGENT_IN_BOX_CONFIG_DIR: paths.configDirectory,
     AGENT_IN_BOX_DATA_ROOT: desktopDataRoot,
@@ -343,10 +384,13 @@ const supervisor = new ControlPlaneSupervisor({
   entryPath: controlPlaneLocation.entryPath,
   workingDirectory: controlPlaneLocation.workingDirectory,
   port: PORT,
+  instanceNonce: controlPlaneNonce,
   nodeCommand: app.isPackaged ? process.execPath : (process.env.AGENT_IN_BOX_NODE ?? "node"),
   runAsNode: app.isPackaged,
   env: {
     AGENT_IN_BOX_CONFIG_DIR: paths.configDirectory,
+    AGENT_IN_BOX_SUPERVISOR_URL: "http://127.0.0.2:7610",
+    AGENT_IN_BOX_SUPERVISOR_NONCE: vmSupervisorNonce,
     AGENT_IN_BOX_GUEST_RUNTIME_DIR: app.isPackaged
       ? path.join(process.resourcesPath, "guest-runtime", "linux-amd64")
       : path.join(__dirname, "..", "..", "..", "release", "guest-runtime", "linux-amd64"),
@@ -381,11 +425,22 @@ function currentCloseBehavior(): CloseBehavior {
   return currentPreferences().closeBehavior;
 }
 
-function mainPageUrl(): string {
-  if (controlPlaneLocation.webRoot || app.isPackaged) {
-    return `http://127.0.0.1:${PORT}/`;
+function controlPlaneVerified(): boolean {
+  const state = supervisor.getStatus().state;
+  return state === "running" || state === "external";
+}
+
+/**
+ * Only returns a URL after the control plane has proved its installation
+ * identity. Before that the window must show the local diagnostic page rather
+ * than load whatever process happens to own the fixed port.
+ */
+function trustedMainPageUrl(): string | null {
+  if (!app.isPackaged && !controlPlaneLocation.webRoot) {
+    return process.env.AGENT_IN_BOX_WEB_URL ?? "http://127.0.0.1:5173";
   }
-  return process.env.AGENT_IN_BOX_WEB_URL ?? "http://127.0.0.1:5173";
+  if (!controlPlaneVerified()) return null;
+  return `http://127.0.0.1:${PORT}/`;
 }
 
 function errorPagePath(): string {
@@ -412,8 +467,21 @@ function isSameOrigin(left: string, right: string): boolean {
 }
 
 function isTrustedFileUrl(url: string): boolean {
-  const staticDirectory = pathToFileURL(path.join(__dirname, "..", "static")).href;
-  return url.startsWith(staticDirectory);
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "file:") return false;
+    const staticDirectory = path.resolve(__dirname, "..", "static");
+    const filePath = path.resolve(fileURLToPath(parsed));
+    return filePath === staticDirectory || filePath.startsWith(`${staticDirectory}${path.sep}`);
+  } catch {
+    return false;
+  }
+}
+
+function isTrustedRendererUrl(url: string): boolean {
+  if (isTrustedFileUrl(url)) return true;
+  const trusted = trustedMainPageUrl();
+  return trusted !== null && isSameOrigin(url, trusted);
 }
 
 function hardenWebContents(contents: WebContents): void {
@@ -422,8 +490,8 @@ function hardenWebContents(contents: WebContents): void {
     return { action: "deny" };
   });
   contents.on("will-navigate", (event, url) => {
-    const current = contents.getURL();
-    if (isTrustedFileUrl(url) || isSameOrigin(url, current)) {
+    const trusted = trustedMainPageUrl();
+    if (isTrustedFileUrl(url) || (trusted !== null && isSameOrigin(url, trusted))) {
       return;
     }
     event.preventDefault();
@@ -458,7 +526,9 @@ function createWindow(show = !startHidden): BrowserWindow {
   }
 
   window.webContents.on("did-finish-load", () => {
-    if (window.webContents.getURL().startsWith("http://127.0.0.1:")) {
+    const url = window.webContents.getURL();
+    const trusted = trustedMainPageUrl();
+    if (trusted !== null && (url === trusted || isSameOrigin(url, trusted))) {
       mainFrameFailed = false;
       void ensureRendererSession();
     }
@@ -492,7 +562,13 @@ function createWindow(show = !startHidden): BrowserWindow {
     }
   });
 
-  void window.loadURL(mainPageUrl());
+  const trusted = trustedMainPageUrl();
+  if (trusted) {
+    void window.loadURL(trusted);
+  } else {
+    logger.warn("控制平面尚未通过实例身份校验，显示诊断页");
+    void window.loadFile(errorPagePath());
+  }
 
   return window;
 }
@@ -576,6 +652,22 @@ async function installUpdate(): Promise<void> {
   }
   if (!app.isPackaged) {
     throw new Error("开发模式不支持安装更新；请使用打包后的应用验证");
+  }
+  const window = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+  const options = {
+    type: "question" as const,
+    buttons: ["取消", "安装并退出"],
+    defaultId: 0,
+    cancelId: 0,
+    title: "安装更新",
+    message: `安装 Agent-in-Box ${ready.version}？`,
+    detail: "应用将停止本地服务并退出，随后启动已校验签名的安装程序。",
+  };
+  const confirmation = window
+    ? await dialog.showMessageBox(window, options)
+    : await dialog.showMessageBox(options);
+  if (confirmation.response !== 1) {
+    throw new Error("已取消安装更新");
   }
   updateManager.setState("installing");
   broadcastStatus();
@@ -967,6 +1059,7 @@ async function bootstrap(): Promise<void> {
     },
     showNotification: showDesktopNotification,
     quit: requestQuit,
+    isTrustedRendererUrl,
     openLogs: async () => {
       const error = await shell.openPath(paths.logDirectory);
       if (error) {
@@ -980,11 +1073,12 @@ async function bootstrap(): Promise<void> {
 
   supervisor.onStatus((status) => {
     updateTrayMenu();
-    if (status.state === "running") {
+    if (status.state === "running" || status.state === "external") {
       void ensureRendererSession();
-      if (mainFrameFailed && mainWindow && !mainWindow.isDestroyed()) {
+      const trusted = trustedMainPageUrl();
+      if (mainFrameFailed && mainWindow && !mainWindow.isDestroyed() && trusted) {
         logger.info("本地服务已恢复，重新加载主页面");
-        void mainWindow.loadURL(mainPageUrl());
+        void mainWindow.loadURL(trusted);
       }
     }
   });
@@ -1018,7 +1112,7 @@ async function bootstrap(): Promise<void> {
   broadcastStatus();
 
   const preferences = currentPreferences();
-  if (preferences.autoUpdateCheck && preferences.updateFeedUrl) {
+  if (preferences.autoUpdateCheck && configuredUpdateFeed()) {
     setTimeout(() => {
       void updateActions.check().catch(() => undefined);
     }, 5000).unref();

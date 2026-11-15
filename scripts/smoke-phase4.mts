@@ -235,6 +235,56 @@ try {
       last_started_at: now,
     })
     .execute();
+  await database.db
+    .insertInto("projects")
+    .values({
+      id: "phase4-project",
+      name: "Phase 4 Smoke",
+      description: "",
+      default_vm_binding_id: null,
+      workspace_config_json: JSON.stringify({
+        defaultGuestWorkspacePath: "/home/aib/worker/workspace",
+      }),
+      agent_config_json: JSON.stringify({ mcpEnabled: false }),
+      created_at: now,
+      updated_at: now,
+      archived_at: null,
+    })
+    .execute();
+  await database.db
+    .insertInto("conversations")
+    .values({
+      id: "phase4-conversation",
+      kind: "project",
+      project_id: "phase4-project",
+      title: "Phase 4 Smoke",
+      created_at: now,
+      last_message_at: now,
+    })
+    .execute();
+  await database.db
+    .insertInto("tasks")
+    .values({
+      id: "phase4-smoke-task",
+      project_id: "phase4-project",
+      vm_id: vmId,
+      origin_conversation_id: "phase4-conversation",
+      assigned_worker_id: null,
+      parent_task_id: null,
+      objective: "Phase 4 execution lease smoke",
+      status: "queued",
+      priority: 0,
+      attempt_count: 1,
+      latest_summary: null,
+      result_json: null,
+      error_code: null,
+      error_message: null,
+      created_at: now,
+      updated_at: now,
+      started_at: null,
+      completed_at: null,
+    })
+    .execute();
   await database.close();
 
   const guestBinary = path.join(
@@ -268,6 +318,7 @@ try {
         AGENT_IN_BOX_DATA_ROOT: temporary,
         AGENT_IN_BOX_CONFIG_DIR: configDirectory,
         AGENT_IN_BOX_SUPERVISOR_URL: `http://127.0.0.1:${supervisorPort}`,
+        AGENT_IN_BOX_GUEST_LOOPBACK_HOST: "127.0.0.1",
         AGENT_IN_BOX_SUPERVISOR_TOKEN_FILE: supervisorTokenFile,
       },
       stdio: ["ignore", "inherit", "inherit"],
@@ -331,6 +382,21 @@ try {
   )
     throw new Error("Verified update was not staged");
   passed("Guest Agent 更新经过大小/SHA-256 校验后暂存，更新源未收到 Bearer 令牌");
+
+  // The control plane fails orphaned running tasks during restart recovery.
+  // Seed the smoke task as queued, then mark it running after startup so the
+  // lease API can validate a real task owned by this VM.
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  const leaseDatabase = AppDatabase.open({
+    filename: path.join(temporary, "agent-in-box.sqlite"),
+  });
+  const runningAt = new Date().toISOString();
+  await leaseDatabase.db
+    .updateTable("tasks")
+    .set({ status: "running", started_at: runningAt, updated_at: runningAt })
+    .where("id", "=", "phase4-smoke-task")
+    .execute();
+  await leaseDatabase.close();
 
   const worker = await api<{ id: string }>(controlPlanePort, `/api/v1/vms/${vmId}/lease/worker`, {
     method: "POST",

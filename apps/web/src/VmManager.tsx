@@ -743,6 +743,7 @@ export function VmManager({
   async function waitForImageAvailable(imageId: string): Promise<ImageRecord> {
     const deadline = Date.now() + 30 * 60_000;
     while (Date.now() < deadline) {
+      if (!mountedRef.current) throw new Error("页面已关闭，停止等待镜像下载");
       const next = await api.images();
       if (mountedRef.current) setCatalog(next);
       const found = next.items.find((item) => item.id === imageId);
@@ -857,13 +858,26 @@ export function VmManager({
             quickStart?.stage === "image" ||
             quickStart?.stage === "create" ||
             quickStart?.stage === "start" ||
-            quickStart?.stage === "provision"
+            quickStart?.stage === "provision" ||
+            quickStart?.stage === "ready"
           }
-          onClick={() => void quickCreateLinuxVm()}
+          onClick={() => {
+            if (
+              quickStart?.stage === "failed" &&
+              !window.confirm("上次初始化失败，重新下载/创建会再建一台 VM，继续吗？")
+            ) {
+              return;
+            }
+            void quickCreateLinuxVm();
+          }}
         >
-          {quickStart && !["ready", "failed"].includes(quickStart.stage)
-            ? "正在初始化…"
-            : "下载并创建可用 VM"}
+          {quickStart?.stage === "ready"
+            ? "已创建可用 VM"
+            : quickStart?.stage === "failed"
+              ? "重试创建"
+              : quickStart
+                ? "正在初始化…"
+                : "下载并创建可用 VM"}
         </button>
         {quickStart && (
           <div className={`quick-start-status ${quickStart.stage}`} role="status">

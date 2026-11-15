@@ -152,6 +152,7 @@ export function BotManager({ bridge }: BotManagerProps): React.JSX.Element {
     await run(async () => {
       if (bridge && form.secret.trim()) {
         await bridge.credentials.save({
+          kind: "bot",
           providerId: credentialProviderId,
           secret: form.secret.trim(),
         });

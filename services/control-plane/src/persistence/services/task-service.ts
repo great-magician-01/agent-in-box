@@ -119,9 +119,12 @@ export class TaskService {
       dependsOn,
     };
     const requestHash = createHash("sha256").update(JSON.stringify(normalized)).digest("hex");
+    // Idempotency is project-scoped; the model-supplied key must never collide
+    // with (or probe) another project's keys.
+    const storageKey = `${normalized.projectId}:${idempotencyKey}`;
 
     return this.db.transaction().execute(async (trx) => {
-      const existing = await this.tasks.findIdempotencyKey(idempotencyKey, trx);
+      const existing = await this.tasks.findIdempotencyKey(storageKey, trx);
       if (existing) {
         if (existing.requestHash !== requestHash) {
           throw new IdempotencyConflictError(idempotencyKey);
@@ -209,11 +212,14 @@ export class TaskService {
       if (dependsOn.length > 0) {
         const dependencies = await trx
           .selectFrom("tasks")
-          .select(["id", "status"])
+          .select(["id", "status", "project_id"])
           .where("id", "in", dependsOn)
           .execute();
         if (dependencies.length !== dependsOn.length) {
           throw new PersistenceError("validation_failed", "一个或多个依赖任务不存在");
+        }
+        if (dependencies.some((task) => task.project_id !== normalized.projectId)) {
+          throw new PersistenceError("validation_failed", "依赖任务必须属于同一项目");
         }
       }
 
@@ -252,7 +258,7 @@ export class TaskService {
           .values({ task_id: task.id, dependency_task_id: dependencyTaskId, created_at: now })
           .execute();
       }
-      await this.tasks.insertIdempotencyKey(idempotencyKey, task.id, requestHash, now, trx);
+      await this.tasks.insertIdempotencyKey(storageKey, task.id, requestHash, now, trx);
       await this.tasks.appendEvent(
         task.id,
         "task.created",
@@ -805,12 +811,22 @@ export class TaskService {
         const worker = workerId
           ? await trx
               .selectFrom("workers")
-              .select(["project_id", "vm_id"])
+              .select(["project_id", "vm_id", "status", "archived_at"])
               .where("id", "=", workerId)
               .executeTakeFirst()
           : undefined;
         if (workerId && !worker) {
           throw new PersistenceError("validation_failed", "Worker 不存在");
+        }
+        if (
+          worker &&
+          (worker.archived_at !== null ||
+            worker.status === "archiving" ||
+            worker.status === "archived")
+        ) {
+          // The caller already atomically moved the Worker from idle to its
+          // claiming state; only a Worker that is being/been archived is invalid.
+          return null;
         }
 
         const candidates = (await this.tasks.listAll({ vmId, statuses: ["queued"] }, trx)).sort(
@@ -1186,7 +1202,43 @@ export class TaskService {
       now,
       trx,
     );
+    if (to === "failed" || to === "cancelled") {
+      await this.blockDependentsInTransaction(taskId, to, trx);
+    }
     return updated;
+  }
+
+  /**
+   * A failed/cancelled dependency can never satisfy its dependents. Move the
+   * still-unstarted dependents to Blocked (retryable) instead of leaving them
+   * in `created` forever, which also prevents project archival.
+   */
+  private async blockDependentsInTransaction(
+    dependencyTaskId: string,
+    outcome: "failed" | "cancelled",
+    trx: DatabaseExecutor,
+  ): Promise<void> {
+    const dependents = await trx
+      .selectFrom("task_dependencies")
+      .innerJoin("tasks", "tasks.id", "task_dependencies.task_id")
+      .select(["tasks.id as id"])
+      .where("task_dependencies.dependency_task_id", "=", dependencyTaskId)
+      .where("tasks.status", "in", ["created", "queued", "waiting_vm", "waiting_resources"])
+      .execute();
+    for (const dependent of dependents) {
+      await this.transitionInTransaction(
+        dependent.id,
+        "blocked",
+        {
+          summary:
+            outcome === "failed" ? "依赖任务失败，请处理后重试" : "依赖任务已取消，请处理后重试",
+          errorCode: "dependency_failed",
+          errorMessage: `依赖任务 ${dependencyTaskId} ${outcome === "failed" ? "失败" : "已取消"}`,
+        },
+        {},
+        trx,
+      );
+    }
   }
 
   private async reconcileDependentsInTransaction(

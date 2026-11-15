@@ -29,6 +29,7 @@ func main() {
 	qemuImg := flag.String("qemu-img", "qemu-img", "fixed qemu-img executable")
 	accelerator := flag.String("accelerator", "", "QEMU accelerator (default: whpx on Windows, kvm elsewhere)")
 	aclTokenFile := flag.String("acl-token-file", "", "ACL bearer token file (default: <data-root>/supervisor-acl.token)")
+	instanceNonce := flag.String("instance-nonce", "", "installation nonce echoed by the health endpoints")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
@@ -60,12 +61,13 @@ func main() {
 	}
 
 	supervisor, err := vmsupervisor.New(vmsupervisor.Config{
-		StorageRoot: *storageRoot,
-		Provider:    provider,
-		Token:       token.Token,
-		Logger:      logger,
-		ServiceName: "vm-supervisor",
-		Version:     version,
+		StorageRoot:   *storageRoot,
+		Provider:      provider,
+		Token:         token.Token,
+		Logger:        logger,
+		ServiceName:   "vm-supervisor",
+		Version:       version,
+		InstanceNonce: *instanceNonce,
 		QemuConfig: vmprovider.QemuConfig{
 			SystemBinary: *qemuSystem,
 			ImageBinary:  *qemuImg,

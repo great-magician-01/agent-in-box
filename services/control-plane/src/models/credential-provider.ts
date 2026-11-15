@@ -1,5 +1,6 @@
 import { lstat, readFile } from "node:fs/promises";
 import path from "node:path";
+import type { CredentialKind } from "@agent-in-box/protocol";
 import { PersistenceError } from "../persistence/errors";
 
 export interface ModelCredentialProvider {
@@ -15,6 +16,8 @@ export interface HostCredentialProviderOptions {
   descriptorPath?: string;
   developmentCredentialsFile?: string;
   fetchImpl?: typeof fetch;
+  /** Model and bot credentials live in separate namespaces. */
+  kind?: CredentialKind;
   /** Used in operator-facing errors, e.g. 模型 or 机器人. */
   purpose?: string;
 }
@@ -28,6 +31,7 @@ export class HostCredentialProvider implements ModelCredentialProvider {
   private readonly developmentCredentialsFile?: string;
   private readonly fetchImpl: typeof fetch;
   private readonly purpose: string;
+  private readonly kind: CredentialKind;
 
   constructor(options: HostCredentialProviderOptions = {}) {
     const descriptor =
@@ -38,6 +42,7 @@ export class HostCredentialProvider implements ModelCredentialProvider {
     if (credentials) this.developmentCredentialsFile = path.resolve(credentials);
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.purpose = options.purpose ?? "模型";
+    this.kind = options.kind ?? "model";
   }
 
   async getSecret(providerId: string): Promise<string> {
@@ -84,7 +89,7 @@ export class HostCredentialProvider implements ModelCredentialProvider {
           "content-type": "application/json",
           authorization: `Bearer ${descriptor.token}`,
         },
-        body: JSON.stringify({ providerId }),
+        body: JSON.stringify({ kind: this.kind, providerId }),
         redirect: "error",
         signal: AbortSignal.timeout(5000),
       });
@@ -115,7 +120,11 @@ export class HostCredentialProvider implements ModelCredentialProvider {
       this.developmentCredentialsFile!,
       true,
     );
-    const secret = values[providerId];
+    const secret =
+      values[`${this.kind}:${providerId}`] ??
+      // Backward-compatible development files used a flat map. Only accept a
+      // flat key when its implicit namespace matches the provider kind.
+      (legacyKindForId(providerId) === this.kind ? values[providerId] : undefined);
     if (typeof secret !== "string" || secret.length < 8 || secret.length > 16_384) {
       throw new PersistenceError(
         "validation_failed",
@@ -145,8 +154,11 @@ async function readJsonFile<T>(file: string, requirePrivateMode: boolean): Promi
   }
 }
 
-function isMissing(error: unknown): boolean {
-  return (
+function legacyKindForId(providerId: string): CredentialKind {
+  return providerId.startsWith("bot-") ? "bot" : "model";
+}
+
+function isMissing(error: unknown): boolean {  return (
     (typeof error === "object" &&
       error !== null &&
       (error as NodeJS.ErrnoException).code === "ENOENT") ||

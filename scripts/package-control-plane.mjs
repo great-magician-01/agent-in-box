@@ -18,7 +18,15 @@ rmSync(target, { recursive: true, force: true });
 
 const deploy = spawnSync(
   pnpm,
-  ["--filter", "@agent-in-box/control-plane", "deploy", "--prod", "--legacy", target],
+  [
+    "--filter",
+    "@agent-in-box/control-plane",
+    "deploy",
+    "--prod",
+    "--legacy",
+    "--config.node-linker=hoisted",
+    target,
+  ],
   {
     cwd: root,
     stdio: "inherit",
@@ -107,6 +115,41 @@ function repairDeployedSymlinks(directory) {
 
 if (existsSync(runtimeModules)) {
   repairDeployedSymlinks(runtimeModules);
+  assertPortableDeployTree(runtimeModules);
+  pruneDevelopmentFiles(runtimeModules);
+}
+
+function assertPortableDeployTree(directory) {
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const entryPath = path.join(directory, entry.name);
+    if (entry.isSymbolicLink()) {
+      const rawTarget = stripWindowsExtendedPrefix(readlinkSync(entryPath));
+      if (path.isAbsolute(rawTarget)) {
+        throw new Error(
+          `control-plane bundle contains an absolute symlink and cannot be relocated: ${entryPath} -> ${rawTarget}`,
+        );
+      }
+      continue;
+    }
+    if (entry.isDirectory()) assertPortableDeployTree(entryPath);
+  }
+}
+
+function pruneDevelopmentFiles(directory) {
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const entryPath = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      pruneDevelopmentFiles(entryPath);
+      continue;
+    }
+    if (
+      /\.(test|spec)\.(js|mjs|cjs|ts|d\.ts)$/.test(entry.name) ||
+      /\.(map)$/.test(entry.name) ||
+      entry.name === "tsconfig.json"
+    ) {
+      rmSync(entryPath, { force: true });
+    }
+  }
 }
 
 // pnpm adds a self-reference back into the workspace. It is broken once the

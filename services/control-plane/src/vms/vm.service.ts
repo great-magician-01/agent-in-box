@@ -386,12 +386,11 @@ export class VmService {
       await this.tasks?.reconcileVm(id);
       return this.view(id, state, await this.resourceReport());
     } catch (error) {
-      await this.persistState(
-        id,
-        "error",
-        "unknown",
-        null,
-        error instanceof Error ? error.message : String(error),
+      // A failed supervisor call does not prove the VM changed power state.
+      // Keep the last known state instead of marking a running VM as "error",
+      // which would make Workers block their tasks and disable auto-start.
+      this.logger.warn(
+        `VM ${id} action failed: ${error instanceof Error ? error.message : String(error)}`,
       );
       throw error;
     }
@@ -417,7 +416,9 @@ export class VmService {
     let guestHealth: GuestHealthState = "unknown";
     if (state.powerState === "running" && state.guestHostPort > 0) {
       try {
-        const response = await this.guestFetch(`http://127.0.0.1:${state.guestHostPort}/healthz`, {
+        const guestHost =
+          process.env.AGENT_IN_BOX_GUEST_LOOPBACK_HOST?.trim() || "127.0.0.2";
+        const response = await this.guestFetch(`http://${guestHost}:${state.guestHostPort}/healthz`, {
           headers: { accept: "application/json" },
           signal: AbortSignal.timeout(this.guestTimeoutMs),
         });

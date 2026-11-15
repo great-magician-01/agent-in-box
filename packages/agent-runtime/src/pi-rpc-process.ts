@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { StringDecoder } from "node:string_decoder";
 
 export interface PiRpcProcessOptions {
   command: string;
@@ -28,6 +29,7 @@ export class PiRpcProcess {
   private readonly listeners = new Set<(event: Record<string, unknown>) => void>();
   private exitError: Error | null = null;
   private closing = false;
+  private readonly decoder = new StringDecoder("utf8");
 
   constructor(private readonly options: PiRpcProcessOptions) {}
 
@@ -39,6 +41,9 @@ export class PiRpcProcess {
       cwd: this.options.cwd,
       env: this.options.env,
       stdio: ["pipe", "pipe", "inherit"],
+      // Give POSIX children their own process group so close() can terminate
+      // subagents as well; Windows uses taskkill /T below.
+      detached: process.platform !== "win32",
     });
     this.child = child;
 
@@ -57,7 +62,7 @@ export class PiRpcProcess {
   }
 
   private onData(chunk: Buffer): void {
-    this.buffer += chunk.toString("utf8");
+    this.buffer += this.decoder.write(chunk);
     if (Buffer.byteLength(this.buffer, "utf8") > MAX_BUFFER_BYTES) {
       const error = new Error("Pi RPC exceeded the maximum unterminated response size");
       this.exitError = error;
@@ -76,7 +81,14 @@ export class PiRpcProcess {
       if (!line) continue;
       let event: Record<string, unknown>;
       try {
-        event = JSON.parse(line) as Record<string, unknown>;
+        const parsed = JSON.parse(line) as unknown;
+        if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+          for (const listener of this.listeners) {
+            listener({ type: "protocol_error", message: "Pi RPC emitted a non-object JSON line" });
+          }
+          continue;
+        }
+        event = parsed as Record<string, unknown>;
       } catch (error) {
         for (const listener of this.listeners) {
           listener({ type: "protocol_error", message: String(error) });
@@ -148,6 +160,37 @@ export class PiRpcProcess {
     return () => this.listeners.delete(listener);
   }
 
+  private signalTree(signal: "SIGTERM" | "SIGKILL"): void {
+    const child = this.child;
+    if (!child || child.exitCode !== null || child.signalCode !== null) return;
+    if (process.platform === "win32") {
+      if (!child.pid) return;
+      const args = ["/pid", String(child.pid), "/T", ...(signal === "SIGKILL" ? ["/F"] : [])];
+      const killer = spawn("taskkill", args, { windowsHide: true, stdio: "ignore" });
+      killer.on("error", () => {
+        try {
+          child.kill(signal);
+        } catch {
+          // Already gone.
+        }
+      });
+      return;
+    }
+    if (child.pid) {
+      try {
+        process.kill(-child.pid, signal);
+        return;
+      } catch {
+        // Fall back to the direct child below.
+      }
+    }
+    try {
+      child.kill(signal);
+    } catch {
+      // Already gone.
+    }
+  }
+
   async close(): Promise<void> {
     const child = this.child;
     if (!child) return;
@@ -159,13 +202,22 @@ export class PiRpcProcess {
       }
       child.once("exit", () => resolve());
     });
-    const stdin = child.stdin;
-    if (stdin) stdin.end();
-    const timeout = setTimeout(() => {
-      if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
-    }, 5000);
-    await exited;
-    clearTimeout(timeout);
+    const stillRunning = (): boolean =>
+      child.exitCode === null && child.signalCode === null;
+    child.stdin?.end();
+    await Promise.race([exited, delay(3000)]);
+    if (stillRunning()) {
+      this.signalTree("SIGTERM");
+      await Promise.race([exited, delay(3000)]);
+    }
+    if (stillRunning()) {
+      this.signalTree("SIGKILL");
+      await Promise.race([exited, delay(2000)]);
+    }
     this.child = null;
   }
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }

@@ -3,10 +3,11 @@ import http, { type IncomingMessage, type Server, type ServerResponse } from "no
 import path from "node:path";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import type { AddressInfo } from "node:net";
+import type { CredentialKind } from "@agent-in-box/protocol";
 import type { LoggerLike } from "./logger";
 
 export interface CredentialDecryptor {
-  decrypt(providerId: string): string | null;
+  decrypt(kind: CredentialKind, providerId: string): string | null;
 }
 
 export interface CredentialBridgeOptions {
@@ -107,18 +108,28 @@ export class CredentialBridge {
       return;
     }
     const body = await readBody(request, 4096);
+    let kind: unknown;
     let providerId: unknown;
     try {
-      providerId = (JSON.parse(body.toString("utf8")) as { providerId?: unknown }).providerId;
+      const parsed = JSON.parse(body.toString("utf8")) as {
+        kind?: unknown;
+        providerId?: unknown;
+      };
+      kind = parsed.kind;
+      providerId = parsed.providerId;
     } catch {
       this.write(response, 400, { error: "bad_request" });
       return;
     }
-    if (typeof providerId !== "string" || !/^[a-z0-9][a-z0-9_-]{0,39}$/.test(providerId)) {
+    if (
+      (kind !== "model" && kind !== "bot") ||
+      typeof providerId !== "string" ||
+      !/^[a-z0-9][a-z0-9_-]{0,39}$/.test(providerId)
+    ) {
       this.write(response, 400, { error: "bad_request" });
       return;
     }
-    const secret = this.credentialStore.decrypt(providerId);
+    const secret = this.credentialStore.decrypt(kind, providerId);
     if (!secret) {
       this.write(response, 404, { error: "credential_missing" });
       return;

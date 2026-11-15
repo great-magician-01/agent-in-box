@@ -252,13 +252,13 @@ pnpm package:vm-supervisor    # Windows / Linux Supervisor 二进制
 pnpm release:checksums        # release/SHA256SUMS 与 build-manifest.json
 ```
 
-阶段 Smoke 的完整清单、各项断言和未关闭门槛见 [`tests/`](tests) 与 [`scripts/`](scripts)。CI 在 `.github/workflows/ci.yml` 中运行 `pnpm check`、`go vet`、关键 Go 包 race 测试和阶段 2～11 服务 Smoke；Windows / Linux 双矩阵使用固定 pnpm、Node 和 `go.mod` 中的 Go 版本。
+阶段 Smoke 的完整清单、各项断言和未关闭门槛见 [`tests/`](tests) 与 [`scripts/`](scripts)。CI 在 `.github/workflows/ci.yml` 中运行 `pnpm check`、`go vet`、关键 Go 包 race 测试和阶段 2～14 服务 Smoke；Windows / Linux 双矩阵使用固定 pnpm、Node 和 `go.mod` 中的 Go 版本。
 
 ## 📦 打包、更新与卸载
 
 - `pnpm package:desktop:dir` 生成当前平台目录包；`pnpm package:desktop:win:portable` 可在 Linux / WSL 直接构建 Windows portable exe；`pnpm package:desktop:win` 生成 per-user NSIS 安装包，需要 Windows 或可用的 wine。
 - NSIS 不申请管理员权限，安装后提示首次启动向导；卸载默认保留 VM、数据库和用户数据。只有用户明确选择删除且目录带有数据根标记时，才调用清理工具。
-- 更新使用 HTTPS Manifest：流式下载、SHA-256 校验、安装前备份数据库与已安装资源，失败可回滚。Windows 上替换 `app.asar` 等资源可能受文件锁影响，干净安装环境的升级 / 回滚仍需验收。
+- 更新使用 HTTPS Manifest：响应为 `{ manifest, signature }`，`signature` 是 `manifest` 规范化 JSON 的 Ed25519 签名；桌面端用 `AGENT_IN_BOX_UPDATE_PUBLIC_KEY`（PEM 或 base64 SPKI）或安装包内 `update-public-key.pem` 校验后才下载。更新源只从 `AGENT_IN_BOX_UPDATE_FEED` 读取（开发时可设 `AGENT_IN_BOX_ALLOW_CUSTOM_UPDATE_FEED=1`），UI 不再接受更新源编辑；安装前必须原生确认，随后流式下载、SHA-256 校验、备份数据库与已安装资源，失败可回滚。Windows 上替换 `app.asar` 等资源可能受文件锁影响，干净安装环境的升级 / 回滚仍需验收。
 - 受限网络下可设置镜像：
 
 ```bash
@@ -267,7 +267,8 @@ ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-
 pnpm package:desktop:win:portable
 ```
 
-- 发布资产清单、SHA-256 和构建 Manifest 由 `pnpm release:checksums` 生成；它不等于外部代码签名。
+- 发布资产清单、SHA-256 和构建 Manifest 由 `pnpm release:checksums` 生成；它不等于外部代码签名。更新 Manifest 可用 `pnpm sign:update-manifest <manifest.json> <ed25519-private-key.pem> <output.json>` 生成带 `signature` 的 envelope，公钥通过 `AGENT_IN_BOX_UPDATE_PUBLIC_KEY` 或安装包内 `update-public-key.pem` 提供给桌面端。
+- 从旧版本升级后：仍在运行的 VM 使用旧的 `127.0.0.1` hostfwd / VNC / QMP 绑定，请停止并重新启动 VM 以采用 `127.0.0.2` 隔离；旧版残留的控制平面进程没有实例 nonce，桌面端会拒绝接管，请先关闭它。Guest 内的 Guest Agent 启动脚本需要更新到带 `-allowed-client-cidrs 10.0.2.2/32` 的版本（重新 provisioning 或手动更新服务）。
 
 ## 📂 项目结构
 

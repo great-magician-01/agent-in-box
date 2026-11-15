@@ -155,7 +155,20 @@ func cleanupQemuRuntimeJunction(dir string) error {
 	return removeASCIIJunction(link)
 }
 
+func assertSafeCmdPath(value string) error {
+	if strings.ContainsAny(value, "&|<>^%\"\r\n") {
+		return fmt.Errorf("path contains characters interpreted by cmd.exe: %q", value)
+	}
+	return nil
+}
+
 func createASCIIJunction(link, target string) error {
+	if err := assertSafeCmdPath(link); err != nil {
+		return err
+	}
+	if err := assertSafeCmdPath(target); err != nil {
+		return err
+	}
 	cmd := exec.Command("cmd.exe", "/c", "mklink", "/J", link, target)
 	cmd.Dir = filepath.Dir(link)
 	output, err := cmd.CombinedOutput()
@@ -172,6 +185,9 @@ func createASCIIJunction(link, target string) error {
 }
 
 func removeASCIIJunction(link string) error {
+	if err := assertSafeCmdPath(link); err != nil {
+		return err
+	}
 	cmd := exec.Command("cmd.exe", "/c", "rmdir", link)
 	cmd.Dir = filepath.Dir(link)
 	output, err := cmd.CombinedOutput()

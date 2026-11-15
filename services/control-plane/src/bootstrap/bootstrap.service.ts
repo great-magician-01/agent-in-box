@@ -61,6 +61,8 @@ interface BootstrapRow {
   completed_at: string | null;
 }
 
+class BootstrapCancelled extends Error {}
+
 @Injectable()
 export class BootstrapService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(BootstrapService.name);
@@ -68,6 +70,7 @@ export class BootstrapService implements OnModuleInit, OnModuleDestroy {
   private readonly provisioningTimeoutMs: number;
   private running: Promise<void> | null = null;
   private stopped = false;
+  private cancelRequested = false;
 
   constructor(
     @Inject(KYSELY) private readonly db: Kysely<DatabaseSchema>,
@@ -130,8 +133,23 @@ export class BootstrapService implements OnModuleInit, OnModuleDestroy {
 
   async start(): Promise<BootstrapState> {
     this.stopped = false;
+    if (this.running) return this.state();
+    this.cancelRequested = false;
+    // Set the single-flight marker synchronously, before any await, so two
+    // concurrent start/retry calls cannot both create the default VM.
+    this.running = this.beginStart()
+      .catch((error: unknown) => {
+        this.logger.warn(`Bootstrap start failed: ${error instanceof Error ? error.message : String(error)}`);
+      })
+      .finally(() => {
+        this.running = null;
+      });
+    return this.state();
+  }
+
+  private async beginStart(): Promise<void> {
     const current = await this.state();
-    if (current.status === "execution_ready" || this.running) return current;
+    if (current.status === "execution_ready") return;
     const now = nowIso();
     const existing = await this.row();
     if (!existing) {
@@ -165,13 +183,11 @@ export class BootstrapService implements OnModuleInit, OnModuleDestroy {
         completed_at: null,
       });
     }
-    this.running = this.run().finally(() => {
-      this.running = null;
-    });
-    return this.state();
+    await this.run();
   }
 
   async cancel(): Promise<BootstrapState> {
+    this.cancelRequested = true;
     const current = await this.state();
     if (current.resources.imageId) {
       const image = await this.images.get(current.resources.imageId).catch(() => null);
@@ -201,6 +217,7 @@ export class BootstrapService implements OnModuleInit, OnModuleDestroy {
 
   private async run(): Promise<void> {
     try {
+      if (this.cancelRequested) return;
       const state = await this.state();
       let validatedModel: Awaited<ReturnType<ModelValidationService["validate"]>> | null = null;
       if (!state.conversationReady || state.requiredAction === "configure_model") {
@@ -332,7 +349,7 @@ export class BootstrapService implements OnModuleInit, OnModuleDestroy {
         .where("id", "=", BOOTSTRAP_ID)
         .execute();
     } catch (error) {
-      if (this.stopped) return;
+      if (error instanceof BootstrapCancelled || this.cancelRequested || this.stopped) return;
       const code = errorCode(error);
       await this.update({
         status: retryableCode(code) ? "retryable_failed" : "blocked",
@@ -392,8 +409,9 @@ export class BootstrapService implements OnModuleInit, OnModuleDestroy {
   private async waitForGuest(vmId: string): Promise<void> {
     const deadline = Date.now() + this.provisioningTimeoutMs;
     while (!this.stopped && Date.now() <= deadline) {
+      if (this.cancelRequested) throw new BootstrapCancelled("cancelled");
       const current = await this.state();
-      if (current.status === "cancelled") return;
+      if (current.status === "cancelled") throw new BootstrapCancelled("cancelled");
       const vm = await this.vms.get(vmId);
       if (vm.vm.provisioning.state === "ready") return;
       if (vm.vm.provisioning.state === "failed") {
@@ -448,6 +466,7 @@ export class BootstrapService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async transition(stage: BootstrapStage) {
+    if (this.cancelRequested) throw new BootstrapCancelled("cancelled");
     await this.update({
       status: "running",
       stage,

@@ -144,7 +144,12 @@ async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
     headers.set(CSRF_HEADER, csrfToken);
   }
 
-  const response = await fetch(path, { ...init, headers, credentials: "same-origin" });
+  const response = await fetch(path, {
+    ...init,
+    headers,
+    credentials: "same-origin",
+    signal: init.signal ?? AbortSignal.timeout(30_000),
+  });
   if (response.status === 401 && !path.endsWith("/auth/login")) {
     csrfToken = null;
     window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
@@ -169,6 +174,9 @@ async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
       response.status,
       error?.details,
     );
+  }
+  if (response.status === 204) {
+    return undefined as T;
   }
   return (await response.json()) as T;
 }
@@ -261,48 +269,90 @@ export function subscribeImageEvents(
 
 export const TASK_EVENTS_PATH = "/api/v1/events/ws";
 
+interface TaskStreamListener {
+  onInvalidate: () => void;
+  onStateChange?: (state: TaskStreamState) => void;
+}
+
+const taskStreamListeners = new Set<TaskStreamListener>();
+let taskStreamSocket: WebSocket | null = null;
+let taskStreamRetryTimer: number | null = null;
+let taskStreamRetryMs = 1000;
+let taskStreamState: TaskStreamState = "reconnecting";
+
+function broadcastTaskStreamState(state: TaskStreamState): void {
+  taskStreamState = state;
+  for (const listener of taskStreamListeners) listener.onStateChange?.(state);
+}
+
+function scheduleTaskStreamReconnect(): void {
+  if (taskStreamListeners.size === 0 || taskStreamRetryTimer !== null) return;
+  const jitter = Math.round(Math.random() * 250);
+  taskStreamRetryTimer = window.setTimeout(() => {
+    taskStreamRetryTimer = null;
+    connectTaskStream();
+  }, taskStreamRetryMs + jitter);
+  taskStreamRetryMs = Math.min(5000, taskStreamRetryMs * 2);
+}
+
+function connectTaskStream(): void {
+  if (taskStreamListeners.size === 0 || taskStreamSocket) return;
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  const socket = new WebSocket(`${protocol}//${window.location.host}${TASK_EVENTS_PATH}`);
+  taskStreamSocket = socket;
+  socket.onopen = () => {
+    taskStreamRetryMs = 1000;
+    broadcastTaskStreamState("live");
+    for (const listener of taskStreamListeners) listener.onInvalidate();
+  };
+  socket.onmessage = (message: MessageEvent) => {
+    if (typeof message.data !== "string") return;
+    try {
+      const event = JSON.parse(message.data) as { type?: unknown };
+      if (event.type === "invalidate") {
+        for (const listener of taskStreamListeners) listener.onInvalidate();
+      }
+    } catch {
+      // Invalid hints are ignored; the next reconnect always performs full sync.
+    }
+  };
+  socket.onclose = () => {
+    if (taskStreamSocket !== socket) return;
+    taskStreamSocket = null;
+    if (taskStreamListeners.size === 0) return;
+    broadcastTaskStreamState("reconnecting");
+    scheduleTaskStreamReconnect();
+  };
+  socket.onerror = () => socket.close();
+}
+
 /**
- * WebSocket messages are invalidation hints, not a second task state store.
- * Every open/reconnect triggers a full board snapshot read by the caller.
+ * One WebSocket is shared by the whole app; every component subscribes to the
+ * same invalidation hints instead of opening its own reconnect loop.
  */
 export function subscribeTaskEvents(
   onInvalidate: () => void,
   onStateChange?: (state: TaskStreamState) => void,
 ): () => void {
-  let closed = false;
-  let socket: WebSocket | null = null;
-  let retryTimer: number | null = null;
-
-  const connect = () => {
-    if (closed) return;
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    socket = new WebSocket(`${protocol}//${window.location.host}${TASK_EVENTS_PATH}`);
-    socket.onopen = () => {
-      onStateChange?.("live");
-      onInvalidate();
-    };
-    socket.onmessage = (message: MessageEvent) => {
-      if (typeof message.data !== "string") return;
-      try {
-        const event = JSON.parse(message.data) as { type?: unknown };
-        if (event.type === "invalidate") onInvalidate();
-      } catch {
-        // Invalid hints are ignored; the next reconnect always performs full sync.
-      }
-    };
-    socket.onclose = () => {
-      if (closed) return;
-      onStateChange?.("reconnecting");
-      retryTimer = window.setTimeout(connect, 1000);
-    };
-    socket.onerror = () => socket?.close();
+  const listener: TaskStreamListener = {
+    onInvalidate,
+    ...(onStateChange ? { onStateChange } : {}),
   };
-
-  connect();
+  taskStreamListeners.add(listener);
+  onStateChange?.(taskStreamState);
+  connectTaskStream();
   return () => {
-    closed = true;
-    if (retryTimer !== null) window.clearTimeout(retryTimer);
-    socket?.close();
+    taskStreamListeners.delete(listener);
+    if (taskStreamListeners.size === 0) {
+      if (taskStreamRetryTimer !== null) {
+        window.clearTimeout(taskStreamRetryTimer);
+        taskStreamRetryTimer = null;
+      }
+      const socket = taskStreamSocket;
+      taskStreamSocket = null;
+      socket?.close();
+      taskStreamState = "reconnecting";
+    }
   };
 }
 

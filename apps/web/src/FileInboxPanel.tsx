@@ -69,6 +69,7 @@ export function FileInboxPanel({
   }
 
   async function remove(file: InboxFileRecord): Promise<void> {
+    if (!window.confirm(`删除 inbox 文件「${file.originalName}」？`)) return;
     setBusy(true);
     try {
       await api.deleteInboxFile(file.id);

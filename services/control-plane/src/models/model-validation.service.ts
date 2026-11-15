@@ -10,6 +10,7 @@ import type {
 } from "@agent-in-box/protocol";
 import { PersistenceError } from "../persistence/errors";
 import { nowIso } from "../persistence/time";
+import { assertSafeOutboundUrl } from "../security/outbound";
 import type { ModelCredentialProvider } from "./credential-provider";
 import { ModelProviderService, type ResolvedModel } from "./model-provider.service";
 import { MODEL_CREDENTIAL_PROVIDER } from "./tokens";
@@ -145,6 +146,22 @@ export class ModelValidationService {
     }
 
     const startedAt = Date.now();
+    try {
+      await assertSafeOutboundUrl(resolved.provider.baseUrl, { allowLoopback: true });
+    } catch (error) {
+      return this.failure(
+        resolved,
+        supportsImage,
+        {
+          code: "provider_unreachable",
+          category: "validation_failed",
+          message: error instanceof Error ? error.message : "Provider 地址不安全",
+        },
+        null,
+        null,
+        requested,
+      );
+    }
     const controller = new AbortController();
     let timedOut = false;
     const timer = setTimeout(() => {

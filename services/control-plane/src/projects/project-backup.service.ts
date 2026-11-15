@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { lstat, mkdir, rm, stat } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import path from "node:path";
-import { Inject, Injectable, Logger } from "@nestjs/common";
+import { Inject, Injectable, Logger, type OnModuleInit } from "@nestjs/common";
 import type { Kysely } from "kysely";
 import {
   ACTIVE_TASK_STATUSES,
@@ -65,8 +65,21 @@ interface BackupRow {
 }
 
 @Injectable()
-export class ProjectBackupService {
+export class ProjectBackupService implements OnModuleInit {
   private readonly logger = new Logger(ProjectBackupService.name);
+
+  async onModuleInit(): Promise<void> {
+    // A process crash leaves these statuses without a running operation. Mark
+    // them failed so restore/delete are not blocked forever.
+    await this.db
+      .updateTable("project_backups")
+      .set({ status: "failed", error_message: "控制平面重启中断了备份操作" })
+      .where("status", "in", ["creating", "restoring"])
+      .execute()
+      .catch((error: unknown) => {
+        this.logger.warn(`Failed to reconcile interrupted project backups: ${String(error)}`);
+      });
+  }
 
   constructor(
     @Inject(KYSELY) private readonly db: Kysely<DatabaseSchema>,
@@ -427,11 +440,15 @@ export class ProjectBackupService {
       .where("backup_id", "=", backupId)
       .orderBy("id", "asc")
       .execute();
-    await this.db
+    const claimed = await this.db
       .updateTable("project_backups")
       .set({ status: "restoring", error_message: null })
       .where("id", "=", backupId)
-      .execute();
+      .where("status", "in", ["available", "restored"])
+      .executeTakeFirst();
+    if (Number(claimed.numUpdatedRows ?? 0) === 0) {
+      throw new PersistenceError("conflict", "该备份已被另一个恢复操作占用");
+    }
     const restored: string[] = [];
     try {
       for (const binding of bindings) {

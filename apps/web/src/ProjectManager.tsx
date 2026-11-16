@@ -217,16 +217,16 @@ export function ProjectManager({
     <div className="project-workspace">
       <div className="project-list" aria-label="项目列表">
         <div className="section-heading">
-          <h3>项目</h3>
+          <h2>项目列表</h2>
           <span className="muted small">{projects.length} 个</span>
         </div>
         {projects.length === 0 && <p className="muted small">创建项目后，再绑定一台或多台 VM。</p>}
-        <div className="project-tabs" role="list">
+        <div className="project-tabs">
           {projects.map((view) => (
             <button
               type="button"
-              role="listitem"
               key={view.project.id}
+              aria-current={view.project.id === selectedProjectId ? "page" : undefined}
               className={view.project.id === selectedProjectId ? "selected" : ""}
               onClick={() => onSelect(view.project.id)}
             >
@@ -285,120 +285,135 @@ export function ProjectManager({
           <>
             <div className="section-heading">
               <div>
-                <h3>{detail.project.name}</h3>
+                <h2>{detail.project.name}</h2>
                 <span className="muted small">创建于 {formatDate(detail.project.createdAt)}</span>
               </div>
               <span className={`pill ${archived ? "warn" : "ok"}`}>
                 {archived ? "已归档" : "活跃"}
               </span>
             </div>
-            <form
-              className="project-edit-form"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void run(() =>
-                  api.updateProject(detail.project.id, {
-                    name: editName,
-                    description: editDescription,
-                    workspaceConfig: { defaultGuestWorkspacePath: editWorkspace },
-                    agentConfig: { mcpEnabled: editMcpEnabled },
-                  }),
-                );
-              }}
-            >
-              <div className="form-grid two-columns">
-                <label className="field">
-                  <span>项目名称</span>
-                  <input
-                    value={editName}
-                    disabled={archived || busy}
-                    required
-                    onChange={(event) => setEditName(event.target.value)}
-                  />
-                </label>
-                <label className="field">
-                  <span>默认工作目录</span>
-                  <input
-                    value={editWorkspace}
-                    disabled={archived || busy}
-                    required
-                    spellCheck={false}
-                    onChange={(event) => setEditWorkspace(event.target.value)}
-                  />
-                </label>
+            <dl className="project-summary">
+              <div>
+                <dt>描述</dt>
+                <dd>{detail.project.description || "暂无描述"}</dd>
               </div>
-              <label className="field">
-                <span>描述</span>
-                <textarea
-                  value={editDescription}
-                  disabled={archived || busy}
-                  onChange={(event) => setEditDescription(event.target.value)}
-                />
-              </label>
-              <div className="field">
-                <span>Agent 扩展</span>
-                <label className="toggle compact-toggle">
-                  <input
-                    type="checkbox"
-                    checked={editMcpEnabled}
-                    disabled={archived || busy}
-                    onChange={(event) => setEditMcpEnabled(event.target.checked)}
-                  />
-                  <span>为此项目启用 MCP</span>
-                </label>
-                <span className="form-hint">
-                  Subagent 默认启用，无需配置。MCP 默认关闭；开启后由该项目 Worker 的 Pi 会话加载
-                  Guest 中的 MCP 配置。更改在新建或恢复 Worker 会话后生效，点击“保存项目”应用。
-                </span>
+              <div>
+                <dt>默认工作目录</dt>
+                <dd>
+                  <code>{detail.project.workspaceConfig.defaultGuestWorkspacePath}</code>
+                </dd>
               </div>
-              <div className="action-row">
-                {!archived && (
-                  <button type="submit" className="secondary" disabled={busy}>
-                    保存项目
+            </dl>
+            <details className="create-box project-edit-details">
+              <summary>编辑项目与 Agent 扩展</summary>
+              <form
+                className="project-edit-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void run(() =>
+                    api.updateProject(detail.project.id, {
+                      name: editName,
+                      description: editDescription,
+                      workspaceConfig: { defaultGuestWorkspacePath: editWorkspace },
+                      agentConfig: { mcpEnabled: editMcpEnabled },
+                    }),
+                  );
+                }}
+              >
+                <div className="form-grid two-columns">
+                  <label className="field">
+                    <span>项目名称</span>
+                    <input
+                      value={editName}
+                      disabled={archived || busy}
+                      required
+                      onChange={(event) => setEditName(event.target.value)}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>默认工作目录</span>
+                    <input
+                      value={editWorkspace}
+                      disabled={archived || busy}
+                      required
+                      spellCheck={false}
+                      onChange={(event) => setEditWorkspace(event.target.value)}
+                    />
+                  </label>
+                </div>
+                <label className="field">
+                  <span>描述</span>
+                  <textarea
+                    value={editDescription}
+                    disabled={archived || busy}
+                    onChange={(event) => setEditDescription(event.target.value)}
+                  />
+                </label>
+                <div className="field">
+                  <span>Agent 扩展</span>
+                  <label className="toggle compact-toggle">
+                    <input
+                      type="checkbox"
+                      checked={editMcpEnabled}
+                      disabled={archived || busy}
+                      onChange={(event) => setEditMcpEnabled(event.target.checked)}
+                    />
+                    <span>为此项目启用 MCP</span>
+                  </label>
+                  <span className="form-hint">
+                    Subagent 默认启用，无需配置。MCP 默认关闭；开启后由该项目 Worker 的 Pi 会话加载
+                    Guest 中的 MCP 配置。更改在新建或恢复 Worker 会话后生效，点击“保存项目”应用。
+                  </span>
+                </div>
+                <div className="action-row">
+                  {!archived && (
+                    <button type="submit" className="secondary" disabled={busy}>
+                      保存项目
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={busy}
+                    onClick={() => {
+                      if (
+                        !archived &&
+                        !window.confirm("归档该项目？任务与历史会保留，可随时恢复。")
+                      ) {
+                        return;
+                      }
+                      void run(() =>
+                        archived
+                          ? api.restoreProject(detail.project.id)
+                          : api.archiveProject(detail.project.id),
+                      );
+                    }}
+                  >
+                    {archived ? "恢复项目" : "归档项目"}
                   </button>
-                )}
-                <button
-                  type="button"
-                  className="secondary"
-                  disabled={busy}
-                  onClick={() => {
-                    if (
-                      !archived &&
-                      !window.confirm("归档该项目？任务与历史会保留，可随时恢复。")
-                    ) {
-                      return;
-                    }
-                    void run(() =>
-                      archived
-                        ? api.restoreProject(detail.project.id)
-                        : api.archiveProject(detail.project.id),
-                    );
-                  }}
-                >
-                  {archived ? "恢复项目" : "归档项目"}
-                </button>
-                <button
-                  type="button"
-                  className="link-button danger-link"
-                  disabled={busy}
-                  onClick={() => {
-                    if (
-                      window.confirm(
-                        "删除项目元数据不会删除任何 VM 或虚拟磁盘。已有任务历史的项目只能归档。确定继续？",
-                      )
-                    ) {
-                      void run(() => api.deleteProject(detail.project.id));
-                    }
-                  }}
-                >
-                  删除项目
-                </button>
-              </div>
-            </form>
+                  <button
+                    type="button"
+                    className="link-button danger-link"
+                    disabled={busy}
+                    onClick={() => {
+                      if (
+                        window.confirm(
+                          "删除项目元数据不会删除任何 VM 或虚拟磁盘。已有任务历史的项目只能归档。确定继续？",
+                        )
+                      ) {
+                        void run(() => api.deleteProject(detail.project.id));
+                      }
+                    }}
+                  >
+                    删除项目
+                  </button>
+                </div>
+              </form>
+            </details>
 
             <section className="subsection" aria-labelledby="bindings-title">
               <div className="section-heading">
-                <h4 id="bindings-title">VM 绑定与共享影响</h4>
+                <h3 id="bindings-title">VM 绑定与共享影响</h3>
                 <span className="muted small">停止的 VM 也可绑定</span>
               </div>
               {detail.bindings.length === 0 && <p className="muted small">尚未绑定 VM。</p>}
@@ -427,7 +442,11 @@ export function ProjectManager({
                       onChange={(event) => selectBindingVm(event.target.value)}
                       disabled={!selectedBindVm || busy}
                     >
-                      {!selectedBindVm && <option value="">所有 VM 均已绑定</option>}
+                      {!selectedBindVm && (
+                        <option value="">
+                          {vms.length === 0 ? "暂无可用 VM" : "所有 VM 均已绑定"}
+                        </option>
+                      )}
                       {availableVms.map((vm) => (
                         <option key={vm.id} value={vm.id}>
                           {vm.osFamily === "windows" ? "Windows" : "Linux"} · {vm.name} ·{" "}
@@ -462,102 +481,105 @@ export function ProjectManager({
 
             <section className="subsection" aria-labelledby="cua-policy-title">
               <div className="section-heading">
-                <h4 id="cua-policy-title">Computer Use 策略</h4>
+                <h3 id="cua-policy-title">Computer Use 策略</h3>
                 <span className="muted small">
                   {policyView?.source === "project" ? "项目覆盖默认策略" : "使用全局默认策略"}
                 </span>
               </div>
               <p className="muted small">
-                Worker 动作必须持有 Execution Lease。敏感动作可要求人工审批；完成必须由 Guest
-                文件/进程证据或新截图独立验证，模型自述不算完成。
+                限制单次任务的执行步数与时长；需要时可要求人工审批敏感桌面操作。
               </p>
-              {policyView && (
-                <form className="stack compact-form" onSubmit={(event) => void savePolicy(event)}>
-                  <div className="project-columns">
-                    <label className="field">
-                      <span>最大步数</span>
-                      <input
-                        type="number"
-                        min={1}
-                        max={1000}
-                        value={policyMaxSteps}
-                        disabled={archived || busy}
-                        onChange={(event) => setPolicyMaxSteps(event.target.value)}
-                      />
-                    </label>
-                    <label className="field">
-                      <span>最长执行（分钟）</span>
-                      <input
-                        type="number"
-                        min={1}
-                        max={1440}
-                        value={policyMinutes}
-                        disabled={archived || busy}
-                        onChange={(event) => setPolicyMinutes(event.target.value)}
-                      />
-                    </label>
-                    <label className="field">
-                      <span>允许的 Provider/网络主机（逗号分隔）</span>
-                      <input
-                        value={policyHosts}
-                        disabled={archived || busy}
-                        placeholder="models.example.test"
-                        onChange={(event) => setPolicyHosts(event.target.value)}
-                      />
-                    </label>
-                    <label className="field">
-                      <span>文件证据允许根目录（逗号分隔）</span>
-                      <input
-                        value={policyRoots}
-                        disabled={archived || busy}
-                        onChange={(event) => setPolicyRoots(event.target.value)}
-                      />
-                      <span className="form-hint">
-                        支持 POSIX（如 /home/worker）和 Windows（如 C:\Users\aib-worker）绝对路径；
-                        不能使用文件系统根目录。
-                      </span>
-                    </label>
-                  </div>
-                  <div className="field">
-                    <span>必须人工审批的动作</span>
-                    <div className="button-row">
-                      {(
-                        [
-                          "type_text",
-                          "keypress",
-                          "drag",
-                          "click",
-                          "move",
-                          "scroll",
-                        ] as ComputerActionType[]
-                      ).map((action) => (
-                        <label key={action} className="toggle compact-toggle">
-                          <input
-                            type="checkbox"
-                            checked={policyApproval.includes(action)}
-                            disabled={archived || busy}
-                            onChange={() => toggleApproval(action)}
-                          />
-                          <span>{action}</span>
-                        </label>
-                      ))}
+              <details className="advanced-details policy-details">
+                <summary>调整执行、网络与审批策略</summary>
+                {policyView && (
+                  <form className="stack compact-form" onSubmit={(event) => void savePolicy(event)}>
+                    <div className="project-columns">
+                      <label className="field">
+                        <span>最大步数</span>
+                        <input
+                          type="number"
+                          min={1}
+                          max={1000}
+                          value={policyMaxSteps}
+                          disabled={archived || busy}
+                          onChange={(event) => setPolicyMaxSteps(event.target.value)}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>最长执行（分钟）</span>
+                        <input
+                          type="number"
+                          min={1}
+                          max={1440}
+                          value={policyMinutes}
+                          disabled={archived || busy}
+                          onChange={(event) => setPolicyMinutes(event.target.value)}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>允许的 Provider/网络主机（逗号分隔）</span>
+                        <input
+                          value={policyHosts}
+                          disabled={archived || busy}
+                          placeholder="models.example.test"
+                          onChange={(event) => setPolicyHosts(event.target.value)}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>文件证据允许根目录（逗号分隔）</span>
+                        <input
+                          value={policyRoots}
+                          disabled={archived || busy}
+                          onChange={(event) => setPolicyRoots(event.target.value)}
+                        />
+                        <span className="form-hint">
+                          支持 POSIX（如 /home/worker）和 Windows（如
+                          C:\Users\aib-worker）绝对路径； 不能使用文件系统根目录。
+                        </span>
+                      </label>
                     </div>
-                  </div>
-                  <div className="button-row">
-                    <button type="submit" className="secondary" disabled={archived || busy}>
-                      保存策略
-                    </button>
-                    <span className="muted small">
-                      网络隔离在当前版本尚未启用（VM 仍可访问网络）；文件交换与凭据策略按项目配置审计。
-                    </span>
-                  </div>
-                </form>
-              )}
+                    <div className="field">
+                      <span>必须人工审批的动作</span>
+                      <div className="button-row">
+                        {(
+                          [
+                            "type_text",
+                            "keypress",
+                            "drag",
+                            "click",
+                            "move",
+                            "scroll",
+                          ] as ComputerActionType[]
+                        ).map((action) => (
+                          <label key={action} className="toggle compact-toggle">
+                            <input
+                              type="checkbox"
+                              checked={policyApproval.includes(action)}
+                              disabled={archived || busy}
+                              onChange={() => toggleApproval(action)}
+                            />
+                            <span>{action}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="button-row">
+                      <button type="submit" className="secondary" disabled={archived || busy}>
+                        保存策略
+                      </button>
+                      <span className="muted small">
+                        网络隔离在当前版本尚未启用（VM
+                        仍可访问网络）；文件交换与凭据策略按项目配置审计。
+                      </span>
+                    </div>
+                  </form>
+                )}
+              </details>
             </section>
 
             <div className="project-columns">
               <section className="subsection">
-                <h4>项目会话</h4>
+                <h3>项目会话</h3>
                 <ul className="plain-list">
                   {detail.conversations.map((conversation) => (
                     <li key={conversation.id} id={`conversation-${conversation.id}`}>
@@ -585,7 +607,7 @@ export function ProjectManager({
                 )}
               </section>
               <section className="subsection">
-                <h4>最近活动</h4>
+                <h3>最近活动</h3>
                 <ul className="plain-list activity-list">
                   {detail.activities.slice(0, 8).map((activity) => (
                     <li key={activity.id}>
@@ -599,7 +621,7 @@ export function ProjectManager({
             </div>
             {detail.artifacts.length > 0 && (
               <section className="subsection">
-                <h4>产物引用</h4>
+                <h3>产物引用</h3>
                 <ul className="plain-list">
                   {detail.artifacts.slice(0, 8).map((artifact) => (
                     <li key={artifact.id}>

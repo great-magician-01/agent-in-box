@@ -1,5 +1,5 @@
 /* eslint-disable react-hooks/set-state-in-effect -- initial data fetch effects intentionally set loading/result state */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import type {
   AutoStartPolicy,
   ControlPlaneState,
@@ -16,15 +16,27 @@ import type {
   StorageReport,
   StorageValidation,
 } from "@agent-in-box/protocol";
-import type { AppView } from "./App";
+import type { AppView, SettingsSection } from "./routes";
 import { api, ApiRequestError } from "./api";
 import { chooseDirectory, savePreferences } from "./desktop";
-import { VmManager, type ConsoleRequest } from "./VmManager";
 import { WorkManager, type WorkView } from "./WorkManager";
-import { BotManager } from "./BotManager";
-import { ModelSettings } from "./ModelSettings";
-import { VmRuntimeSettings } from "./VmRuntimeSettings";
-import { PluginManager } from "./PluginManager";
+import type { ConsoleRequest } from "./VmManager";
+
+const VmManager = lazy(() =>
+  import("./VmManager").then((module) => ({ default: module.VmManager })),
+);
+const BotManager = lazy(() =>
+  import("./BotManager").then((module) => ({ default: module.BotManager })),
+);
+const ModelSettings = lazy(() =>
+  import("./ModelSettings").then((module) => ({ default: module.ModelSettings })),
+);
+const VmRuntimeSettings = lazy(() =>
+  import("./VmRuntimeSettings").then((module) => ({ default: module.VmRuntimeSettings })),
+);
+const PluginManager = lazy(() =>
+  import("./PluginManager").then((module) => ({ default: module.PluginManager })),
+);
 import {
   THEME_LABELS,
   applyThemePreference,
@@ -48,9 +60,6 @@ export interface RestartRequest {
   reason: string;
 }
 
-type SettingsSection =
-  "models" | "general" | "runtime" | "plugins" | "bots" | "storage" | "security" | "diagnostics";
-
 const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string }> = [
   { id: "models", label: "模型" },
   { id: "general", label: "通用" },
@@ -70,11 +79,15 @@ interface DashboardProps {
   bridge: DesktopBridge | null;
   authInfo: LocalAuthSessionView;
   controlPlaneState: ControlPlaneState | null;
-  onNavigate(view: string): void;
+  onNavigate(view: string, entityId?: string): void;
   onChanged(): Promise<void>;
   onRestartRequired(request: RestartRequest): void;
   onOpenWorker?(projectId: string, workerId: string): void;
+  onProjectSelected(projectId: string): void;
   initialProjectId?: string | null;
+  focusTaskId?: string | null;
+  settingsSection: SettingsSection;
+  onSettingsSectionChange(section: SettingsSection): void;
 }
 
 export function Dashboard({
@@ -90,13 +103,16 @@ export function Dashboard({
   onRestartRequired,
   onOpenWorker,
   initialProjectId,
+  focusTaskId,
+  settingsSection,
+  onSettingsSectionChange,
+  onProjectSelected,
 }: DashboardProps): React.JSX.Element {
   const [host, setHost] = useState<HostInspectionReport | null>(null);
   const [storage, setStorage] = useState<StorageReport | null>(null);
   const [settings, setSettings] = useState<SettingsView | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [settingsSection, setSettingsSection] = useState<SettingsSection>("models");
   const [theme, setTheme] = useState<ThemePreference>(() => getThemePreference());
 
   const [reserveGb, setReserveGb] = useState(formatGb(onboarding.resourcePolicy.hostReserveBytes));
@@ -134,6 +150,21 @@ export function Dashboard({
   const [migrationError, setMigrationError] = useState<string | null>(null);
   const [consoleRequest, setConsoleRequest] = useState<ConsoleRequest | null>(null);
   const consoleNonce = useRef(0);
+  const settingsNavRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const nav = settingsNavRef.current;
+    if (!nav || nav.scrollWidth <= nav.clientWidth) return;
+    const active = nav.querySelector<HTMLElement>('[aria-current="page"]');
+    if (!active) return;
+    nav.scrollTo({
+      left: Math.max(
+        0,
+        active.offsetLeft - nav.offsetLeft - nav.clientWidth / 2 + active.clientWidth / 2,
+      ),
+      behavior: "auto",
+    });
+  }, [settingsSection]);
 
   const reload = useCallback(async () => {
     setLoadError(null);
@@ -456,13 +487,14 @@ export function Dashboard({
       )}
 
       {view === "settings" && (
-        <nav className="settings-nav" aria-label="设置分类">
+        <nav className="settings-nav" aria-label="设置分类" ref={settingsNavRef}>
           {SETTINGS_SECTIONS.map((item) => (
             <button
               key={item.id}
               type="button"
               className={settingsSection === item.id ? "active" : ""}
-              onClick={() => setSettingsSection(item.id)}
+              aria-current={settingsSection === item.id ? "page" : undefined}
+              onClick={() => onSettingsSectionChange(item.id)}
             >
               {item.label}
             </button>
@@ -565,6 +597,9 @@ export function Dashboard({
           view={workView}
           {...(onOpenWorker ? { onOpenWorker } : {})}
           {...(initialProjectId ? { focusProjectId: initialProjectId } : {})}
+          {...(focusTaskId ? { focusTaskId } : {})}
+          onTaskSelected={(taskId) => onNavigate("tasks", taskId ?? undefined)}
+          onProjectSelected={onProjectSelected}
           onNavigate={(next) => onNavigate(next)}
           onOpenVmConsole={(vmId) => {
             consoleNonce.current += 1;
@@ -574,26 +609,41 @@ export function Dashboard({
         />
       )}
 
-      {view === "settings" && settingsSection === "models" && <ModelSettings bridge={bridge} />}
+      {view === "settings" && settingsSection === "models" && (
+        <Suspense fallback={<PanelLoading />}>
+          <ModelSettings bridge={bridge} />
+        </Suspense>
+      )}
       {view === "settings" && settingsSection === "plugins" && (
-        <PluginManager bridge={bridge} onOpenWorker={onOpenWorker} />
+        <Suspense fallback={<PanelLoading />}>
+          <PluginManager bridge={bridge} onOpenWorker={onOpenWorker} />
+        </Suspense>
       )}
       {view === "settings" && settingsSection === "runtime" && (
-        <VmRuntimeSettings bridge={bridge} />
+        <Suspense fallback={<PanelLoading />}>
+          <VmRuntimeSettings bridge={bridge} />
+        </Suspense>
       )}
-      {view === "settings" && settingsSection === "bots" && <BotManager bridge={bridge} />}
+      {view === "settings" && settingsSection === "bots" && (
+        <Suspense fallback={<PanelLoading />}>
+          <BotManager bridge={bridge} />
+        </Suspense>
+      )}
 
       {view === "vms" && (
-        <VmManager
-          host={host}
-          consoleRequest={consoleRequest}
-          onConsoleRequestConsumed={(request) =>
-            setConsoleRequest((current) => (current?.nonce === request.nonce ? null : current))
-          }
-          hostReserveBytes={
-            settings?.resourcePolicy.hostReserveBytes ?? onboarding.resourcePolicy.hostReserveBytes
-          }
-        />
+        <Suspense fallback={<PanelLoading />}>
+          <VmManager
+            host={host}
+            consoleRequest={consoleRequest}
+            onConsoleRequestConsumed={(request) =>
+              setConsoleRequest((current) => (current?.nonce === request.nonce ? null : current))
+            }
+            hostReserveBytes={
+              settings?.resourcePolicy.hostReserveBytes ??
+              onboarding.resourcePolicy.hostReserveBytes
+            }
+          />
+        </Suspense>
       )}
 
       {view === "settings" && settingsSection === "storage" && (
@@ -761,7 +811,7 @@ export function Dashboard({
           </div>
           <div className="policy-grid">
             <label className="field">
-              <span>Host Reserve（GB）</span>
+              <span>为电脑保留内存（GB）</span>
               <input
                 type="number"
                 min="0"
@@ -781,7 +831,7 @@ export function Dashboard({
               </select>
             </label>
             <label className="field">
-              <span>Soft Memory Budget（GB，0 = 自动）</span>
+              <span>Worker 内存预算（GB，0 = 自动）</span>
               <input
                 type="number"
                 min="0"
@@ -996,7 +1046,7 @@ function DesktopSettingsPanels({
 }: DesktopSettingsPanelsProps): React.JSX.Element {
   return (
     <>
-      {section === "general" && (
+      {section === "general" && bridge && (
         <section className="panel" aria-labelledby="desktop-settings-title">
           <div className="panel-heading">
             <div>
@@ -1087,9 +1137,7 @@ function DesktopSettingsPanels({
                   type="button"
                   className="secondary"
                   onClick={() => {
-                    if (
-                      window.confirm("停止本地服务会中断所有会话与正在执行的任务，确定继续？")
-                    ) {
+                    if (window.confirm("停止本地服务会中断所有会话与正在执行的任务，确定继续？")) {
                       void bridge.app.stopControlPlane();
                     }
                   }}
@@ -1117,7 +1165,7 @@ function DesktopSettingsPanels({
         </section>
       )}
 
-      {section === "general" && (
+      {section === "general" && bridge && (
         <section className="panel" aria-labelledby="updates-title">
           <div className="panel-heading">
             <div>
@@ -1250,6 +1298,15 @@ function DesktopSettingsPanels({
         </section>
       )}
     </>
+  );
+}
+
+function PanelLoading() {
+  return (
+    <section className="panel loading-panel" aria-live="polite">
+      <span className="spinner" aria-hidden="true" />
+      <p className="muted">正在加载当前设置…</p>
+    </section>
   );
 }
 

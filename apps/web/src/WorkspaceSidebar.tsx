@@ -1,12 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  ChevronDown,
+  ChevronRight,
+  Folder,
+  ListChecks,
+  Monitor,
+  PanelLeftClose,
+  Plus,
+  Settings,
+  type LucideIcon,
+} from "lucide-react";
 import type { ProjectView, WorkerView } from "@agent-in-box/protocol";
-import type { AppView } from "./App";
+import type { AppView } from "./routes";
 import { api, subscribeTaskEvents } from "./api";
+import { useModalFocus } from "./useModalFocus";
 
 interface WorkspaceSidebarProps {
   view: AppView;
   selectedWorkerId: string | null;
   revision: number;
+  modal: boolean;
   onSelectView(view: AppView): void;
   onSelectProject(projectId: string): void;
   onSelectWorker(workerId: string, projectId: string, vmId: string): void;
@@ -14,17 +27,18 @@ interface WorkspaceSidebarProps {
   onCollapse(): void;
 }
 
-const FOOTER_VIEWS: Array<{ id: AppView; label: string }> = [
-  { id: "projects", label: "项目" },
-  { id: "tasks", label: "任务" },
-  { id: "vms", label: "虚拟机" },
-  { id: "settings", label: "设置" },
+const FOOTER_VIEWS: Array<{ id: AppView; label: string; icon: LucideIcon }> = [
+  { id: "projects", label: "项目", icon: Folder },
+  { id: "tasks", label: "任务", icon: ListChecks },
+  { id: "vms", label: "虚拟机", icon: Monitor },
+  { id: "settings", label: "设置", icon: Settings },
 ];
 
 export function WorkspaceSidebar({
   view,
   selectedWorkerId,
   revision,
+  modal,
   onSelectView,
   onSelectProject,
   onSelectWorker,
@@ -42,6 +56,40 @@ export function WorkspaceSidebar({
   const [creatingFor, setCreatingFor] = useState<string | null>(null);
   const loadInFlight = useRef(false);
   const loadQueued = useRef(false);
+  const sidebarRef = useModalFocus<HTMLElement>(modal, onCollapse);
+  const newSessionTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const newSessionMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!newSessionOpen) return;
+    const frame = requestAnimationFrame(() =>
+      newSessionMenuRef.current?.querySelector("button")?.focus(),
+    );
+    function onKeyDown(event: KeyboardEvent): void {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      setNewSessionOpen(false);
+      newSessionTriggerRef.current?.focus();
+    }
+    function onPointerDown(event: PointerEvent): void {
+      const target = event.target instanceof Node ? event.target : null;
+      if (
+        newSessionMenuRef.current?.contains(target) ||
+        newSessionTriggerRef.current?.contains(target)
+      ) {
+        return;
+      }
+      setNewSessionOpen(false);
+    }
+    document.addEventListener("keydown", onKeyDown, true);
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      cancelAnimationFrame(frame);
+      document.removeEventListener("keydown", onKeyDown, true);
+      document.removeEventListener("pointerdown", onPointerDown);
+    };
+  }, [newSessionOpen]);
 
   const load = useCallback(async (): Promise<void> => {
     if (loadInFlight.current) {
@@ -53,10 +101,7 @@ export function WorkspaceSidebar({
       do {
         loadQueued.current = false;
         try {
-          const [allProjects, nextWorkers] = await Promise.all([
-            api.projects(true),
-            api.workers(),
-          ]);
+          const [allProjects, nextWorkers] = await Promise.all([api.projects(true), api.workers()]);
           const nextProjects = allProjects.filter((item) => item.project.archivedAt === null);
           setProjects(nextProjects);
           setWorkers(nextWorkers.filter((item) => item.worker.archivedAt === null));
@@ -130,11 +175,19 @@ export function WorkspaceSidebar({
   }
 
   return (
-    <aside className="workspace-sidebar" aria-label="会话导航">
+    <aside
+      className="workspace-sidebar"
+      aria-label="会话导航"
+      id="workspace-sidebar"
+      ref={sidebarRef}
+      role={modal ? "dialog" : undefined}
+      aria-modal={modal || undefined}
+      tabIndex={modal ? -1 : undefined}
+    >
       <div className="workspace-brand">
         <div className="brand">
           <img className="brand-logo" src="/logo.svg" alt="" width={24} height={24} />
-          <h1>Agent-in-Box</h1>
+          <div className="brand-name">Agent-in-Box</div>
         </div>
         <button
           type="button"
@@ -142,8 +195,9 @@ export function WorkspaceSidebar({
           onClick={onCollapse}
           title="收起侧栏"
           aria-label="收起侧栏"
+          data-dialog-close
         >
-          ‹
+          <PanelLeftClose aria-hidden="true" />
         </button>
       </div>
 
@@ -151,13 +205,15 @@ export function WorkspaceSidebar({
         type="button"
         className={`workspace-primary${newSessionOpen ? " active" : ""}`}
         aria-expanded={newSessionOpen}
+        aria-controls="new-session-menu"
+        ref={newSessionTriggerRef}
         onClick={() => setNewSessionOpen((current) => !current)}
       >
-        <span aria-hidden="true">＋</span>
+        <Plus aria-hidden="true" />
         新会话
       </button>
       {newSessionOpen && (
-        <div className="new-session-menu">
+        <div className="new-session-menu" id="new-session-menu" ref={newSessionMenuRef}>
           <button
             type="button"
             onClick={() => {
@@ -200,6 +256,7 @@ export function WorkspaceSidebar({
           className={`workspace-session workspace-router-link${
             view === "session" && selectedWorkerId === null ? " active" : ""
           }`}
+          aria-current={view === "session" && selectedWorkerId === null ? "page" : undefined}
           onClick={onSelectRouter}
         >
           <span>主会话</span>
@@ -223,7 +280,7 @@ export function WorkspaceSidebar({
                       onClick={() => toggleProject(item.project.id)}
                     >
                       <span className="workspace-chevron" aria-hidden="true">
-                        {isExpanded ? "▾" : "▸"}
+                        {isExpanded ? <ChevronDown /> : <ChevronRight />}
                       </span>
                       <span className="workspace-project-name">{item.project.name}</span>
                     </button>
@@ -235,7 +292,7 @@ export function WorkspaceSidebar({
                       disabled={creatingFor === item.project.id}
                       onClick={() => void createWorkerFor(item)}
                     >
-                      ＋
+                      <Plus aria-hidden="true" />
                     </button>
                   </div>
                   {isExpanded && (
@@ -250,6 +307,9 @@ export function WorkspaceSidebar({
                               className={`workspace-session ${
                                 selectedWorkerId === worker.worker.id ? "active" : ""
                               }`}
+                              aria-current={
+                                selectedWorkerId === worker.worker.id ? "page" : undefined
+                              }
                               onClick={() =>
                                 onSelectWorker(
                                   worker.worker.id,
@@ -271,6 +331,9 @@ export function WorkspaceSidebar({
                               {worker.worker.status === "running" && (
                                 <span className="workspace-status">执行中</span>
                               )}
+                              {worker.worker.status === "failed" && (
+                                <span className="workspace-status error-line">异常</span>
+                              )}
                             </button>
                           </li>
                         ))
@@ -285,16 +348,21 @@ export function WorkspaceSidebar({
       </div>
 
       <nav className="workspace-footer" aria-label="工作区管理">
-        {FOOTER_VIEWS.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            className={view === item.id ? "active" : ""}
-            onClick={() => onSelectView(item.id)}
-          >
-            {item.label}
-          </button>
-        ))}
+        {FOOTER_VIEWS.map((item) => {
+          const Icon = item.icon;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              className={view === item.id ? "active" : ""}
+              aria-current={view === item.id ? "page" : undefined}
+              onClick={() => onSelectView(item.id)}
+            >
+              <Icon aria-hidden="true" />
+              {item.label}
+            </button>
+          );
+        })}
       </nav>
     </aside>
   );

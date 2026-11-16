@@ -1,7 +1,10 @@
 /* eslint-disable react-hooks/set-state-in-effect -- worker snapshots refresh from server events */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ArrowDown, Send, Square } from "lucide-react";
 import type { ConversationMessageRecord, WorkerView } from "@agent-in-box/protocol";
 import { api, subscribeTaskEvents } from "./api";
+import { MarkdownContent } from "./MarkdownContent";
+import { useConversationScroll } from "./useConversationScroll";
 
 interface WorkerConversationProps {
   workerId: string | null;
@@ -79,6 +82,7 @@ export function WorkerConversation({
       }
       setText("");
       await load();
+      jumpToLatest();
       onChanged?.();
     } catch (cause) {
       setError(errorMessage(cause));
@@ -102,12 +106,22 @@ export function WorkerConversation({
     }
   }
 
+  const running = worker?.worker.status === "running";
+  const connected = worker?.runtime.connected === true;
+  const lastMessage = messages.at(-1);
+  const {
+    scrollRef: conversationRef,
+    showJump,
+    onScroll,
+    jumpToLatest,
+  } = useConversationScroll(
+    `${messages.length}:${lastMessage?.id ?? ""}:${lastMessage?.content.length ?? 0}`,
+    workerId,
+  );
+
   if (!workerId) {
     return <p className="muted small">选择一个会话查看执行详情。</p>;
   }
-
-  const running = worker?.worker.status === "running";
-  const connected = worker?.runtime.connected === true;
 
   const composer = (
     <div className="chat-composer">
@@ -136,6 +150,7 @@ export function WorkerConversation({
               disabled={busy}
               onClick={() => void abort()}
             >
+              <Square aria-hidden="true" />
               停止
             </button>
           )}
@@ -145,6 +160,7 @@ export function WorkerConversation({
             disabled={busy || !connected || !text.trim()}
             onClick={() => void submit()}
           >
+            <Send aria-hidden="true" />
             发送
           </button>
         </div>
@@ -154,32 +170,48 @@ export function WorkerConversation({
 
   return (
     <div className={`conversation-page worker-conversation${compact ? " compact" : ""}`}>
-      <div className="conversation-scroll">
-        <div className="conversation-column">
-          {running && (
-            <p className="conversation-running" role="status">
-              <span className="workspace-dot running" aria-hidden="true" />
-              正在执行任务
-            </p>
-          )}
-          {!connected && worker && <p className="muted">执行环境尚未连接，暂时无法发送消息。</p>}
-          {error && <div className="notice">{error}</div>}
-          <div className="worker-messages" aria-live="polite">
-            {messages.length === 0 ? (
-              <div className="worker-empty">
-                <h2>准备开始</h2>
-                <p className="muted">在下方描述任务，Agent 会在项目绑定的虚拟机中执行。</p>
-              </div>
-            ) : (
-              messages.map((message) => (
-                <article key={message.id} className={`chat-message ${message.role}`}>
-                  {message.role !== "user" && <span className="chat-role">Agent</span>}
-                  <p>{message.content}</p>
-                </article>
-              ))
+      <div className="conversation-body">
+        <div className="conversation-scroll" ref={conversationRef} onScroll={onScroll}>
+          <div className="conversation-column">
+            {running && (
+              <p className="conversation-running" role="status">
+                <span className="workspace-dot running" aria-hidden="true" />
+                正在执行任务
+              </p>
             )}
+            {!connected && worker && <p className="muted">执行环境尚未连接，暂时无法发送消息。</p>}
+            {error && (
+              <div className="notice" role="alert">
+                {error}
+              </div>
+            )}
+            <div className="worker-messages">
+              {messages.length === 0 ? (
+                <div className="worker-empty">
+                  <h2>准备开始</h2>
+                  <p className="muted">在下方描述任务，Agent 会在项目绑定的虚拟机中执行。</p>
+                </div>
+              ) : (
+                messages.map((message) => (
+                  <article
+                    key={message.id}
+                    className={`chat-message ${message.role}`}
+                    aria-label={message.role === "user" ? "你的消息" : "Agent 的回答"}
+                  >
+                    {message.role !== "user" && <span className="chat-role">Agent</span>}
+                    <MarkdownContent content={message.content} />
+                  </article>
+                ))
+              )}
+            </div>
           </div>
         </div>
+        {showJump && (
+          <button type="button" className="jump-latest" onClick={jumpToLatest}>
+            <ArrowDown aria-hidden="true" />
+            回到最新
+          </button>
+        )}
       </div>
       <div className="conversation-composer">{composer}</div>
     </div>

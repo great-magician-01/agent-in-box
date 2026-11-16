@@ -1,5 +1,5 @@
 /* eslint-disable react-hooks/set-state-in-effect -- task trace loads as a server snapshot */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ACTIVE_TASK_STATUSES,
   TASK_STATUSES,
@@ -52,6 +52,8 @@ export function TaskBoard({
   const [workerFilter, setWorkerFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [trace, setTrace] = useState<TaskTraceView | null>(null);
+  const createTaskRef = useRef<HTMLDetailsElement | null>(null);
+  const objectiveRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     setTrace(null);
@@ -151,13 +153,26 @@ export function TaskBoard({
   }
 
   const detail = taskDetail?.task.id === selectedTaskId ? taskDetail : null;
+  const hasTasks = (board?.tasks.length ?? 0) > 0;
+
+  function resetFilters(): void {
+    setProjectFilter("");
+    setVmFilter("");
+    setWorkerFilter("");
+    setStatusFilter("");
+  }
+
+  function openCreateTask(): void {
+    if (createTaskRef.current) createTaskRef.current.open = true;
+    requestAnimationFrame(() => objectiveRef.current?.focus());
+  }
 
   return (
     <section className="task-workspace" aria-labelledby="task-board-title">
       <div className="section-heading">
         <div>
-          <h3 id="task-board-title">任务看板</h3>
-          <span className="muted small">数据库快照 · 每 VM 串行，不同 VM 可独立认领</span>
+          <h2 id="task-board-title">任务列表</h2>
+          <span className="muted small">每台 VM 串行执行，不同 VM 可以并行</span>
         </div>
         <span className="muted small">
           {tasks.length} / {board?.tasks.length ?? 0} 个任务
@@ -165,7 +180,7 @@ export function TaskBoard({
       </div>
       {error && <div className="notice">{error}</div>}
 
-      {board?.resources && (
+      {hasTasks && board?.resources && (
         <div className={`resource-banner pressure-${board.resources.pressure}`} role="status">
           <span>
             资源预算 {formatBytes(board.resources.allocatedMemoryBytes)} /{" "}
@@ -182,12 +197,13 @@ export function TaskBoard({
       )}
 
       {selectedProject && !selectedProject.project.archivedAt && (
-        <details className="create-box task-create-box">
+        <details className="create-box task-create-box" ref={createTaskRef}>
           <summary>在「{selectedProject.project.name}」中新建任务</summary>
           <form className="stack compact-form" onSubmit={(event) => void createTask(event)}>
             <label className="field">
               <span>任务目标</span>
               <textarea
+                ref={objectiveRef}
                 value={objective}
                 required
                 maxLength={4000}
@@ -266,101 +282,118 @@ export function TaskBoard({
         </details>
       )}
 
-      <div className="task-filters" aria-label="任务筛选">
-        <label className="field">
-          <span>项目</span>
-          <select value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)}>
-            <option value="">全部项目</option>
-            {board?.projects.map((project) => (
-              <option key={project.id} value={project.id}>
-                {project.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          <span>VM</span>
-          <select value={vmFilter} onChange={(event) => setVmFilter(event.target.value)}>
-            <option value="">全部 VM</option>
-            {board?.vms.map((vm) => (
-              <option key={vm.id} value={vm.id}>
-                {vm.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          <span>Worker</span>
-          <select value={workerFilter} onChange={(event) => setWorkerFilter(event.target.value)}>
-            <option value="">全部 Worker</option>
-            {board?.workers.map((worker) => (
-              <option key={worker.id} value={worker.id}>
-                {worker.id.slice(0, 8)} · {worker.engineType}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          <span>状态</span>
-          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
-            <option value="">全部状态</option>
-            {TASK_STATUSES.map((status) => (
-              <option key={status} value={status}>
-                {TASK_STATUS_LABELS[status]}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button
-          type="button"
-          className="secondary filter-reset"
-          onClick={() => {
-            setProjectFilter("");
-            setVmFilter("");
-            setWorkerFilter("");
-            setStatusFilter("");
-          }}
-        >
-          清除筛选
-        </button>
-      </div>
+      {hasTasks && (
+        <div className="task-filters" aria-label="任务筛选">
+          <label className="field">
+            <span>项目</span>
+            <select
+              value={projectFilter}
+              onChange={(event) => setProjectFilter(event.target.value)}
+            >
+              <option value="">全部项目</option>
+              {board?.projects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>VM</span>
+            <select value={vmFilter} onChange={(event) => setVmFilter(event.target.value)}>
+              <option value="">全部 VM</option>
+              {board?.vms.map((vm) => (
+                <option key={vm.id} value={vm.id}>
+                  {vm.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>Worker</span>
+            <select value={workerFilter} onChange={(event) => setWorkerFilter(event.target.value)}>
+              <option value="">全部 Worker</option>
+              {board?.workers.map((worker) => (
+                <option key={worker.id} value={worker.id}>
+                  {worker.id.slice(0, 8)} · {worker.engineType}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>状态</span>
+            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+              <option value="">全部状态</option>
+              {TASK_STATUSES.map((status) => (
+                <option key={status} value={status}>
+                  {TASK_STATUS_LABELS[status]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button type="button" className="secondary filter-reset" onClick={resetFilters}>
+            清除筛选
+          </button>
+        </div>
+      )}
 
-      <div className="task-table-wrap">
-        <table className="task-table">
-          <caption className="sr-only">任务数据库快照，可按项目、VM、Worker 和状态筛选</caption>
-          <thead>
-            <tr>
-              <th scope="col">任务</th>
-              <th scope="col">状态</th>
-              <th scope="col">项目 / VM</th>
-              <th scope="col">Worker</th>
-              <th scope="col">队列 / 优先级</th>
-              <th scope="col">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {tasks.map((task) => (
-              <TaskRow
-                key={task.id}
-                task={task}
-                projectName={projects.get(task.projectId)?.name ?? task.projectId}
-                vmName={vms.get(task.vmId)?.name ?? task.vmId}
-                workerName={
-                  task.assignedWorkerId
-                    ? (workers.get(task.assignedWorkerId)?.engineType ??
-                      task.assignedWorkerId.slice(0, 8))
-                    : "未分配"
-                }
-                busy={busy}
-                onDetails={() => onSelectTask(task.id)}
-                onProject={() => jumpToProject(task.projectId)}
-                onAction={run}
-              />
-            ))}
-          </tbody>
-        </table>
-        {tasks.length === 0 && <p className="muted empty-state">当前筛选条件下没有任务。</p>}
-      </div>
+      {tasks.length > 0 && (
+        <div className="task-table-wrap">
+          <table className="task-table">
+            <caption className="sr-only">任务数据库快照，可按项目、VM、Worker 和状态筛选</caption>
+            <thead>
+              <tr>
+                <th scope="col">任务</th>
+                <th scope="col">状态</th>
+                <th scope="col">项目 / VM</th>
+                <th scope="col">Worker</th>
+                <th scope="col">队列 / 优先级</th>
+                <th scope="col">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tasks.map((task) => (
+                <TaskRow
+                  key={task.id}
+                  task={task}
+                  projectName={projects.get(task.projectId)?.name ?? task.projectId}
+                  vmName={vms.get(task.vmId)?.name ?? task.vmId}
+                  workerName={
+                    task.assignedWorkerId
+                      ? (workers.get(task.assignedWorkerId)?.engineType ??
+                        task.assignedWorkerId.slice(0, 8))
+                      : "未分配"
+                  }
+                  busy={busy}
+                  onDetails={() => onSelectTask(task.id)}
+                  onProject={() => jumpToProject(task.projectId)}
+                  onAction={run}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {!hasTasks && (
+        <div className="task-empty">
+          <h3>还没有任务</h3>
+          <p className="muted">从一件具体的事开始，或回到主会话直接描述目标。</p>
+          {selectedProject && !selectedProject.project.archivedAt && (
+            <button type="button" className="primary" onClick={openCreateTask}>
+              新建任务
+            </button>
+          )}
+        </div>
+      )}
+      {hasTasks && tasks.length === 0 && (
+        <div className="task-empty">
+          <h3>没有符合筛选条件的任务</h3>
+          <button type="button" className="secondary" onClick={resetFilters}>
+            清除筛选
+          </button>
+        </div>
+      )}
 
       {selectedTaskId && (
         <aside className="task-detail" aria-label="任务详情">

@@ -120,7 +120,7 @@ export function BootstrapMonitor({ bridge }: { bridge: DesktopBridge | null }) {
           <strong>{STAGE_LABELS[state.stage]}</strong>
           <p className="muted small">
             {state.status === "not_started"
-              ? "自动准备默认工作环境；聊天不受影响。"
+              ? "需要执行桌面任务时，再准备虚拟机环境。"
               : state.conversationReady
                 ? "现在可以正常对话，任务会等待执行环境就绪。"
                 : "完成模型配置后即可开始对话。"}
@@ -130,8 +130,8 @@ export function BootstrapMonitor({ bridge }: { bridge: DesktopBridge | null }) {
       {message && <p className="bootstrap-message">{message}</p>}
       <div className="bootstrap-actions">
         {state.status === "not_started" && (
-          <button type="button" className="primary" onClick={() => void start()} disabled={busy}>
-            自动准备执行环境
+          <button type="button" className="secondary" onClick={() => void start()} disabled={busy}>
+            准备执行环境
           </button>
         )}
         {canRetry && (
@@ -142,9 +142,9 @@ export function BootstrapMonitor({ bridge }: { bridge: DesktopBridge | null }) {
         {needsModel && (
           <button
             type="button"
-            className="primary"
+            className="secondary"
             onClick={() => {
-              window.location.hash = "#/settings";
+              window.location.hash = "#/settings/models";
             }}
           >
             打开模型设置
@@ -155,7 +155,7 @@ export function BootstrapMonitor({ bridge }: { bridge: DesktopBridge | null }) {
             type="button"
             className="secondary"
             onClick={() => {
-              window.location.hash = "#/settings";
+              window.location.hash = "#/settings/runtime";
             }}
           >
             查看环境要求

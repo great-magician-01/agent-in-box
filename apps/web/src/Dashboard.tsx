@@ -18,6 +18,7 @@ import type {
 } from "@agent-in-box/protocol";
 import type { AppView, SettingsSection } from "./routes";
 import { api, ApiRequestError } from "./api";
+import { Select } from "./Select";
 import { chooseDirectory, savePreferences } from "./desktop";
 import { WorkManager, type WorkView } from "./WorkManager";
 import type { ConsoleRequest } from "./VmManager";
@@ -509,7 +510,7 @@ export function Dashboard({
           </div>
           <label className="field settings-theme-field">
             <span>主题</span>
-            <select
+            <Select
               value={theme}
               onChange={(event) => {
                 const next = event.target.value as ThemePreference;
@@ -523,7 +524,7 @@ export function Dashboard({
                   {label}
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
         </section>
       )}
@@ -621,7 +622,7 @@ export function Dashboard({
       )}
       {view === "settings" && settingsSection === "runtime" && (
         <Suspense fallback={<PanelLoading />}>
-          <VmRuntimeSettings bridge={bridge} />
+          <VmRuntimeSettings bridge={bridge} host={host} onRefreshHost={reload} />
         </Suspense>
       )}
       {view === "settings" && settingsSection === "bots" && (
@@ -822,13 +823,13 @@ export function Dashboard({
             </label>
             <label className="field">
               <span>自动启动</span>
-              <select
+              <Select
                 value={autoStart}
                 onChange={(event) => setAutoStart(event.target.value as AutoStartPolicy)}
               >
                 <option value="manual">仅手动启动</option>
                 <option value="when_needed">有任务时自动启动</option>
-              </select>
+              </Select>
             </label>
             <label className="field">
               <span>Worker 内存预算（GB，0 = 自动）</span>
@@ -1066,7 +1067,7 @@ function DesktopSettingsPanels({
               <div className="policy-grid">
                 <label className="field">
                   <span>关闭窗口时</span>
-                  <select
+                  <Select
                     value={preferences.closeBehavior}
                     onChange={(event) =>
                       onCloseBehaviorChange(
@@ -1076,7 +1077,7 @@ function DesktopSettingsPanels({
                   >
                     <option value="keep_running">后台继续运行</option>
                     <option value="quit">停止服务并退出</option>
-                  </select>
+                  </Select>
                 </label>
                 <label className="toggle policy-toggle">
                   <input

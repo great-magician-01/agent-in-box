@@ -770,7 +770,9 @@ function AuthenticatedApp({
               }
             >
               <>
-                {!onboarding.required && view === "session" && <BootstrapMonitor bridge={bridge} />}
+                {!onboarding.required && ["session", "projects", "vms"].includes(view) && (
+                  <BootstrapMonitor bridge={bridge} showNotStarted={view === "session"} />
+                )}
                 {onboarding.required ? (
                   <OnboardingWizard
                     initialState={onboarding}

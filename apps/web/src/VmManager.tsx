@@ -31,6 +31,7 @@ import {
   formatBytes,
   formatProgressPercent,
 } from "./format";
+import { Select } from "./Select";
 
 const VmConsole = lazy(() =>
   import("./VmConsole").then((module) => ({ default: module.VmConsole })),
@@ -1262,7 +1263,7 @@ export function VmManager({
 
             <div className="field">
               <label htmlFor="vm-image">Guest 镜像</label>
-              <select
+              <Select
                 id="vm-image"
                 value={selectedImageId}
                 onChange={(event) => selectImage(event.target.value)}
@@ -1279,7 +1280,7 @@ export function VmManager({
                     </option>
                   ))
                 )}
-              </select>
+              </Select>
               <span className="form-hint" id="vm-image-hint">
                 仅列出已下载且校验通过的 Linux/Windows 镜像。Windows 镜像必须来自合法 ISO
                 或评估镜像的自建 Golden Image。

@@ -8,6 +8,7 @@ import type {
   WorkerView,
 } from "@agent-in-box/protocol";
 import { api } from "./api";
+import { Select } from "./Select";
 
 interface PluginManagerProps {
   bridge: DesktopBridge | null;
@@ -149,13 +150,13 @@ export function PluginManager({ bridge, onOpenWorker }: PluginManagerProps) {
         </p>
         <label className="field">
           <span>开发项目</span>
-          <select value={projectId} onChange={(event) => setProjectId(event.target.value)}>
+          <Select value={projectId} onChange={(event) => setProjectId(event.target.value)}>
             {projects.map((project) => (
               <option key={project.project.id} value={project.project.id}>
                 {project.project.name}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         <label className="toggle">
           <input

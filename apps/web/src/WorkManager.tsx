@@ -23,6 +23,9 @@ interface WorkManagerProps {
   onOpenVmConsole?(vmId: string): void;
   onOpenWorker?(projectId: string, workerId: string): void;
   focusProjectId?: string;
+  focusTaskId?: string;
+  onTaskSelected(taskId: string | null): void;
+  onProjectSelected(projectId: string): void;
   onNavigate?(view: "tasks" | "archive" | "settings"): void;
 }
 
@@ -38,13 +41,16 @@ export function WorkManager({
   onOpenVmConsole,
   onOpenWorker,
   focusProjectId,
+  focusTaskId,
+  onTaskSelected,
+  onProjectSelected,
   onNavigate,
 }: WorkManagerProps): React.JSX.Element {
   const [projects, setProjects] = useState<ProjectView[]>([]);
   const [board, setBoard] = useState<TaskBoardSnapshot | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [projectDetail, setProjectDetail] = useState<ProjectDetail | null>(null);
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(focusTaskId ?? null);
   const [taskDetail, setTaskDetail] = useState<TaskDetail | null>(null);
   const [streamState, setStreamState] = useState<TaskStreamState>("reconnecting");
   const [loading, setLoading] = useState(true);
@@ -105,6 +111,18 @@ export function WorkManager({
     setProjectDetail(null);
   }, [focusProjectId, projects]);
 
+  useEffect(() => {
+    setSelectedTaskId(focusTaskId ?? null);
+  }, [focusTaskId]);
+
+  const selectTask = useCallback(
+    (taskId: string | null) => {
+      setSelectedTaskId(taskId);
+      onTaskSelected(taskId);
+    },
+    [onTaskSelected],
+  );
+
   useEffect(() => subscribeTaskEvents(() => void load(true), setStreamState), [load]);
 
   useEffect(() => {
@@ -151,6 +169,14 @@ export function WorkManager({
     setSelectedProjectId(projectId);
     if (changed) setProjectDetail(null);
   }, []);
+
+  const selectProjectDetail = useCallback(
+    (projectId: string) => {
+      selectProject(projectId);
+      onProjectSelected(projectId);
+    },
+    [selectProject, onProjectSelected],
+  );
 
   const selectedDetail = projectDetail?.project.id === selectedProjectId ? projectDetail : null;
 
@@ -201,24 +227,23 @@ export function WorkManager({
 
   const title = VIEW_TITLES[view];
   return (
-    <section className="panel work-manager" aria-labelledby="work-manager-title">
-      <div className="panel-heading">
-        <div>
-          <h2 id="work-manager-title">{title}</h2>
+    <section className="panel work-manager" aria-label={title}>
+      {(streamState !== "live" || (onNavigate && (view === "tasks" || view === "archive"))) && (
+        <div className="panel-heading work-manager-toolbar">
+          <span className="muted small">{streamState !== "live" ? "正在更新连接" : ""}</span>
+          <div className="panel-heading-actions">
+            {onNavigate && (view === "tasks" || view === "archive") && (
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => onNavigate(view === "tasks" ? "archive" : "tasks")}
+              >
+                {view === "tasks" ? "已归档" : "返回任务"}
+              </button>
+            )}
+          </div>
         </div>
-        <div className="panel-heading-actions">
-          {onNavigate && (view === "tasks" || view === "archive") && (
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => onNavigate(view === "tasks" ? "archive" : "tasks")}
-            >
-              {view === "tasks" ? "已归档" : "返回任务"}
-            </button>
-          )}
-          {streamState !== "live" && <span className="muted small">正在更新连接</span>}
-        </div>
-      </div>
+      )}
       {error && (
         <div className="notice" role="alert">
           {error}
@@ -235,7 +260,7 @@ export function WorkManager({
           taskDetail={taskDetail}
           selectedTaskId={selectedTaskId}
           revision={revision}
-          onSelectTask={setSelectedTaskId}
+          onSelectTask={selectTask}
           onSelectProject={selectProject}
           onOpenConversation={openConversation}
           onOpenWorker={openWorker}
@@ -249,7 +274,7 @@ export function WorkManager({
             vms={board?.vms ?? []}
             detail={selectedDetail}
             selectedProjectId={selectedProjectId}
-            onSelect={selectProject}
+            onSelect={selectProjectDetail}
             onChanged={() => load(true)}
           />
           {selectedDetail && selectedDetail.project.archivedAt === null && (

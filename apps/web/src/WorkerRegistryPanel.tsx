@@ -123,7 +123,7 @@ export function WorkerRegistryPanel({
     <section className="panel registry-panel" aria-labelledby="registry-panel-title">
       <div className="panel-heading">
         <div>
-          <h3 id="registry-panel-title">Worker 注册表与归档</h3>
+          <h2 id="registry-panel-title">Worker 注册表与归档</h2>
         </div>
         <span className="muted small">
           {roster?.workers.length ?? 0} 个活跃 Worker · {archives?.items.length ?? 0} 条归档结果
@@ -146,7 +146,7 @@ export function WorkerRegistryPanel({
 
       <div className="registry-layout">
         <div>
-          <h4 className="registry-heading">活跃 Worker</h4>
+          <h3 className="registry-heading">活跃 Worker</h3>
           {!roster || roster.workers.length === 0 ? (
             <p className="muted small">
               当前没有活跃 Worker。任务进入 VM 队列后由空闲 Worker 认领。
@@ -184,7 +184,7 @@ export function WorkerRegistryPanel({
           {summary && (
             <div className="registry-summary">
               <div className="panel-heading">
-                <h4>Worker 摘要</h4>
+                <h3>Worker 摘要</h3>
                 <span className="muted small">
                   归档阻塞：{summary.archiveBlockers.blocked ? "是" : "否"}
                 </span>
@@ -235,7 +235,7 @@ export function WorkerRegistryPanel({
         </div>
 
         <div>
-          <h4 className="registry-heading">归档检索</h4>
+          <h3 className="registry-heading">归档检索</h3>
           <div className="action-row">
             <input
               value={query}

@@ -1,5 +1,6 @@
 /* eslint-disable react-hooks/set-state-in-effect -- VM/worker snapshots refresh from server events */
-import { useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import { X } from "lucide-react";
 import type {
   RouterToolCallRecord,
   RouterToolDefinition,
@@ -9,7 +10,11 @@ import type {
   WorkerView,
 } from "@agent-in-box/protocol";
 import { api } from "./api";
-import { VmConsole } from "./VmConsole";
+import { useModalFocus } from "./useModalFocus";
+
+const VmConsole = lazy(() =>
+  import("./VmConsole").then((module) => ({ default: module.VmConsole })),
+);
 
 export type ObserverTab = "vm" | "activity";
 
@@ -19,6 +24,7 @@ interface ObserverSidebarProps {
   workerId: string | null;
   preferredVmId: string | null;
   revision: number;
+  modal: boolean;
   onTabChange(tab: ObserverTab): void;
   onClose(): void;
   onChanged?(): void;
@@ -30,6 +36,7 @@ export function ObserverSidebar({
   workerId,
   preferredVmId,
   revision,
+  modal,
   onTabChange,
   onClose,
 }: ObserverSidebarProps): React.JSX.Element | null {
@@ -44,6 +51,15 @@ export function ObserverSidebar({
   const [worker, setWorker] = useState<WorkerView | null>(null);
   const [tools, setTools] = useState<RouterToolDefinition[]>([]);
   const [toolCalls, setToolCalls] = useState<RouterToolCallRecord[]>([]);
+  const sidebarRef = useModalFocus<HTMLElement>(open && modal, onClose);
+
+  function onTabKeyDown(event: React.KeyboardEvent<HTMLButtonElement>): void {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const next = tab === "activity" ? "vm" : "activity";
+    onTabChange(next);
+    requestAnimationFrame(() => document.getElementById(`observer-tab-${next}`)?.focus());
+  }
 
   const loadVms = useCallback(async (): Promise<void> => {
     try {
@@ -141,18 +157,36 @@ export function ObserverSidebar({
   const status = worker?.worker.status ?? router?.status;
 
   return (
-    <aside className="observer-sidebar" aria-label="执行观察栏">
+    <aside
+      className="observer-sidebar"
+      aria-label="执行观察栏"
+      id="observer-sidebar"
+      ref={sidebarRef}
+      role={modal ? "dialog" : undefined}
+      aria-modal={modal || undefined}
+      tabIndex={modal ? -1 : undefined}
+    >
       <div className="observer-header">
         <h2>执行详情</h2>
-        <button type="button" className="icon-button" onClick={onClose} aria-label="收起观察栏">
-          ×
+        <button
+          type="button"
+          className="icon-button"
+          onClick={onClose}
+          aria-label="收起观察栏"
+          data-dialog-close
+        >
+          <X aria-hidden="true" />
         </button>
       </div>
       <div className="observer-tabs" role="tablist" aria-label="观察内容">
         <button
           type="button"
           role="tab"
+          id="observer-tab-activity"
+          aria-controls="observer-panel-activity"
           aria-selected={tab === "activity"}
+          tabIndex={tab === "activity" ? 0 : -1}
+          onKeyDown={onTabKeyDown}
           className={tab === "activity" ? "active" : ""}
           onClick={() => onTabChange("activity")}
         >
@@ -161,7 +195,11 @@ export function ObserverSidebar({
         <button
           type="button"
           role="tab"
+          id="observer-tab-vm"
+          aria-controls="observer-panel-vm"
           aria-selected={tab === "vm"}
+          tabIndex={tab === "vm" ? 0 : -1}
+          onKeyDown={onTabKeyDown}
           className={tab === "vm" ? "active" : ""}
           onClick={() => onTabChange("vm")}
         >
@@ -170,7 +208,12 @@ export function ObserverSidebar({
       </div>
 
       {tab === "activity" ? (
-        <div className="observer-body">
+        <div
+          className="observer-body"
+          role="tabpanel"
+          id="observer-panel-activity"
+          aria-labelledby="observer-tab-activity"
+        >
           {error && <div className="notice">{error}</div>}
           <div className="activity-summary">
             <strong>
@@ -234,7 +277,12 @@ export function ObserverSidebar({
           </details>
         </div>
       ) : (
-        <div className="observer-body">
+        <div
+          className="observer-body"
+          role="tabpanel"
+          id="observer-panel-vm"
+          aria-labelledby="observer-tab-vm"
+        >
           {error && <div className="notice">{error}</div>}
           <label className="field">
             <span>虚拟机</span>
@@ -250,13 +298,15 @@ export function ObserverSidebar({
           {connecting && <p className="muted small">正在连接只读画面…</p>}
           {session && selected && (
             <>
-              <VmConsole
-                key={`${selected.vm.id}-${session.viewOnly ? "view" : "takeover"}`}
-                session={session}
-                vmName={selected.vm.name}
-                onClose={() => setSession(null)}
-                onReconnect={() => setConnectNonce((value) => value + 1)}
-              />
+              <Suspense fallback={<p className="muted small">正在加载控制台组件…</p>}>
+                <VmConsole
+                  key={`${selected.vm.id}-${session.viewOnly ? "view" : "takeover"}`}
+                  session={session}
+                  vmName={selected.vm.name}
+                  onClose={() => setSession(null)}
+                  onReconnect={() => setConnectNonce((value) => value + 1)}
+                />
+              </Suspense>
               {session.viewOnly && (
                 <button type="button" className="secondary" onClick={() => void takeover()}>
                   人工接管

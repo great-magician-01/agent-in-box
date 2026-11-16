@@ -1,5 +1,5 @@
 /* eslint-disable react-hooks/set-state-in-effect -- initial fetch and SSE effects intentionally update state */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   GuestHealthState,
   HostInspectionReport,
@@ -23,7 +23,6 @@ import {
   subscribeTaskEvents,
   type ImageEventStreamState,
 } from "./api";
-import { VmConsole } from "./VmConsole";
 import {
   GUEST_HEALTH_LABELS,
   IMAGE_STATUS_LABELS,
@@ -32,6 +31,10 @@ import {
   formatBytes,
   formatProgressPercent,
 } from "./format";
+
+const VmConsole = lazy(() =>
+  import("./VmConsole").then((module) => ({ default: module.VmConsole })),
+);
 
 const GIB = 1024 * 1024 * 1024;
 
@@ -911,16 +914,22 @@ export function VmManager({
         )}
         {loadError && (
           <div className="notice" role="alert">
-            <strong>读取镜像或 VM 列表失败。</strong>
-            <span>{loadError}</span>
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => void refreshAll()}
-              disabled={refreshing}
-            >
-              重试
-            </button>
+            <strong>暂时无法读取镜像和虚拟机状态。</strong>
+            <span>请确认本地服务正在运行，然后重试。</span>
+            <details className="advanced-details">
+              <summary>技术详情</summary>
+              <code>{loadError}</code>
+            </details>
+            <div>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => void refreshAll()}
+                disabled={refreshing}
+              >
+                重试
+              </button>
+            </div>
           </div>
         )}
         {feedback && (
@@ -935,12 +944,26 @@ export function VmManager({
 
       {vms && !supervisorAvailable && (
         <div className="notice supervisor-notice" role="alert">
-          <strong>Supervisor 不可用，VM 操作暂不可用。</strong>
-          <span>{supervisorMessage ?? "无法连接本机 Supervisor 服务。"}</span>
+          <strong>虚拟机服务尚未连接。</strong>
           <span>
-            下方 VM 来自已持久化记录，电源与 Guest Health
-            仅代表最后已知状态，不代表当前就绪。启动、停止、休眠、恢复与控制台已暂时禁用。
+            启动、停止和控制台暂时不可用。下方显示最后保存的状态，现有磁盘与项目数据不会被删除。
           </span>
+          {supervisorMessage && (
+            <details className="advanced-details">
+              <summary>技术详情</summary>
+              <code>{supervisorMessage}</code>
+            </details>
+          )}
+          <div>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => void refreshAll()}
+              disabled={refreshing}
+            >
+              重新连接
+            </button>
+          </div>
         </div>
       )}
 
@@ -1814,19 +1837,21 @@ export function VmManager({
                 </p>
 
                 {consoleInfo && (
-                  <VmConsole
-                    key={consoleInfo.lease?.id ?? `${view.vm.id}-view-only`}
-                    session={consoleInfo}
-                    vmName={view.vm.name}
-                    onClose={() =>
-                      setConsoles((current) => {
-                        const next = { ...current };
-                        delete next[view.vm.id];
-                        return next;
-                      })
-                    }
-                    onReconnect={() => void openConsole(view)}
-                  />
+                  <Suspense fallback={<p className="muted small">正在加载控制台组件…</p>}>
+                    <VmConsole
+                      key={consoleInfo.lease?.id ?? `${view.vm.id}-view-only`}
+                      session={consoleInfo}
+                      vmName={view.vm.name}
+                      onClose={() =>
+                        setConsoles((current) => {
+                          const next = { ...current };
+                          delete next[view.vm.id];
+                          return next;
+                        })
+                      }
+                      onReconnect={() => void openConsole(view)}
+                    />
+                  </Suspense>
                 )}
               </article>
             );

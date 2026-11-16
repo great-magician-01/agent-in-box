@@ -159,7 +159,7 @@ const KIND_LABELS: Record<NotificationRecord["kind"], string> = {
 
 interface NotificationCenterProps {
   state: NotificationCenterState;
-  onNavigate(view: string): void;
+  onNavigate(view: string, entityId?: string): void;
 }
 
 export function NotificationCenter({
@@ -186,7 +186,7 @@ export function NotificationCenter({
     <section className="panel notifications-panel" aria-labelledby="notifications-title">
       <div className="panel-heading">
         <div>
-          <h2 id="notifications-title">通知中心</h2>
+          <h2 id="notifications-title">通知列表</h2>
         </div>
         <div className="action-row">
           <label className="toggle">
@@ -207,10 +207,7 @@ export function NotificationCenter({
           </button>
         </div>
       </div>
-      <p className="muted small">
-        任务、审批、Worker、VM、资源、Router 和机器人事件统一在此汇总；通知只是 Outbox
-        的投影，不改变任务状态。
-      </p>
+      <p className="muted small">任务、审批、Worker、VM 和系统消息统一汇总在这里。</p>
       {state.error && <div className="notice">{state.error}</div>}
       {visible.length === 0 ? (
         <p className="muted">暂无通知。</p>
@@ -236,7 +233,7 @@ export function NotificationCenter({
                     <button
                       type="button"
                       className="link-button"
-                      onClick={() => onNavigate("tasks")}
+                      onClick={() => onNavigate("tasks", item.taskId ?? undefined)}
                     >
                       查看任务
                     </button>
@@ -245,7 +242,7 @@ export function NotificationCenter({
                     <button
                       type="button"
                       className="link-button"
-                      onClick={() => onNavigate("projects")}
+                      onClick={() => onNavigate("projects", item.projectId ?? undefined)}
                     >
                       查看项目
                     </button>
@@ -259,7 +256,7 @@ export function NotificationCenter({
                     <button
                       type="button"
                       className="link-button"
-                      onClick={() => onNavigate("archive")}
+                      onClick={() => onNavigate("session", item.workerId ?? undefined)}
                     >
                       查看 Worker
                     </button>
@@ -292,12 +289,13 @@ export function NotificationCenter({
   );
 }
 
-function severityTone(severity: NotificationRecord["severity"]): "ok" | "warn" | "live" {
+function severityTone(severity: NotificationRecord["severity"]): "ok" | "warn" | "bad" | "live" {
   switch (severity) {
     case "success":
       return "ok";
-    case "warning":
     case "danger":
+      return "bad";
+    case "warning":
       return "warn";
     default:
       return "live";

@@ -1,5 +1,6 @@
 /* eslint-disable react-hooks/set-state-in-effect -- server snapshots refresh from event revisions */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ArrowDown, Send, Square } from "lucide-react";
 import type {
   ModelConfigurationView,
   RouterMessageRecord,
@@ -7,6 +8,8 @@ import type {
   RouterView,
 } from "@agent-in-box/protocol";
 import { api } from "./api";
+import { MarkdownContent } from "./MarkdownContent";
+import { useConversationScroll } from "./useConversationScroll";
 
 interface RouterPanelProps {
   revision: number;
@@ -67,6 +70,7 @@ export function RouterPanel({
       await api.routerSend(text.trim());
       setText("");
       await load();
+      jumpToLatest();
       onChanged();
     } catch (cause) {
       setError(errorMessage(cause));
@@ -108,6 +112,34 @@ export function RouterPanel({
   const running = view?.status === "running";
   const enabledProviders = (modelConfig?.providers ?? []).filter((provider) => provider.enabled);
   const selectedModel = JSON.stringify([switchProvider, switchModel]);
+  const timeline = useMemo(
+    () =>
+      [
+        ...messages.map((message) => ({
+          kind: "message" as const,
+          id: `message-${message.id}`,
+          createdAt: message.createdAt,
+          message,
+        })),
+        ...toolCalls.map((call) => ({
+          kind: "tool" as const,
+          id: `tool-${call.id}`,
+          createdAt: call.createdAt,
+          call,
+        })),
+      ].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+    [messages, toolCalls],
+  );
+  const lastMessage = messages.at(-1);
+  const {
+    scrollRef: conversationRef,
+    showJump,
+    onScroll,
+    jumpToLatest,
+  } = useConversationScroll(
+    `${messages.length}:${lastMessage?.id ?? ""}:${lastMessage?.content.length ?? 0}:${toolCalls.length}`,
+    view?.conversationId ?? null,
+  );
 
   const composer = (
     <div className="chat-composer">
@@ -144,7 +176,7 @@ export function RouterPanel({
                   key={`${provider.id}-${model.id}`}
                   value={JSON.stringify([provider.id, model.id])}
                 >
-                  {provider.id} / {model.id}
+                  {model.name ?? model.id}
                 </option>
               )),
             )}
@@ -152,6 +184,7 @@ export function RouterPanel({
         ) : (
           <span />
         )}
+        <span className="composer-hint">Enter 发送 · Shift + Enter 换行</span>
         {running ? (
           <button
             type="button"
@@ -159,6 +192,7 @@ export function RouterPanel({
             disabled={busy}
             onClick={() => void abort()}
           >
+            <Square aria-hidden="true" />
             停止
           </button>
         ) : (
@@ -168,6 +202,7 @@ export function RouterPanel({
             disabled={busy || !text.trim() || enabledProviders.length === 0}
             onClick={() => void send()}
           >
+            <Send aria-hidden="true" />
             发送
           </button>
         )}
@@ -182,7 +217,7 @@ export function RouterPanel({
           <h2>有什么需要完成的？</h2>
           {enabledProviders.length === 0 ? (
             <div className="configuration-hint">
-              <p>先配置一个模型服务，就可以开始对话。</p>
+              <p>先配置模型服务。只有执行桌面任务时才需要虚拟机。</p>
               {onOpenSettings && (
                 <button type="button" className="primary" onClick={onOpenSettings}>
                   配置模型
@@ -195,37 +230,51 @@ export function RouterPanel({
         </div>
       ) : (
         <>
-          <div className="conversation-scroll">
-            <div className="conversation-column">
-              <div className="worker-messages" aria-live="polite">
-                {messages.map((message) => (
-                  <article key={message.id} className={`chat-message ${message.role}`}>
-                    {message.role !== "user" && <span className="chat-role">Agent</span>}
-                    <p>{message.content}</p>
-                  </article>
-                ))}
-              </div>
-              {toolCalls.length > 0 && (
-                <details className="conversation-tools">
-                  <summary>最近使用了 {toolCalls.length} 次工具</summary>
-                  <ul>
-                    {toolCalls
-                      .slice()
-                      .reverse()
-                      .slice(0, 10)
-                      .map((call) => (
-                        <li key={call.id}>
-                          <span>{call.toolName}</span>
-                          <span className={call.status === "error" ? "error-line" : "muted"}>
-                            {call.status === "error" ? "失败" : "完成"}
+          <div className="conversation-body">
+            <div className="conversation-scroll" ref={conversationRef} onScroll={onScroll}>
+              <div className="conversation-column">
+                {running && (
+                  <p className="conversation-running" role="status">
+                    <span className="workspace-dot running" aria-hidden="true" />
+                    正在执行任务
+                  </p>
+                )}
+                <div className="worker-messages">
+                  {timeline.map((item) =>
+                    item.kind === "message" ? (
+                      <article
+                        key={item.id}
+                        className={`chat-message ${item.message.role}`}
+                        aria-label={item.message.role === "user" ? "你的消息" : "Agent 的回答"}
+                      >
+                        {item.message.role !== "user" && <span className="chat-role">Agent</span>}
+                        <MarkdownContent content={item.message.content} />
+                      </article>
+                    ) : (
+                      <details className="chat-tool-call" key={item.id}>
+                        <summary>
+                          <span>{item.call.toolName}</span>
+                          <span className={item.call.status === "error" ? "error-line" : "muted"}>
+                            {item.call.status === "error" ? "失败" : "完成"}
+                            {item.call.durationMs > 0 &&
+                              ` · ${(item.call.durationMs / 1000).toFixed(1)}s`}
                           </span>
-                          {call.errorMessage && <p className="error-line">{call.errorMessage}</p>}
-                        </li>
-                      ))}
-                  </ul>
-                </details>
-              )}
+                        </summary>
+                        {item.call.errorMessage && (
+                          <p className="error-line">{item.call.errorMessage}</p>
+                        )}
+                      </details>
+                    ),
+                  )}
+                </div>
+              </div>
             </div>
+            {showJump && (
+              <button type="button" className="jump-latest" onClick={jumpToLatest}>
+                <ArrowDown aria-hidden="true" />
+                回到最新
+              </button>
+            )}
           </div>
           <div className="conversation-composer">{composer}</div>
         </>

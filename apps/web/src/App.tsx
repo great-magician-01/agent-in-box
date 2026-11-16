@@ -1,5 +1,6 @@
 /* eslint-disable react-hooks/set-state-in-effect -- initial data fetch effects intentionally set loading/result state */
-import { useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { Bell, Lock, PanelLeft, PanelRight } from "lucide-react";
 import type {
   DesktopAppStatus,
   DesktopBridge,
@@ -10,19 +11,37 @@ import type {
   RuntimeInfo,
 } from "@agent-in-box/protocol";
 import { api, UNAUTHORIZED_EVENT } from "./api";
-import { Dashboard, type RestartRequest } from "./Dashboard";
+import type { RestartRequest } from "./Dashboard";
 import { useDesktop } from "./desktop";
 import { CONTROL_PLANE_STATE_LABELS } from "./format";
 import { LoginScreen } from "./LoginScreen";
 import { NotificationCenter, useNotificationCenter } from "./NotificationCenter";
-import { ObserverSidebar, type ObserverTab } from "./ObserverSidebar";
 import { OnboardingWizard } from "./OnboardingWizard";
 import { BootstrapMonitor } from "./BootstrapMonitor";
-import { WorkerConversation } from "./WorkerConversation";
 import { WorkspaceSidebar } from "./WorkspaceSidebar";
+import type { ObserverTab } from "./ObserverSidebar";
+import { useMediaQuery } from "./useMediaQuery";
+import {
+  DEFAULT_ROUTE,
+  parseRoute,
+  routeFor,
+  routeHash,
+  type AppRoute,
+  type AppView,
+  type SettingsSection,
+} from "./routes";
 
-export type AppView =
-  "overview" | "session" | "projects" | "tasks" | "vms" | "archive" | "notifications" | "settings";
+export type { AppView } from "./routes";
+
+const Dashboard = lazy(() =>
+  import("./Dashboard").then((module) => ({ default: module.Dashboard })),
+);
+const ObserverSidebar = lazy(() =>
+  import("./ObserverSidebar").then((module) => ({ default: module.ObserverSidebar })),
+);
+const WorkerConversation = lazy(() =>
+  import("./WorkerConversation").then((module) => ({ default: module.WorkerConversation })),
+);
 
 const NAV_ITEMS: Array<{ id: AppView; label: string; hint: string }> = [
   { id: "overview", label: "总览", hint: "本机状态与快速摘要" },
@@ -34,11 +53,6 @@ const NAV_ITEMS: Array<{ id: AppView; label: string; hint: string }> = [
   { id: "notifications", label: "通知", hint: "统一通知中心" },
   { id: "settings", label: "设置", hint: "存储、资源、桌面与更新" },
 ];
-
-function viewFromHash(): AppView {
-  const value = window.location.hash.replace(/^#\/?/, "").split("?")[0];
-  return NAV_ITEMS.some((item) => item.id === value) ? (value as AppView) : "session";
-}
 
 type AuthState =
   | { state: "checking" }
@@ -222,65 +236,105 @@ function AuthenticatedApp({
   const [pendingRestart, setPendingRestart] = useState<PendingRestart | null>(null);
   const [restartBusy, setRestartBusy] = useState(false);
   const [restartMessage, setRestartMessage] = useState<string | null>(null);
-  const [view, setView] = useState<AppView>(() => viewFromHash());
+  const [route, setRoute] = useState<AppRoute>(() => parseRoute(window.location.hash));
+  const view = route.view;
+  const compactShell = useMediaQuery("(max-width: 900px)");
+  const observerOverlay = useMediaQuery("(max-width: 1280px)");
   const [logoutBusy, setLogoutBusy] = useState(false);
-  const [selectedWorker, setSelectedWorker] = useState<{
+  const [selectedWorkerContext, setSelectedWorkerContext] = useState<{
     workerId: string;
     projectId: string;
-    vmId: string;
+    vmId: string | null;
+    projectName: string | null;
+    conversationTitle: string | null;
   } | null>(null);
   const [observerOpen, setObserverOpen] = useState(false);
   const [observerTab, setObserverTab] = useState<ObserverTab>("activity");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
-    () => typeof window !== "undefined" && window.innerWidth < 900,
+    () => typeof window !== "undefined" && window.innerWidth <= 900,
   );
   const [workspaceRevision, setWorkspaceRevision] = useState(0);
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const observerTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const sidebarTriggerRef = useRef<HTMLButtonElement | null>(null);
 
-  const navigate = useCallback((next: string) => {
-    const target = NAV_ITEMS.some((item) => item.id === next) ? (next as AppView) : "session";
-    setView(target);
-    if (target !== "session") setSelectedWorker(null);
-    if (target !== "projects") setSelectedProjectId(null);
-    if (window.location.hash !== `#/${target}`) {
-      window.history.replaceState(null, "", `#/${target}`);
-    }
+  const closeObserver = useCallback(() => {
+    setObserverOpen(false);
+    requestAnimationFrame(() => observerTriggerRef.current?.focus());
   }, []);
 
-  const selectWorker = useCallback((workerId: string, projectId: string, vmId: string) => {
-    setSelectedWorker({ workerId, projectId, vmId });
-    setView("session");
-    if (window.location.hash !== "#/session") {
-      window.history.replaceState(null, "", "#/session");
-    }
+  const collapseSidebar = useCallback(() => {
+    setSidebarCollapsed(true);
+    requestAnimationFrame(() => sidebarTriggerRef.current?.focus());
   }, []);
+
+  const commitRoute = useCallback(
+    (next: AppRoute, replace = false) => {
+      setRoute(next);
+      if (compactShell) setSidebarCollapsed(true);
+      const hash = routeHash(next);
+      if (window.location.hash !== hash) {
+        window.history[replace ? "replaceState" : "pushState"](null, "", hash);
+      }
+    },
+    [compactShell],
+  );
+
+  const navigate = useCallback(
+    (next: string, entityId?: string) => {
+      const target = NAV_ITEMS.some((item) => item.id === next) ? (next as AppView) : "session";
+      commitRoute(routeFor(target, entityId));
+    },
+    [commitRoute],
+  );
+
+  const selectWorker = useCallback(
+    (workerId: string, projectId: string, vmId: string) => {
+      setSelectedWorkerContext({
+        workerId,
+        projectId,
+        vmId,
+        projectName: null,
+        conversationTitle: null,
+      });
+      commitRoute(routeFor("session", workerId));
+    },
+    [commitRoute],
+  );
 
   const selectRouter = useCallback(() => {
-    setSelectedWorker(null);
-    setView("session");
-    if (window.location.hash !== "#/session") {
-      window.history.replaceState(null, "", "#/session");
-    }
-  }, []);
+    commitRoute(routeFor("session"));
+  }, [commitRoute]);
 
-  const selectProject = useCallback((projectId: string) => {
-    setSelectedWorker(null);
-    setSelectedProjectId(projectId);
-    setView("projects");
-    if (window.location.hash !== "#/projects") {
-      window.history.replaceState(null, "", "#/projects");
+  const selectProject = useCallback(
+    (projectId: string) => {
+      commitRoute(routeFor("projects", projectId));
+    },
+    [commitRoute],
+  );
+
+  const selectSettingsSection = useCallback(
+    (settingsSection: SettingsSection) => {
+      commitRoute({ ...routeFor("settings"), settingsSection });
+    },
+    [commitRoute],
+  );
+
+  useEffect(() => {
+    function onLocationChange(): void {
+      setRoute(parseRoute(window.location.hash));
+      if (window.innerWidth <= 900) setSidebarCollapsed(true);
     }
+    window.addEventListener("hashchange", onLocationChange);
+    window.addEventListener("popstate", onLocationChange);
+    return () => {
+      window.removeEventListener("hashchange", onLocationChange);
+      window.removeEventListener("popstate", onLocationChange);
+    };
   }, []);
 
   useEffect(() => {
-    function onHashChange(): void {
-      const next = viewFromHash();
-      setView(next);
-      if (next !== "session") setSelectedWorker(null);
-    }
-    window.addEventListener("hashchange", onHashChange);
-    return () => window.removeEventListener("hashchange", onHashChange);
-  }, []);
+    if (compactShell) setSidebarCollapsed(true);
+  }, [compactShell]);
 
   useEffect(() => {
     if (!bridge) return;
@@ -288,9 +342,8 @@ function AuthenticatedApp({
     // a previous run must not resurrect an old page.
     if (window.location.hash !== "#/session") {
       window.history.replaceState(null, "", "#/session");
-      setView("session");
-      setSelectedWorker(null);
-      setSelectedProjectId(null);
+      setRoute(DEFAULT_ROUTE);
+      setSelectedWorkerContext(null);
     }
   }, [bridge]);
 
@@ -298,6 +351,43 @@ function AuthenticatedApp({
     if (!bridge) return;
     return bridge.app.onNavigate((next) => navigate(next));
   }, [bridge, navigate]);
+
+  useEffect(() => {
+    const workerId = route.workerId;
+    if (!workerId) {
+      setSelectedWorkerContext(null);
+      return;
+    }
+    let active = true;
+    setSelectedWorkerContext((current) => (current?.workerId === workerId ? current : null));
+    void api
+      .worker(workerId)
+      .then(async (workerView) => {
+        if (!active) return;
+        const { projectId, vmId, conversationId } = workerView.worker;
+        setSelectedWorkerContext({
+          workerId,
+          projectId,
+          vmId,
+          projectName: null,
+          conversationTitle: null,
+        });
+        const project = await api.project(projectId);
+        if (!active) return;
+        setSelectedWorkerContext({
+          workerId,
+          projectId,
+          vmId,
+          projectName: project.project.name,
+          conversationTitle:
+            project.conversations.find((item) => item.id === conversationId)?.title || "新会话",
+        });
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [route.workerId, workspaceRevision]);
 
   const notifications = useNotificationCenter(bridge, () => navigate("notifications"));
 
@@ -444,16 +534,22 @@ function AuthenticatedApp({
   }
 
   const online = connection.state === "online" ? connection.health : null;
-  const currentTitle = NAV_ITEMS.find((item) => item.id === view)?.label ?? "";
-
   const workspaceVisible = Boolean(onboarding && runtime && online && !onboarding.required);
+  const currentTitle =
+    view === "session"
+      ? (selectedWorkerContext?.conversationTitle ?? (route.workerId ? "项目会话" : "主会话"))
+      : (NAV_ITEMS.find((item) => item.id === view)?.label ?? "");
+  const mobileSidebarOpen = compactShell && workspaceVisible && !sidebarCollapsed;
+  const modalObserverOpen = observerOverlay && workspaceVisible && observerOpen;
   const openWorkerFromBoard = (projectId: string, workerId: string): void => {
-    void api
-      .worker(workerId)
-      .then((view) => selectWorker(workerId, projectId, view.worker.vmId))
-      .catch(() => {
-        setView("projects");
-      });
+    setSelectedWorkerContext({
+      workerId,
+      projectId,
+      vmId: null,
+      projectName: null,
+      conversationTitle: null,
+    });
+    commitRoute(routeFor("session", workerId));
   };
   const onWorkspaceChanged = (): void => {
     setWorkspaceRevision((value) => value + 1);
@@ -476,11 +572,12 @@ function AuthenticatedApp({
       >
         跳到主要内容
       </a>
-      {workspaceVisible && (
+      {workspaceVisible && (!compactShell || !sidebarCollapsed) && (
         <WorkspaceSidebar
           view={view}
-          selectedWorkerId={selectedWorker?.workerId ?? null}
+          selectedWorkerId={route.workerId}
           revision={workspaceRevision}
+          modal={compactShell}
           onSelectView={navigate}
           onSelectProject={selectProject}
           onSelectWorker={(workerId, projectId, vmId) => {
@@ -488,24 +585,38 @@ function AuthenticatedApp({
             setObserverTab("activity");
           }}
           onSelectRouter={selectRouter}
-          onCollapse={() => setSidebarCollapsed(true)}
+          onCollapse={collapseSidebar}
         />
       )}
-      <div className="app-workspace">
+      {mobileSidebarOpen && (
+        <button
+          type="button"
+          className="shell-backdrop workspace-backdrop"
+          aria-label="关闭会话导航"
+          onClick={collapseSidebar}
+        />
+      )}
+      <div className="app-workspace" inert={mobileSidebarOpen || modalObserverOpen}>
         <header className="header app-header">
           <div className="app-header-leading">
             {workspaceVisible && sidebarCollapsed && (
               <button
                 type="button"
                 className="icon-button"
+                ref={sidebarTriggerRef}
                 title="展开侧栏"
                 aria-label="展开侧栏"
                 onClick={() => setSidebarCollapsed(false)}
               >
-                ☰
+                <PanelLeft aria-hidden="true" />
               </button>
             )}
-            {view !== "session" && <h1>{currentTitle}</h1>}
+            <div className="app-title-group">
+              <h1>{currentTitle}</h1>
+              {view === "session" && selectedWorkerContext?.projectName && (
+                <span>{selectedWorkerContext.projectName}</span>
+              )}
+            </div>
           </div>
           <div className="header-actions">
             {workspaceVisible && (
@@ -515,7 +626,8 @@ function AuthenticatedApp({
                 aria-label={`通知中心，${notifications.view?.unreadCount ?? 0} 条未读`}
                 onClick={() => navigate("notifications")}
               >
-                通知
+                <Bell aria-hidden="true" />
+                <span className="header-tool-label">通知</span>
                 {(notifications.view?.unreadCount ?? 0) > 0 && (
                   <span className="bell-count">{notifications.view?.unreadCount}</span>
                 )}
@@ -525,20 +637,30 @@ function AuthenticatedApp({
               <button
                 type="button"
                 className={observerOpen ? "header-tool active" : "header-tool"}
+                ref={observerTriggerRef}
                 aria-pressed={observerOpen}
-                onClick={() => setObserverOpen((current) => !current)}
+                aria-label="观察执行详情"
+                aria-expanded={observerOpen}
+                aria-controls="observer-sidebar"
+                onClick={() => {
+                  if (observerOpen) closeObserver();
+                  else setObserverOpen(true);
+                }}
               >
-                观察
+                <PanelRight aria-hidden="true" />
+                <span className="header-tool-label">观察</span>
               </button>
             )}
             {!bridge && (
               <button
                 type="button"
                 className="header-tool"
+                aria-label={logoutBusy ? "正在锁定" : "锁定当前会话"}
                 onClick={() => void lockUi()}
                 disabled={logoutBusy}
               >
-                {logoutBusy ? "锁定中…" : "锁定"}
+                <Lock aria-hidden="true" />
+                <span className="header-tool-label">{logoutBusy ? "锁定中…" : "锁定"}</span>
               </button>
             )}
           </div>
@@ -636,44 +758,60 @@ function AuthenticatedApp({
               </div>
             </section>
           ) : onboarding && runtime && online ? (
-            <>
-              {!onboarding.required && <BootstrapMonitor bridge={bridge} />}
-              {onboarding.required ? (
-                <OnboardingWizard
-                  initialState={onboarding}
-                  bridge={bridge}
-                  onCompleted={(result) => void completed(result)}
-                />
-              ) : view === "notifications" ? (
-                <NotificationCenter state={notifications} onNavigate={navigate} />
-              ) : selectedWorker ? (
-                <section className="conversation-page worker-main" aria-label="项目会话">
-                  <WorkerConversation
-                    workerId={selectedWorker.workerId}
-                    revision={workspaceRevision}
-                    onChanged={onWorkspaceChanged}
-                  />
+            <Suspense
+              fallback={
+                <section className="panel loading-panel" aria-live="polite">
+                  <span className="spinner" aria-hidden="true" />
+                  <div>
+                    <h2>正在加载工作区</h2>
+                    <p className="muted">正在准备当前页面所需的组件。</p>
+                  </div>
                 </section>
-              ) : (
-                <Dashboard
-                  view={view}
-                  onboarding={onboarding}
-                  runtime={runtime}
-                  health={online}
-                  bridge={bridge}
-                  authInfo={authInfo}
-                  controlPlaneState={desktopStatus?.controlPlane.state ?? "running"}
-                  onNavigate={navigate}
-                  onChanged={async () => {
-                    await refresh(true);
-                    setWorkspaceRevision((value) => value + 1);
-                  }}
-                  onRestartRequired={restartRequired}
-                  onOpenWorker={openWorkerFromBoard}
-                  initialProjectId={selectedProjectId}
-                />
-              )}
-            </>
+              }
+            >
+              <>
+                {!onboarding.required && view === "session" && <BootstrapMonitor bridge={bridge} />}
+                {onboarding.required ? (
+                  <OnboardingWizard
+                    initialState={onboarding}
+                    bridge={bridge}
+                    onCompleted={(result) => void completed(result)}
+                  />
+                ) : view === "notifications" ? (
+                  <NotificationCenter state={notifications} onNavigate={navigate} />
+                ) : route.workerId ? (
+                  <section className="conversation-page worker-main" aria-label="项目会话">
+                    <WorkerConversation
+                      workerId={route.workerId}
+                      revision={workspaceRevision}
+                      onChanged={onWorkspaceChanged}
+                    />
+                  </section>
+                ) : (
+                  <Dashboard
+                    view={view}
+                    onboarding={onboarding}
+                    runtime={runtime}
+                    health={online}
+                    bridge={bridge}
+                    authInfo={authInfo}
+                    controlPlaneState={desktopStatus?.controlPlane.state ?? "running"}
+                    onNavigate={navigate}
+                    onChanged={async () => {
+                      await refresh(true);
+                      setWorkspaceRevision((value) => value + 1);
+                    }}
+                    onRestartRequired={restartRequired}
+                    onOpenWorker={openWorkerFromBoard}
+                    initialProjectId={route.projectId}
+                    focusTaskId={route.taskId}
+                    settingsSection={route.settingsSection}
+                    onSettingsSectionChange={selectSettingsSection}
+                    onProjectSelected={selectProject}
+                  />
+                )}
+              </>
+            </Suspense>
           ) : (
             <section className="panel loading-panel" aria-live="polite">
               <span className="spinner" aria-hidden="true" />
@@ -685,17 +823,34 @@ function AuthenticatedApp({
           )}
         </main>
       </div>
-      {workspaceVisible && (
-        <ObserverSidebar
-          open={observerOpen}
-          tab={observerTab}
-          workerId={selectedWorker?.workerId ?? null}
-          preferredVmId={selectedWorker?.vmId ?? null}
-          revision={workspaceRevision}
-          onTabChange={setObserverTab}
-          onClose={() => setObserverOpen(false)}
-          onChanged={onWorkspaceChanged}
+      {modalObserverOpen && (
+        <button
+          type="button"
+          className="shell-backdrop observer-backdrop"
+          aria-label="关闭观察栏"
+          onClick={closeObserver}
         />
+      )}
+      {workspaceVisible && observerOpen && (
+        <Suspense
+          fallback={
+            <aside className="observer-sidebar" aria-label="正在加载观察栏">
+              <span className="spinner" aria-hidden="true" />
+            </aside>
+          }
+        >
+          <ObserverSidebar
+            open={observerOpen}
+            tab={observerTab}
+            workerId={route.workerId}
+            preferredVmId={selectedWorkerContext?.vmId ?? null}
+            revision={workspaceRevision}
+            modal={observerOverlay}
+            onTabChange={setObserverTab}
+            onClose={closeObserver}
+            onChanged={onWorkspaceChanged}
+          />
+        </Suspense>
       )}
     </div>
   );

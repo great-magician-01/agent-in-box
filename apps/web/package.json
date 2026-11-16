@@ -6,14 +6,18 @@
     "build": "tsc -p tsconfig.json --noEmit && vite build",
     "dev": "vite",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run"
   },
   "dependencies": {
     "@agent-in-box/protocol": "workspace:*",
     "@agent-in-box/ui": "workspace:*",
     "@novnc/novnc": "1.5.0",
+    "lucide-react": "^1.73.0",
     "react": "19.3.1",
-    "react-dom": "19.3.1"
+    "react-dom": "19.3.1",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@types/react": "19.3.0",

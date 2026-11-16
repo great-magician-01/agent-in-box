@@ -8,6 +8,7 @@ import type {
   WorkerView,
 } from "@agent-in-box/protocol";
 import { api } from "./api";
+import { MarkdownContent } from "./MarkdownContent";
 
 interface WorkerPanelProps {
   project: ProjectDetail;
@@ -257,7 +258,9 @@ export function WorkerPanel({
         {providers.length === 0
           ? "尚未配置模型 Provider。"
           : `已配置 ${providers.length} 套模型 Provider。`}{" "}
-        <a href="#settings">前往“模型与 API 配置”管理或切换</a>
+        <a className="link-button" href="#/settings/models">
+          前往“模型与 API 配置”管理或切换
+        </a>
       </p>
       {switchNotice && <div className="validation-box ok">{switchNotice}</div>}
 
@@ -412,7 +415,7 @@ export function WorkerPanel({
                     <span className="chat-role">
                       {message.role === "user" ? "用户" : "Worker"} · {message.mode}
                     </span>
-                    <p>{message.content}</p>
+                    <MarkdownContent content={message.content} />
                   </article>
                 ))
               )}

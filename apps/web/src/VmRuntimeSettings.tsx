@@ -1,10 +1,13 @@
 /* eslint-disable react-hooks/set-state-in-effect -- runtime status loads from the desktop bridge */
 import { useCallback, useEffect, useState } from "react";
-import type { DesktopBridge, VmRuntimeStatus } from "@agent-in-box/protocol";
+import type { DesktopBridge, HostInspectionReport, VmRuntimeStatus } from "@agent-in-box/protocol";
 import { chooseDirectory } from "./desktop";
+import { VmSetupGuidance } from "./VmSetupGuidance";
 
 interface VmRuntimeSettingsProps {
   bridge: DesktopBridge | null;
+  host: HostInspectionReport | null;
+  onRefreshHost?: (() => Promise<void>) | undefined;
 }
 
 const STATE_LABELS: Record<VmRuntimeStatus["state"], string> = {
@@ -23,7 +26,11 @@ const QEMU_LABELS: Record<VmRuntimeStatus["qemu"]["state"], string> = {
   invalid: "路径无效",
 };
 
-export function VmRuntimeSettings({ bridge }: VmRuntimeSettingsProps): React.JSX.Element {
+export function VmRuntimeSettings({
+  bridge,
+  host,
+  onRefreshHost,
+}: VmRuntimeSettingsProps): React.JSX.Element {
   const [status, setStatus] = useState<VmRuntimeStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -72,10 +79,16 @@ export function VmRuntimeSettings({ bridge }: VmRuntimeSettingsProps): React.JSX
     <section className="panel" aria-labelledby="vm-runtime-title">
       <div className="panel-heading">
         <div>
-          <h2 id="vm-runtime-title">虚拟机运行组件</h2>
+          <h2 id="vm-runtime-title">VM 运行环境</h2>
+          <p className="muted small">自动准备遇到问题时可在这里检查；大多数用户无需修改。</p>
         </div>
-        <button type="button" className="secondary" onClick={() => void load()} disabled={busy}>
-          刷新
+        <button
+          type="button"
+          className="secondary"
+          onClick={() => void Promise.all([load(), onRefreshHost?.()])}
+          disabled={busy}
+        >
+          重新检查
         </button>
       </div>
       {!bridge ? (
@@ -85,40 +98,50 @@ export function VmRuntimeSettings({ bridge }: VmRuntimeSettingsProps): React.JSX
       ) : (
         <>
           <p className="muted small">
-            Electron 会托管 Go VM Supervisor，并按需下载经过 SHA-256 校验的 QEMU 工具链。 QEMU
-            不随安装包捆绑。
+            应用会自动下载并校验所需组件，再启动后台服务。组件不随安装包捆绑，首次准备需要联网。
           </p>
+          {host?.ready ? (
+            <div className="validation-box ok">
+              <strong>电脑运行条件检查通过</strong>
+              <span className="muted small">虚拟化、内存和磁盘检查均满足当前要求。</span>
+            </div>
+          ) : (
+            <VmSetupGuidance host={host} />
+          )}
           {error && <div className="notice">{error}</div>}
           {message && <div className="validation-box ok">{message}</div>}
           {status ? (
-            <dl className="runtime-facts">
-              <div>
-                <dt>Supervisor</dt>
-                <dd>
-                  {STATE_LABELS[status.state]}
-                  {status.pid ? ` · pid ${status.pid}` : ""}
-                </dd>
-              </div>
-              <div>
-                <dt>QEMU</dt>
-                <dd>
-                  {QEMU_LABELS[status.qemu.state]}
-                  {status.qemu.version ? ` · ${status.qemu.version}` : ""}
-                </dd>
-              </div>
-              <div>
-                <dt>QEMU 路径</dt>
-                <dd>
-                  <code>{status.qemu.path ?? "—"}</code>
-                </dd>
-              </div>
-              <div>
-                <dt>托管目录</dt>
-                <dd>
-                  <code>{status.qemu.managedRoot ?? "—"}</code>
-                </dd>
-              </div>
-            </dl>
+            <details className="runtime-advanced">
+              <summary>查看组件路径与进程详情</summary>
+              <dl className="runtime-facts">
+                <div>
+                  <dt>Supervisor</dt>
+                  <dd>
+                    {STATE_LABELS[status.state]}
+                    {status.pid ? ` · pid ${status.pid}` : ""}
+                  </dd>
+                </div>
+                <div>
+                  <dt>QEMU</dt>
+                  <dd>
+                    {QEMU_LABELS[status.qemu.state]}
+                    {status.qemu.version ? ` · ${status.qemu.version}` : ""}
+                  </dd>
+                </div>
+                <div>
+                  <dt>QEMU 路径</dt>
+                  <dd>
+                    <code>{status.qemu.path ?? "—"}</code>
+                  </dd>
+                </div>
+                <div>
+                  <dt>托管目录</dt>
+                  <dd>
+                    <code>{status.qemu.managedRoot ?? "—"}</code>
+                  </dd>
+                </div>
+              </dl>
+            </details>
           ) : (
             <p className="muted small">正在读取 VM 运行组件状态…</p>
           )}
@@ -138,7 +161,7 @@ export function VmRuntimeSettings({ bridge }: VmRuntimeSettingsProps): React.JSX
                 ? "处理中…"
                 : status?.qemu.state === "managed"
                   ? "已安装托管 QEMU"
-                  : "下载并安装 QEMU"}
+                  : "自动下载并安装 VM 组件"}
             </button>
             <button
               type="button"
@@ -146,7 +169,7 @@ export function VmRuntimeSettings({ bridge }: VmRuntimeSettingsProps): React.JSX
               disabled={busy}
               onClick={() => void chooseQemu()}
             >
-              选择已有 QEMU 目录
+              已有安装？手动选择目录
             </button>
             {status?.qemu.state === "custom" && (
               <button
@@ -166,7 +189,7 @@ export function VmRuntimeSettings({ bridge }: VmRuntimeSettingsProps): React.JSX
               disabled={busy}
               onClick={() => run(() => bridge.vm.restartSupervisor(), "VM Supervisor 已重启")}
             >
-              重启 Supervisor
+              重启后台服务
             </button>
           </div>
         </>

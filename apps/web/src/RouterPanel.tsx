@@ -9,6 +9,7 @@ import type {
 } from "@agent-in-box/protocol";
 import { api } from "./api";
 import { MarkdownContent } from "./MarkdownContent";
+import { Select } from "./Select";
 import { useConversationScroll } from "./useConversationScroll";
 
 interface RouterPanelProps {
@@ -160,7 +161,7 @@ export function RouterPanel({
       />
       <div className="composer-toolbar">
         {enabledProviders.length > 0 && !view?.selectionLockedByEnv ? (
-          <select
+          <Select
             aria-label="当前模型"
             className="composer-model"
             value={selectedModel}
@@ -180,7 +181,7 @@ export function RouterPanel({
                 </option>
               )),
             )}
-          </select>
+          </Select>
         ) : (
           <span />
         )}

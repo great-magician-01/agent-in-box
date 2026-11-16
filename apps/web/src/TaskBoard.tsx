@@ -12,6 +12,7 @@ import {
 } from "@agent-in-box/protocol";
 import { api } from "./api";
 import { formatBytes, formatDate, TASK_STATUS_LABELS, VM_POWER_STATE_LABELS } from "./format";
+import { Select } from "./Select";
 
 interface TaskBoardProps {
   board: TaskBoardSnapshot | null;
@@ -214,7 +215,7 @@ export function TaskBoard({
             <div className="form-grid four-columns">
               <label className="field">
                 <span>目标 VM</span>
-                <select
+                <Select
                   value={selectedVmId}
                   onChange={(event) => setVmId(event.target.value)}
                   required
@@ -224,11 +225,11 @@ export function TaskBoard({
                       {item.vm.name} · {VM_POWER_STATE_LABELS[item.vm.powerState]}
                     </option>
                   ))}
-                </select>
+                </Select>
               </label>
               <label className="field">
                 <span>来源会话</span>
-                <select
+                <Select
                   value={selectedConversationId}
                   onChange={(event) => setConversationId(event.target.value)}
                 >
@@ -238,7 +239,7 @@ export function TaskBoard({
                       {conversation.title}
                     </option>
                   ))}
-                </select>
+                </Select>
               </label>
               <label className="field">
                 <span>优先级（-100～100）</span>
@@ -252,7 +253,7 @@ export function TaskBoard({
               </label>
               <label className="field">
                 <span>依赖任务（可选）</span>
-                <select
+                <Select
                   value={dependencyId}
                   onChange={(event) => setDependencyId(event.target.value)}
                 >
@@ -264,7 +265,7 @@ export function TaskBoard({
                         {task.objective.slice(0, 48)} · {TASK_STATUS_LABELS[task.status]}
                       </option>
                     ))}
-                </select>
+                </Select>
               </label>
             </div>
             <p className="muted small">
@@ -286,7 +287,7 @@ export function TaskBoard({
         <div className="task-filters" aria-label="任务筛选">
           <label className="field">
             <span>项目</span>
-            <select
+            <Select
               value={projectFilter}
               onChange={(event) => setProjectFilter(event.target.value)}
             >
@@ -296,40 +297,40 @@ export function TaskBoard({
                   {project.name}
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
           <label className="field">
             <span>VM</span>
-            <select value={vmFilter} onChange={(event) => setVmFilter(event.target.value)}>
+            <Select value={vmFilter} onChange={(event) => setVmFilter(event.target.value)}>
               <option value="">全部 VM</option>
               {board?.vms.map((vm) => (
                 <option key={vm.id} value={vm.id}>
                   {vm.name}
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
           <label className="field">
             <span>Worker</span>
-            <select value={workerFilter} onChange={(event) => setWorkerFilter(event.target.value)}>
+            <Select value={workerFilter} onChange={(event) => setWorkerFilter(event.target.value)}>
               <option value="">全部 Worker</option>
               {board?.workers.map((worker) => (
                 <option key={worker.id} value={worker.id}>
                   {worker.id.slice(0, 8)} · {worker.engineType}
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
           <label className="field">
             <span>状态</span>
-            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+            <Select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
               <option value="">全部状态</option>
               {TASK_STATUSES.map((status) => (
                 <option key={status} value={status}>
                   {TASK_STATUS_LABELS[status]}
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
           <button type="button" className="secondary filter-reset" onClick={resetFilters}>
             清除筛选

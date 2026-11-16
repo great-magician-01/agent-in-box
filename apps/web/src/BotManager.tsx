@@ -11,6 +11,7 @@ import type {
 } from "@agent-in-box/protocol";
 import { api, ApiRequestError, subscribeTaskEvents } from "./api";
 import { formatDate } from "./format";
+import { Select } from "./Select";
 
 const STATE_LABELS: Record<BotRuntimeState, string> = {
   disabled: "已停用",
@@ -411,7 +412,7 @@ export function BotManager({ bridge }: BotManagerProps): React.JSX.Element {
                 </p>
               )}
               <div className="bot-inline-form">
-                <select
+                <Select
                   value={identityForm.platform}
                   onChange={(event) =>
                     setIdentityForm((current) => ({
@@ -422,7 +423,7 @@ export function BotManager({ bridge }: BotManagerProps): React.JSX.Element {
                 >
                   <option value="feishu">飞书</option>
                   <option value="qq">QQ</option>
-                </select>
+                </Select>
                 <input
                   value={identityForm.platformUserId}
                   onChange={(event) =>
@@ -443,7 +444,7 @@ export function BotManager({ bridge }: BotManagerProps): React.JSX.Element {
                   }
                   placeholder="显示名称（可选）"
                 />
-                <select
+                <Select
                   value={identityForm.role}
                   onChange={(event) =>
                     setIdentityForm((current) => ({
@@ -454,7 +455,7 @@ export function BotManager({ bridge }: BotManagerProps): React.JSX.Element {
                 >
                   <option value="admin">管理员</option>
                   <option value="member">只读成员</option>
-                </select>
+                </Select>
                 <button
                   type="button"
                   className="secondary"
@@ -514,7 +515,7 @@ export function BotManager({ bridge }: BotManagerProps): React.JSX.Element {
               <div className="bot-form-grid">
                 <label className="field">
                   <span>平台</span>
-                  <select
+                  <Select
                     value={form.platform}
                     onChange={(event) =>
                       setForm((current) => ({
@@ -525,7 +526,7 @@ export function BotManager({ bridge }: BotManagerProps): React.JSX.Element {
                   >
                     <option value="feishu">飞书</option>
                     <option value="qq">QQ</option>
-                  </select>
+                  </Select>
                 </label>
                 <label className="field">
                   <span>名称</span>
@@ -811,7 +812,7 @@ export function BotManager({ bridge }: BotManagerProps): React.JSX.Element {
             单聊由已绑定用户授权；群聊必须显式加入白名单。未授权群消息会被静默忽略，避免机器人在无关群中响应。
           </p>
           <div className="bot-inline-form">
-            <select
+            <Select
               value={chatForm.platform}
               onChange={(event) =>
                 setChatForm((current) => ({
@@ -822,7 +823,7 @@ export function BotManager({ bridge }: BotManagerProps): React.JSX.Element {
             >
               <option value="feishu">飞书</option>
               <option value="qq">QQ</option>
-            </select>
+            </Select>
             <input
               value={chatForm.conversationId}
               onChange={(event) =>
@@ -830,7 +831,7 @@ export function BotManager({ bridge }: BotManagerProps): React.JSX.Element {
               }
               placeholder="会话 ID（飞书 chat_id / QQ group_openid）"
             />
-            <select
+            <Select
               value={chatForm.kind}
               onChange={(event) =>
                 setChatForm((current) => ({
@@ -841,7 +842,7 @@ export function BotManager({ bridge }: BotManagerProps): React.JSX.Element {
             >
               <option value="group">群聊</option>
               <option value="p2p">单聊</option>
-            </select>
+            </Select>
             <input
               value={chatForm.title}
               onChange={(event) =>

@@ -9,6 +9,7 @@ import type {
 } from "@agent-in-box/protocol";
 import { api } from "./api";
 import { MarkdownContent } from "./MarkdownContent";
+import { Select } from "./Select";
 
 interface WorkerPanelProps {
   project: ProjectDetail;
@@ -267,22 +268,23 @@ export function WorkerPanel({
       <div className="action-row worker-create-row">
         <label className="field">
           <span>绑定 VM</span>
-          <select
+          <Select
             value={selectedVmId}
             onChange={(event) => setSelectedVmId(event.target.value)}
-            disabled={busy}
+            disabled={busy || project.bindings.length === 0}
           >
+            {project.bindings.length === 0 && <option value="">暂无绑定 VM</option>}
             {project.bindings.map((binding) => (
               <option key={binding.vm.id} value={binding.vm.id}>
                 {binding.vm.name} · {binding.vm.powerState}
                 {binding.vm.powerState !== "running" ? "（需先启动）" : ""}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         <label className="field">
           <span>Worker Provider</span>
-          <select
+          <Select
             value={workerProvider}
             onChange={(event) => {
               setWorkerProvider(event.target.value);
@@ -296,11 +298,11 @@ export function WorkerPanel({
                 {provider.id}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         <label className="field">
           <span>Worker 模型</span>
-          <select
+          <Select
             value={workerModel}
             onChange={(event) => setWorkerModel(event.target.value)}
             disabled={busy}
@@ -311,7 +313,7 @@ export function WorkerPanel({
                 {model.id}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         <button
           type="button"
@@ -364,7 +366,7 @@ export function WorkerPanel({
                 <div className="worker-switch-model">
                   <label className="field">
                     <span>切换 Provider</span>
-                    <select
+                    <Select
                       value={switchProvider}
                       onChange={(event) => {
                         setSwitchProvider(event.target.value);
@@ -377,11 +379,11 @@ export function WorkerPanel({
                           {provider.id}
                         </option>
                       ))}
-                    </select>
+                    </Select>
                   </label>
                   <label className="field">
                     <span>切换模型</span>
-                    <select
+                    <Select
                       value={switchModel}
                       onChange={(event) => setSwitchModel(event.target.value)}
                       disabled={busy || selected.worker.status !== "idle"}
@@ -391,7 +393,7 @@ export function WorkerPanel({
                           {model.id}
                         </option>
                       ))}
-                    </select>
+                    </Select>
                   </label>
                   <button
                     type="button"

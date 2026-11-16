@@ -12,6 +12,7 @@ import type {
 } from "@agent-in-box/protocol";
 import { api } from "./api";
 import { credentialStatus } from "./desktop";
+import { Select } from "./Select";
 import { CUSTOM_PRESET_ID, PROVIDER_PRESETS } from "./provider-presets";
 
 interface ModelSettingsProps {
@@ -345,7 +346,7 @@ export function ModelSettings({
           {!selectedProvider && (
             <label className="field">
               <span>从预设创建（仍可修改）</span>
-              <select
+              <Select
                 value={CUSTOM_PRESET_ID}
                 onChange={(event) => applyPreset(event.target.value)}
               >
@@ -355,7 +356,7 @@ export function ModelSettings({
                     {preset.label}
                   </option>
                 ))}
-              </select>
+              </Select>
             </label>
           )}
           <div className="provider-form">
@@ -382,13 +383,13 @@ export function ModelSettings({
             </label>
             <label className="field">
               <span>API 类型</span>
-              <select
+              <Select
                 value={draft.api}
                 onChange={(event) => updateDraft({ api: event.target.value as WorkerModelApi })}
               >
                 <option value="openai-completions">openai-completions</option>
                 <option value="anthropic-messages">anthropic-messages</option>
-              </select>
+              </Select>
             </label>
             <label className="field">
               <span>凭据 Provider ID</span>
@@ -548,7 +549,7 @@ export function ModelSettings({
             <h4>新 Worker 默认模型</h4>
             <label className="field">
               <span>Worker Provider</span>
-              <select
+              <Select
                 value={workerProvider}
                 onChange={(event) => setWorkerProvider(event.target.value)}
               >
@@ -558,25 +559,25 @@ export function ModelSettings({
                     {provider.id}
                   </option>
                 ))}
-              </select>
+              </Select>
             </label>
             <label className="field">
               <span>Worker 模型</span>
-              <select value={workerModel} onChange={(event) => setWorkerModel(event.target.value)}>
+              <Select value={workerModel} onChange={(event) => setWorkerModel(event.target.value)}>
                 <option value="">未选择</option>
                 {modelsFor(workerProvider).map((model) => (
                   <option key={model.id} value={model.id}>
                     {model.id}
                   </option>
                 ))}
-              </select>
+              </Select>
             </label>
           </div>
           <div>
             <h4>Router 模型</h4>
             <label className="field">
               <span>Router Provider</span>
-              <select
+              <Select
                 value={routerProvider}
                 disabled={configuration?.routerLockedByEnv === true}
                 onChange={(event) => setRouterProvider(event.target.value)}
@@ -587,11 +588,11 @@ export function ModelSettings({
                     {provider.id}
                   </option>
                 ))}
-              </select>
+              </Select>
             </label>
             <label className="field">
               <span>Router 模型</span>
-              <select
+              <Select
                 value={routerModel}
                 disabled={configuration?.routerLockedByEnv === true}
                 onChange={(event) => setRouterModel(event.target.value)}
@@ -602,7 +603,7 @@ export function ModelSettings({
                     {model.id}
                   </option>
                 ))}
-              </select>
+              </Select>
             </label>
             {configuration?.routerLockedByEnv && (
               <p className="notice small">Router 模型由环境变量锁定，界面只能查看。</p>

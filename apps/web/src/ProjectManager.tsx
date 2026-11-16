@@ -9,6 +9,7 @@ import type {
   VmInstanceRecord,
 } from "@agent-in-box/protocol";
 import { api } from "./api";
+import { Select } from "./Select";
 import { formatDate, VM_POWER_STATE_LABELS } from "./format";
 
 const DEFAULT_LINUX_WORKSPACE = "/home/aib-worker/workspace";
@@ -36,6 +37,7 @@ export function ProjectManager({
   onChanged,
 }: ProjectManagerProps): React.JSX.Element {
   const [busy, setBusy] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -184,6 +186,7 @@ export function ProjectManager({
       setName("");
       setDescription("");
       setWorkspace(DEFAULT_LINUX_WORKSPACE);
+      setCreateOpen(false);
       onSelect(created.project.id);
     }
   }
@@ -216,11 +219,30 @@ export function ProjectManager({
   return (
     <div className="project-workspace">
       <div className="project-list" aria-label="项目列表">
-        <div className="section-heading">
-          <h2>项目列表</h2>
-          <span className="muted small">{projects.length} 个</span>
+        <div className="project-list-heading">
+          <div>
+            <h2>项目</h2>
+            <p className="muted small">选择项目，管理它的执行环境、会话和文件。</p>
+          </div>
+          <button
+            type="button"
+            className="secondary"
+            aria-expanded={createOpen}
+            aria-controls="create-project-form"
+            onClick={() => setCreateOpen((current) => !current)}
+          >
+            {createOpen ? "取消新建" : "＋ 新建项目"}
+          </button>
         </div>
-        {projects.length === 0 && <p className="muted small">创建项目后，再绑定一台或多台 VM。</p>}
+        {projects.length === 0 && !createOpen && (
+          <div className="project-empty-state">
+            <strong>从第一个项目开始</strong>
+            <p className="muted small">项目用来隔离会话、文件和 VM 工作目录。</p>
+            <button type="button" className="primary" onClick={() => setCreateOpen(true)}>
+              创建第一个项目
+            </button>
+          </div>
+        )}
         <div className="project-tabs">
           {projects.map((view) => (
             <button
@@ -233,46 +255,58 @@ export function ProjectManager({
               <strong>{view.project.name}</strong>
               <span>
                 {view.project.archivedAt ? "已归档 · " : ""}
-                {view.bindings.length} VM · {view.activeTaskCount} 活跃任务 ·{" "}
-                {view.activeWorkerCount} 活跃 Worker
+                {view.bindings.length} 台 VM · {view.activeTaskCount} 个活跃任务
               </span>
             </button>
           ))}
         </div>
-        <details className="create-box">
-          <summary>新建项目</summary>
-          <form className="stack compact-form" onSubmit={(event) => void createProject(event)}>
+        {createOpen && (
+          <form
+            id="create-project-form"
+            className="create-project-form"
+            onSubmit={(event) => void createProject(event)}
+          >
+            <div className="form-grid two-columns">
+              <label className="field">
+                <span>项目名称</span>
+                <input
+                  value={name}
+                  maxLength={80}
+                  required
+                  autoFocus
+                  placeholder="例如：我的第一个项目"
+                  onChange={(event) => setName(event.target.value)}
+                />
+              </label>
+              <label className="field">
+                <span>默认 Guest 工作目录</span>
+                <input
+                  value={workspace}
+                  required
+                  spellCheck={false}
+                  onChange={(event) => setWorkspace(event.target.value)}
+                />
+              </label>
+            </div>
             <label className="field">
-              <span>名称</span>
-              <input
-                value={name}
-                maxLength={80}
-                required
-                onChange={(event) => setName(event.target.value)}
-              />
-            </label>
-            <label className="field">
-              <span>描述</span>
+              <span>描述（可选）</span>
               <textarea
                 value={description}
                 maxLength={2000}
+                placeholder="这个项目用来做什么？"
                 onChange={(event) => setDescription(event.target.value)}
               />
             </label>
-            <label className="field">
-              <span>默认 Guest 工作目录</span>
-              <input
-                value={workspace}
-                required
-                spellCheck={false}
-                onChange={(event) => setWorkspace(event.target.value)}
-              />
-            </label>
-            <button type="submit" className="primary" disabled={busy}>
-              创建项目
-            </button>
+            <div className="action-row">
+              <button type="submit" className="primary" disabled={busy}>
+                {busy ? "正在创建…" : "创建项目"}
+              </button>
+              <button type="button" className="link-button" onClick={() => setCreateOpen(false)}>
+                取消
+              </button>
+            </div>
           </form>
-        </details>
+        )}
       </div>
 
       <div className="project-detail" id="project-detail">
@@ -416,7 +450,9 @@ export function ProjectManager({
                 <h3 id="bindings-title">VM 绑定与共享影响</h3>
                 <span className="muted small">停止的 VM 也可绑定</span>
               </div>
-              {detail.bindings.length === 0 && <p className="muted small">尚未绑定 VM。</p>}
+              {detail.bindings.length === 0 && vms.length > 0 && (
+                <p className="muted small">尚未绑定 VM。从下方选择一台即可，停止的 VM 也能绑定。</p>
+              )}
               <div className="binding-list">
                 {detail.bindings.map((item) => (
                   <BindingRow
@@ -430,14 +466,49 @@ export function ProjectManager({
                   />
                 ))}
               </div>
-              {!archived && (
+              {!archived && vms.length === 0 && (
+                <div className="vm-empty-guide">
+                  <div>
+                    <strong>还没有可用的虚拟机</strong>
+                    <p className="muted small">
+                      推荐使用一键准备：系统会自动下载镜像、创建并初始化默认 Linux
+                      VM，无需手动填写这些选项。
+                    </p>
+                  </div>
+                  <div className="action-row">
+                    <button
+                      type="button"
+                      className="primary"
+                      disabled={busy}
+                      onClick={() =>
+                        void run(async () => {
+                          await api.startBootstrap();
+                          window.location.hash = "#/session";
+                        })
+                      }
+                    >
+                      {busy ? "正在启动…" : "一键准备默认 VM"}
+                    </button>
+                    <button
+                      type="button"
+                      className="link-button"
+                      onClick={() => {
+                        window.location.hash = "#/vms";
+                      }}
+                    >
+                      手动管理 VM
+                    </button>
+                  </div>
+                </div>
+              )}
+              {!archived && vms.length > 0 && (
                 <form
                   className="inline-form binding-form"
                   onSubmit={(event) => void addBinding(event)}
                 >
                   <label className="field">
                     <span>添加 VM</span>
-                    <select
+                    <Select
                       value={selectedBindVm}
                       onChange={(event) => selectBindingVm(event.target.value)}
                       disabled={!selectedBindVm || busy}
@@ -453,7 +524,7 @@ export function ProjectManager({
                           {VM_POWER_STATE_LABELS[vm.powerState]}
                         </option>
                       ))}
-                    </select>
+                    </Select>
                   </label>
                   <label className="field">
                     <span>Guest 工作目录</span>

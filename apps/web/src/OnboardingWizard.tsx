@@ -12,6 +12,7 @@ import type {
 import { api, ApiRequestError } from "./api";
 import { chooseDirectory, credentialStatus } from "./desktop";
 import { DATA_ROOT_SOURCE_LABELS, formatBytes } from "./format";
+import { Select } from "./Select";
 import { CUSTOM_PRESET_ID, DEFAULT_PRESET_ID, PROVIDER_PRESETS } from "./provider-presets";
 
 interface OnboardingWizardProps {
@@ -36,10 +37,12 @@ export function OnboardingWizard({
   const [storageBusy, setStorageBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [providerId, setProviderId] = useState(
-    initialState.preferredModelProvider ?? DEFAULT_PRESET_ID,
-  );
-  const initialPreset = PROVIDER_PRESETS.find((provider) => provider.id === providerId);
+  const savedProviderId = initialState.preferredModelProvider;
+  const initialProviderId = PROVIDER_OPTIONS.some((provider) => provider.id === savedProviderId)
+    ? (savedProviderId ?? DEFAULT_PRESET_ID)
+    : DEFAULT_PRESET_ID;
+  const [providerId, setProviderId] = useState(initialProviderId);
+  const initialPreset = PROVIDER_PRESETS.find((provider) => provider.id === initialProviderId);
   const [model, setModel] = useState(initialPreset ? preferredModel(initialPreset.models) : "");
   const [workspaceId, setWorkspaceId] = useState("");
   const [secret, setSecret] = useState("");
@@ -215,7 +218,9 @@ export function OnboardingWizard({
   return (
     <div className="wizard">
       <aside className="wizard-steps">
-        <h1>首次启动向导</h1>
+        <span className="wizard-kicker">欢迎使用 Agent-in-Box</span>
+        <h1>两项设置，即可开始</h1>
+        <p className="wizard-intro">先选择保存位置，再连接模型。剩下的 VM 初始化交给系统。</p>
         <ol>
           <li className={step === "storage" ? "active" : "done"}>
             <span className="step-index">{step === "storage" ? 1 : "✓"}</span>
@@ -231,7 +236,20 @@ export function OnboardingWizard({
               <small>验证后即可对话，执行环境会自动准备</small>
             </span>
           </li>
+          <li className="automatic">
+            <span className="step-index">✓</span>
+            <span>
+              <strong>自动准备虚拟机</strong>
+              <small>无需安装 QEMU、下载镜像或手动创建 VM</small>
+            </span>
+          </li>
         </ol>
+        <div className="wizard-promise">
+          <strong>你只需要做这两项选择</strong>
+          <p>
+            组件下载、Linux VM 创建和 Agent 初始化都会自动完成；需要系统授权时，我们会一步一步提示。
+          </p>
+        </div>
         <p className="wizard-note">
           资源、权限和虚拟机组件使用安全默认值。高级设置仍可在进入工作区后修改。
         </p>
@@ -239,12 +257,12 @@ export function OnboardingWizard({
 
       <section className="wizard-panel">
         <header className="wizard-heading">
-          <span className="step-count">第 {step === "storage" ? 1 : 2} / 2 步</span>
-          <h2>{step === "storage" ? "选择保存位置" : "配置默认模型"}</h2>
+          <span className="step-count">第 {step === "storage" ? 1 : 2} / 2 项设置</span>
+          <h2>{step === "storage" ? "文件保存在哪里？" : "连接你的 AI 模型"}</h2>
           <p>
             {step === "storage"
-              ? "接受默认目录即可，不需要了解内部文件结构。"
-              : "保存时会做一次最小模型请求，确认账号和模型确实可用。"}
+              ? "直接使用推荐目录即可。系统已自动检查，无需了解内部文件结构。"
+              : "选择服务商、粘贴 API Key，然后点击“保存并验证模型”。"}
           </p>
         </header>
 
@@ -296,13 +314,13 @@ export function OnboardingWizard({
           <div className="stack">
             <label className="field">
               <span>服务商</span>
-              <select value={providerId} onChange={(event) => changeProvider(event.target.value)}>
+              <Select value={providerId} onChange={(event) => changeProvider(event.target.value)}>
                 {PROVIDER_OPTIONS.map((provider) => (
                   <option key={provider.id} value={provider.id}>
                     {provider.label}
                   </option>
                 ))}
-              </select>
+              </Select>
             </label>
             {providerId === CUSTOM_PRESET_ID && (
               <>
@@ -330,7 +348,7 @@ export function OnboardingWizard({
                 </label>
                 <label className="field">
                   <span>API 类型</span>
-                  <select
+                  <Select
                     value={apiType}
                     onChange={(event) => {
                       setApiType(event.target.value as WorkerModelApi);
@@ -339,7 +357,7 @@ export function OnboardingWizard({
                   >
                     <option value="openai-completions">OpenAI-compatible</option>
                     <option value="anthropic-messages">Anthropic Messages</option>
-                  </select>
+                  </Select>
                 </label>
               </>
             )}
@@ -370,7 +388,7 @@ export function OnboardingWizard({
             ) : (
               <label className="field">
                 <span>默认模型</span>
-                <select
+                <Select
                   value={model}
                   onChange={(event) => {
                     setModel(event.target.value);
@@ -384,7 +402,7 @@ export function OnboardingWizard({
                       {item.name ?? item.id}
                     </option>
                   ))}
-                </select>
+                </Select>
               </label>
             )}
             <label className="field">
@@ -422,11 +440,11 @@ export function OnboardingWizard({
             )}
             <button
               type="button"
-              className="secondary"
+              className={validation?.ok ? "secondary" : "primary"}
               onClick={() => void validateAndSave()}
               disabled={validating}
             >
-              {validating ? "正在验证…" : "保存并验证模型"}
+              {validating ? "正在连接并验证…" : validation?.ok ? "重新验证模型" : "保存并验证模型"}
             </button>
             {validation?.ok && (
               <div className="validation-box ok">
@@ -438,6 +456,33 @@ export function OnboardingWizard({
                 )}
               </div>
             )}
+            <section className="wizard-vm-preview" aria-labelledby="wizard-vm-preview-title">
+              <div className="wizard-vm-preview-heading">
+                <span className="auto-badge">自动</span>
+                <div>
+                  <h3 id="wizard-vm-preview-title">接下来的 VM 初始化，无需手动操作</h3>
+                  <p className="muted small">点击完成后开始对话，系统会同时在后台准备执行环境。</p>
+                </div>
+              </div>
+              <ol>
+                <li>
+                  <span>1</span>检查电脑是否支持虚拟化
+                </li>
+                <li>
+                  <span>2</span>下载并校验 VM 组件与 Linux 镜像
+                </li>
+                <li>
+                  <span>3</span>自动创建、启动并初始化 VM
+                </li>
+                <li>
+                  <span>4</span>连接 Agent，准备完成后即可执行任务
+                </li>
+              </ol>
+              <p className="muted small">
+                下载耗时取决于网络，不需要保持在本页。若 Windows
+                需要开启虚拟化或重启，界面会给出对应步骤。
+              </p>
+            </section>
           </div>
         )}
 
@@ -461,7 +506,7 @@ export function OnboardingWizard({
                 setStep("model");
               }}
             >
-              下一步
+              下一步：连接模型
             </button>
           ) : (
             <button
@@ -470,7 +515,7 @@ export function OnboardingWizard({
               disabled={!validation?.ok || submitting || validating}
               onClick={() => void submit()}
             >
-              {submitting ? "正在启动…" : "完成并开始使用"}
+              {submitting ? "正在保存并启动…" : "完成，开始对话并自动准备 VM"}
             </button>
           )}
         </footer>

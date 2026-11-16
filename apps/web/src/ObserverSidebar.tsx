@@ -10,6 +10,7 @@ import type {
   WorkerView,
 } from "@agent-in-box/protocol";
 import { api } from "./api";
+import { Select } from "./Select";
 import { useModalFocus } from "./useModalFocus";
 
 const VmConsole = lazy(() =>
@@ -286,14 +287,14 @@ export function ObserverSidebar({
           {error && <div className="notice">{error}</div>}
           <label className="field">
             <span>虚拟机</span>
-            <select value={selectedVmId} onChange={(event) => setSelectedVmId(event.target.value)}>
+            <Select value={selectedVmId} onChange={(event) => setSelectedVmId(event.target.value)}>
               <option value="">未选择</option>
               {vms.map((item) => (
                 <option key={item.vm.id} value={item.vm.id}>
                   {item.vm.name} · {item.vm.powerState === "running" ? "运行中" : "已停止"}
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
           {connecting && <p className="muted small">正在连接只读画面…</p>}
           {session && selected && (

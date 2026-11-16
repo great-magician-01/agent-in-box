@@ -1,0 +1,997 @@
+/* Focused follow-up refinements: custom listboxes, project layout and guided VM setup. */
+
+.select-control {
+  display: block;
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  color: var(--text);
+}
+
+.select-trigger {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  margin: 0;
+  padding: 0.6rem 0.7rem 0.6rem 0.8rem;
+  border: 1px solid var(--border-2);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 3%);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 400;
+  line-height: 1.4;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.select-trigger:hover:not(:disabled) {
+  border-color: var(--muted);
+  background: var(--surface-2);
+}
+
+.select-trigger:focus-visible,
+.select-trigger[aria-expanded="true"] {
+  border-color: var(--text-2);
+  outline: 0;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 18%, transparent);
+}
+
+.select-trigger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.select-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.select-value.placeholder {
+  color: var(--muted);
+}
+
+.select-chevron {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  color: var(--muted);
+  stroke-width: 1.8;
+  transition: transform 150ms ease;
+}
+
+.select-trigger[aria-expanded="true"] .select-chevron {
+  color: var(--text);
+  transform: rotate(180deg);
+}
+
+.select-menu {
+  position: fixed;
+  z-index: 1000;
+  padding: 6px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--border-2);
+  border-radius: 12px;
+  outline: 0;
+  background: var(--surface);
+  box-shadow:
+    0 16px 42px rgb(0 0 0 / 18%),
+    0 3px 10px rgb(0 0 0 / 8%);
+  animation: select-menu-enter 130ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.select-option {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-height: 38px;
+  padding: 0.5rem 0.55rem 0.5rem 0.65rem;
+  border-radius: 8px;
+  color: var(--text-2);
+  font-size: 0.875rem;
+  line-height: 1.35;
+  cursor: pointer;
+  user-select: none;
+}
+
+.select-option.active {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.select-option.selected {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.select-option[aria-disabled="true"] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.select-option-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.select-option-check {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  place-items: center;
+}
+
+.select-option-check svg {
+  width: 15px;
+  height: 15px;
+  stroke-width: 2;
+}
+
+@keyframes select-menu-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.composer-toolbar .select-control {
+  width: auto;
+  max-width: min(360px, 65%);
+  flex: 0 1 auto;
+}
+
+.select-trigger.composer-model {
+  width: auto;
+  max-width: 100%;
+  min-height: 30px;
+  padding: 0.25rem 0.45rem;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+
+.select-trigger.composer-model .select-value {
+  max-width: 290px;
+}
+
+.bot-inline-form .select-control {
+  width: auto;
+  min-width: 140px;
+  flex: 1 1 170px;
+}
+
+.bot-inline-form .select-trigger {
+  min-height: 40px;
+  padding: 0.45rem 0.6rem;
+}
+
+/* Projects already have a global project tree. Keep this page on one reading axis. */
+.app-main > .dashboard {
+  width: min(1120px, 100%);
+}
+
+.work-manager:has(.project-workspace) {
+  gap: 1.5rem;
+  padding: clamp(1rem, 2vw, 1.75rem);
+}
+
+.project-workspace {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1.5rem;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.project-list {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.project-list-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.project-list-heading h2 {
+  margin: 0;
+  font-size: 1.25rem;
+  letter-spacing: -0.025em;
+}
+
+.project-list-heading p {
+  margin: 0.3rem 0 0;
+}
+
+.project-tabs {
+  display: flex;
+  gap: 0.65rem;
+  margin: 0;
+  padding: 2px 2px 5px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.project-tabs button {
+  min-width: 0;
+  flex: 0 0 230px;
+  gap: 0.35rem;
+  padding: 0.8rem 0.9rem;
+  border-color: var(--border);
+  border-radius: 12px;
+  background: var(--surface-2);
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease;
+}
+
+.project-tabs button:hover {
+  border-color: var(--border-2);
+  background: var(--surface-3);
+}
+
+.project-tabs button.selected {
+  border-color: var(--text-2);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--text-2);
+}
+
+.project-tabs button strong,
+.project-tabs button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.create-project-form {
+  display: grid;
+  gap: 0.85rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-2);
+}
+
+.project-empty-state {
+  display: grid;
+  justify-items: start;
+  gap: 0.35rem;
+  padding: 1.25rem;
+  border: 1px dashed var(--border-2);
+  border-radius: 14px;
+  background: var(--surface-2);
+}
+
+.project-empty-state p {
+  margin: 0 0 0.45rem;
+}
+
+.project-detail {
+  gap: 1.25rem;
+}
+
+.project-detail > .section-heading {
+  align-items: center;
+}
+
+.project-detail > .section-heading h2 {
+  margin: 0 0 0.25rem;
+  font-size: 1.15rem;
+}
+
+.project-summary {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.project-summary div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.35rem;
+  padding: 0.9rem 1rem;
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+
+.project-summary dd {
+  line-height: 1.55;
+}
+
+.project-edit-details {
+  overflow: hidden;
+  border-color: var(--border);
+  background: var(--surface-2);
+}
+
+.project-edit-details > summary {
+  padding: 0.8rem 1rem;
+}
+
+.project-edit-details > form {
+  padding: 0.35rem 1rem 1rem;
+}
+
+.project-detail > .subsection,
+.project-columns > .subsection {
+  gap: 0.85rem;
+  padding: 1.15rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+}
+
+.project-detail > .subsection > .section-heading,
+.project-columns > .subsection > h3 {
+  margin: 0;
+}
+
+.project-columns {
+  align-items: start;
+  gap: 1.25rem;
+}
+
+.binding-form.inline-form {
+  display: grid;
+  grid-template-columns: minmax(160px, 0.85fr) minmax(220px, 1.35fr) auto auto;
+  align-items: end;
+  gap: 0.75rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.binding-form .field {
+  min-width: 0;
+  flex: initial;
+}
+
+.binding-form .compact-toggle {
+  min-height: 42px;
+  align-items: center;
+  padding: 0.6rem 0.75rem;
+  background: var(--surface);
+}
+
+.binding-form > button {
+  min-height: 42px;
+  border-radius: 10px;
+}
+
+.vm-empty-guide {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px dashed var(--border-2);
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+
+.vm-empty-guide p {
+  margin: 0.3rem 0 0;
+}
+
+.vm-empty-guide .action-row {
+  flex: 0 0 auto;
+}
+
+.toggle input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  margin: 0.1rem 0 0;
+  accent-color: var(--text);
+}
+
+.drop-zone {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0.25rem 0.85rem;
+  justify-items: start;
+  padding: 1.1rem 1.2rem;
+  border-width: 1px;
+  border-color: var(--border-2);
+  border-radius: 12px;
+  background: var(--surface-2);
+  text-align: left;
+}
+
+.drop-zone .drop-icon {
+  grid-row: 1 / span 2;
+  align-self: center;
+  font-size: 1.5rem;
+}
+
+.drop-zone > strong {
+  align-self: end;
+}
+
+.drop-zone > .muted.small {
+  display: none;
+}
+
+.drop-zone > button {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+  align-self: center;
+}
+
+/* First-run wizard: two decisions, followed by an explicit automatic VM phase. */
+.app-main > .wizard {
+  width: min(1080px, 100%);
+  margin: 1rem auto;
+}
+
+.wizard {
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 1.25rem;
+}
+
+.wizard-steps {
+  padding: 1.5rem;
+}
+
+.wizard-kicker {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.wizard-steps h1 {
+  margin: 0.65rem 0 0.65rem;
+  font-size: 1.65rem;
+  line-height: 1.15;
+}
+
+.wizard-intro {
+  margin: 0 0 1.5rem;
+  color: var(--text-2);
+  font-size: 0.875rem;
+  line-height: 1.65;
+}
+
+.wizard-steps li.automatic {
+  margin-top: 0.35rem;
+  color: var(--text-2);
+}
+
+.wizard-steps li.automatic .step-index {
+  background: var(--ok-bg);
+  color: var(--ok);
+}
+
+.wizard-promise {
+  margin-top: 1.35rem;
+  padding: 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-2);
+  font-size: 0.8125rem;
+}
+
+.wizard-promise p {
+  margin: 0.4rem 0 0;
+  color: var(--text-2);
+  line-height: 1.6;
+}
+
+.wizard-panel {
+  min-height: 36rem;
+  padding: clamp(1.25rem, 2.5vw, 2rem);
+}
+
+.wizard-heading h2 {
+  font-size: 1.65rem;
+}
+
+.wizard-panel > .stack {
+  gap: 1.05rem;
+}
+
+.wizard-panel .field {
+  gap: 0.45rem;
+  font-size: 0.875rem;
+}
+
+.wizard-panel .field input,
+.wizard-panel .select-trigger {
+  min-height: 46px;
+}
+
+.wizard-panel .stack > button {
+  justify-self: start;
+}
+
+.wizard-vm-preview {
+  display: grid;
+  gap: 0.85rem;
+  margin-top: 0.35rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-2);
+}
+
+.wizard-vm-preview-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.wizard-vm-preview h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.wizard-vm-preview-heading p {
+  margin: 0.3rem 0 0;
+}
+
+.auto-badge {
+  flex: 0 0 auto;
+  padding: 0.2rem 0.45rem;
+  border-radius: 999px;
+  background: var(--ok-bg);
+  color: var(--ok);
+  font-size: 0.7rem;
+  font-weight: 750;
+}
+
+.wizard-vm-preview ol {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem 0.9rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wizard-vm-preview li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  color: var(--text-2);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.wizard-vm-preview li > span {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.wizard-vm-preview > p {
+  margin: 0;
+}
+
+/* VM preparation stays visible on conversation, project and VM pages. */
+.bootstrap-banner.setup-guide {
+  display: grid;
+  gap: 1rem;
+  width: min(960px, calc(100% - 2rem));
+  padding: 1rem;
+  border-color: var(--border-2);
+  border-radius: 16px;
+  background: var(--surface);
+}
+
+.app-main:not(.session-active) > .bootstrap-banner.setup-guide {
+  width: min(1080px, calc(100% - 3rem));
+  margin: 1rem auto 0;
+}
+
+.bootstrap-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.8rem;
+}
+
+.bootstrap-vm-icon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.bootstrap-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.setup-kicker {
+  display: block;
+  margin-bottom: 0.2rem;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.bootstrap-title > strong {
+  display: block;
+  font-size: 1rem;
+}
+
+.bootstrap-title p {
+  margin: 0.3rem 0 0;
+  color: var(--text-2);
+  font-size: 0.8125rem;
+  line-height: 1.55;
+}
+
+.setup-status {
+  flex: 0 0 auto;
+  padding: 0.25rem 0.55rem;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+
+.setup-status.running {
+  background: var(--ok-bg);
+  color: var(--ok);
+}
+
+.setup-status.blocked,
+.setup-status.retryable_failed,
+.setup-status.waiting_user_action {
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+
+.bootstrap-steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bootstrap-steps li {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+  padding: 0.55rem 0.6rem;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.bootstrap-steps li.active {
+  border-color: var(--border-2);
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 650;
+}
+
+.bootstrap-steps li.done {
+  color: var(--ok);
+}
+
+.bootstrap-steps li.needs-action {
+  border-color: color-mix(in srgb, var(--warn) 30%, transparent);
+  color: var(--warn);
+}
+
+.bootstrap-step-index {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--surface-3);
+  font-size: 0.7rem;
+}
+
+.bootstrap-steps li.active .bootstrap-step-index {
+  background: var(--text);
+  color: var(--bg);
+}
+
+.bootstrap-steps li.done .bootstrap-step-index {
+  background: var(--ok-bg);
+}
+
+.bootstrap-step-index svg {
+  width: 13px;
+  height: 13px;
+  stroke-width: 2.2;
+}
+
+.bootstrap-progress {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.bootstrap-progress .progress-track {
+  height: 6px;
+}
+
+.bootstrap-error {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid color-mix(in srgb, var(--bad) 20%, transparent);
+  border-radius: 10px;
+  background: var(--bad-bg);
+  color: var(--bad);
+  font-size: 0.8125rem;
+  line-height: 1.55;
+}
+
+.vm-action-guide {
+  display: grid;
+  gap: 0.85rem;
+  padding: 0.9rem;
+  border: 1px solid color-mix(in srgb, var(--warn) 24%, transparent);
+  border-radius: 12px;
+  background: var(--warn-bg);
+}
+
+.vm-action-guide > div:first-child > p {
+  margin: 0.3rem 0 0;
+}
+
+.vm-host-issues,
+.vm-recovery-steps {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vm-host-issues > li,
+.vm-recovery-steps > li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  padding: 0.65rem;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+}
+
+.vm-host-issues > li > span,
+.vm-recovery-steps > li > span {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--warn-bg);
+  color: var(--warn);
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.vm-host-issues p,
+.vm-recovery-steps p {
+  margin: 0.25rem 0 0;
+  color: var(--text-2);
+  font-size: 0.8125rem;
+  line-height: 1.55;
+}
+
+.vm-host-issues small {
+  display: block;
+  margin-top: 0.35rem;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.vm-system-note {
+  padding: 0.7rem;
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+
+.bootstrap-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.bootstrap-actions {
+  flex-wrap: wrap;
+}
+
+.bootstrap-diagnostics {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.bootstrap-diagnostics summary {
+  cursor: pointer;
+}
+
+.bootstrap-diagnostics dl {
+  width: min(420px, 80vw);
+  padding: 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.runtime-advanced {
+  margin: 0.8rem 0;
+}
+
+.runtime-advanced > summary {
+  color: var(--text-2);
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+@media (max-width: 1000px) {
+  .binding-form.inline-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .binding-form .compact-toggle {
+    justify-self: start;
+  }
+
+  .bootstrap-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .project-summary,
+  .wizard-vm-preview ol {
+    grid-template-columns: 1fr;
+  }
+
+  .project-list-heading,
+  .vm-empty-guide,
+  .bootstrap-footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .project-list-heading > button {
+    flex: 0 0 auto;
+  }
+
+  .project-tabs button {
+    flex-basis: min(230px, 78vw);
+  }
+
+  .binding-form.inline-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .binding-form .compact-toggle {
+    justify-self: stretch;
+  }
+
+  .bootstrap-heading {
+    flex-wrap: wrap;
+  }
+
+  .setup-status {
+    margin-left: 50px;
+  }
+
+  .app-main > .wizard {
+    margin-top: 0.5rem;
+  }
+}
+
+@media (max-width: 560px) {
+  .select-trigger {
+    min-height: 44px;
+    font-size: 1rem;
+  }
+
+  .select-trigger.composer-model {
+    min-height: 44px;
+    font-size: 0.8125rem;
+  }
+
+  .drop-zone {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .drop-zone > button {
+    grid-column: 2;
+    grid-row: auto;
+    margin-top: 0.5rem;
+  }
+
+  .wizard-steps h1,
+  .wizard-heading h2 {
+    font-size: 1.4rem;
+  }
+
+  .bootstrap-banner.setup-guide,
+  .app-main:not(.session-active) > .bootstrap-banner.setup-guide {
+    width: calc(100% - 20px);
+    padding: 0.85rem;
+  }
+
+  .bootstrap-steps {
+    grid-template-columns: 1fr;
+  }
+
+  .bootstrap-actions,
+  .bootstrap-actions > button {
+    width: 100%;
+  }
+
+  .bootstrap-actions > .link-button {
+    justify-content: center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .select-menu {
+    animation: none;
+  }
+
+  .select-chevron,
+  .select-trigger,
+  .project-tabs button {
+    transition: none;
+  }
+}

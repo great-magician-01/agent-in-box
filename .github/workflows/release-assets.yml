@@ -170,7 +170,9 @@ jobs:
           node - <<'NODE'
           const fs = require("node:fs");
           const qemu = JSON.parse(fs.readFileSync("runtime-assets/qemu-windows-x64.json", "utf8"));
-          const guest = JSON.parse(fs.readFileSync("runtime-assets/manifest.json", "utf8"));
+          const guest = JSON.parse(
+            fs.readFileSync("runtime-assets/guest-runtime/linux-amd64/manifest.json", "utf8"),
+          );
           fs.writeFileSync(
             "runtime-assets/runtime-assets.json",
             `${JSON.stringify({ schemaVersion: 1, qemu: { "windows-x64": qemu }, guestRuntime: guest }, null, 2)}\n`,

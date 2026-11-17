@@ -259,6 +259,7 @@ pnpm release:checksums        # release/SHA256SUMS 与 build-manifest.json
 - `pnpm package:desktop:dir` 生成当前平台目录包；`pnpm package:desktop:win:portable` 可在 Linux / WSL 直接构建 Windows portable exe；`pnpm package:desktop:win` 生成 per-user NSIS 安装包，需要 Windows 或可用的 wine。
 - 推送 `vX.Y.Z` tag 后，`.github/workflows/release-assets.yml` 校验 tag 与所有产品包版本一致，构建 Windows x64 NSIS、Linux x64 AppImage、QEMU 与 Guest Runtime，生成 `desktop-SHA256SUMS` 并上传到同名 GitHub Release。桌面安装包的平台代码签名不在 CI 中自动完成，仍需按外部证书流程处理。当前发布矩阵不包含 macOS，因为 Darwin VM Supervisor 与运行时资产尚未补齐。
 - 日常版本由 Release Please 维护：`fix` 提升 patch、`feat` 提升 minor、带 `!` / `BREAKING CHANGE` 的提交提升 major。它会在 `main` 上维护 Release PR；合并该 PR 后自动更新产品包版本与 `CHANGELOG.md`、创建对应 tag / Release，并显式调度同一个资产发布工作流。无需为机器人配置个人访问令牌。
+- 如果构建 artifact 已成功但最后的 Release 汇总失败，可手动运行 `Release assets`，填写目标 `tag` 和原运行的 `artifacts_run_id`，只重新汇总并上传已验证产物，不重复构建。
 - NSIS 不申请管理员权限，安装后提示首次启动向导；卸载默认保留 VM、数据库和用户数据。只有用户明确选择删除且目录带有数据根标记时，才调用清理工具。
 - 更新使用 HTTPS Manifest：响应为 `{ manifest, signature }`，`signature` 是 `manifest` 规范化 JSON 的 Ed25519 签名；桌面端用 `AGENT_IN_BOX_UPDATE_PUBLIC_KEY`（PEM 或 base64 SPKI）或安装包内 `update-public-key.pem` 校验后才下载。更新源只从 `AGENT_IN_BOX_UPDATE_FEED` 读取（开发时可设 `AGENT_IN_BOX_ALLOW_CUSTOM_UPDATE_FEED=1`），UI 不再接受更新源编辑；安装前必须原生确认，随后流式下载、SHA-256 校验、备份数据库与已安装资源，失败可回滚。Windows 上替换 `app.asar` 等资源可能受文件锁影响，干净安装环境的升级 / 回滚仍需验收。
 - 受限网络下可设置镜像：

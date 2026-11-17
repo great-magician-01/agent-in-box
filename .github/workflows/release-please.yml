@@ -38,4 +38,4 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ steps.release.outputs.tag_name }}
-        run: gh workflow run release-assets.yml --ref "$RELEASE_TAG"
+        run: gh workflow run release-assets.yml --ref main -f tag="$RELEASE_TAG"

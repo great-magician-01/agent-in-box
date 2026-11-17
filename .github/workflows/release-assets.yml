@@ -4,22 +4,33 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to build and publish, for example v0.1.0
+        required: true
+        type: string
+      artifacts_run_id:
+        description: Optional prior run ID whose verified artifacts should be republished without rebuilding
+        required: false
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-assets-${{ github.ref }}
+  group: release-assets-${{ inputs.tag || github.ref }}
   cancel-in-progress: false
 
 jobs:
   verify:
     name: Verify tagged commit
+    if: ${{ inputs.artifacts_run_id == '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.tag || github.ref }}
           persist-credentials: false
       - uses: pnpm/action-setup@v4
         with:
@@ -34,7 +45,7 @@ jobs:
           cache: true
       - name: Validate release tag and package versions
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: node scripts/check-release-version.mjs "$RELEASE_TAG"
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
@@ -45,6 +56,7 @@ jobs:
   desktop:
     name: Desktop ${{ matrix.name }}
     needs: verify
+    if: ${{ inputs.artifacts_run_id == '' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 75
     strategy:
@@ -62,6 +74,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.tag || github.ref }}
           persist-credentials: false
       - uses: pnpm/action-setup@v4
         with:
@@ -92,11 +105,13 @@ jobs:
   qemu-windows:
     name: QEMU Windows toolchain
     needs: verify
+    if: ${{ inputs.artifacts_run_id == '' }}
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.tag || github.ref }}
           persist-credentials: false
       - uses: msys2/setup-msys2@v2
         with:
@@ -117,11 +132,13 @@ jobs:
   guest-runtime:
     name: Linux guest runtime
     needs: verify
+    if: ${{ inputs.artifacts_run_id == '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.tag || github.ref }}
           persist-credentials: false
       - uses: pnpm/action-setup@v4
         with:
@@ -156,6 +173,18 @@ jobs:
   publish:
     name: Publish GitHub Release assets
     needs: [desktop, qemu-windows, guest-runtime]
+    if: >-
+      ${{
+        always() &&
+        (
+          inputs.artifacts_run_id != '' ||
+          (
+            needs.desktop.result == 'success' &&
+            needs['qemu-windows'].result == 'success' &&
+            needs['guest-runtime'].result == 'success'
+          )
+        )
+      }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -163,16 +192,35 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
+          run-id: ${{ inputs.artifacts_run_id || github.run_id }}
           merge-multiple: true
           path: runtime-assets
       - name: Build runtime-assets.json
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           node - <<'NODE'
           const fs = require("node:fs");
+          const tag = process.env.RELEASE_TAG;
+          if (!/^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(tag)) {
+            throw new Error(`Invalid semantic version release tag: ${tag}`);
+          }
+          const version = tag.slice(1);
           const qemu = JSON.parse(fs.readFileSync("runtime-assets/qemu-windows-x64.json", "utf8"));
           const guest = JSON.parse(
             fs.readFileSync("runtime-assets/guest-runtime/linux-amd64/manifest.json", "utf8"),
           );
+          if (guest.guestRuntimeVersion !== version) {
+            throw new Error(`Guest runtime version ${guest.guestRuntimeVersion} does not match ${tag}`);
+          }
+          for (const file of [
+            `agent-in-box-${version}-windows-x64.exe`,
+            `agent-in-box-${version}-linux-x64.AppImage`,
+          ]) {
+            if (!fs.existsSync(`runtime-assets/${file}`)) {
+              throw new Error(`Desktop artifact does not match ${tag}: ${file}`);
+            }
+          }
           fs.writeFileSync(
             "runtime-assets/runtime-assets.json",
             `${JSON.stringify({ schemaVersion: 1, qemu: { "windows-x64": qemu }, guestRuntime: guest }, null, 2)}\n`,
@@ -188,7 +236,7 @@ jobs:
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
+          tag_name: ${{ inputs.tag || github.ref_name }}
           generate_release_notes: ${{ github.event_name == 'push' }}
           files: |
             runtime-assets/qemu-windows-x64.tar.gz

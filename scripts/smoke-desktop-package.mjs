@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
@@ -24,7 +24,7 @@ function executablePath() {
       "Agent-in-Box",
     );
   }
-  return path.join(root, "release", "linux-unpacked", "@agent-in-boxdesktop");
+  return path.join(root, "release", "linux-unpacked", "agent-in-box");
 }
 
 async function main() {
@@ -70,6 +70,11 @@ async function main() {
     throw new Error(`desktop smoke timed out\n${output.slice(-4000)}`);
   }
 
+  if (!existsSync(reportPath)) {
+    throw new Error(
+      `desktop exited with ${String(exitCode)} before writing a smoke report\n${output.slice(-4000)}`,
+    );
+  }
   const report = JSON.parse(readFileSync(reportPath, "utf8"));
   console.log(JSON.stringify(report, null, 2));
   assert.equal(report.ok, true, "control plane must be running in the packaged app");
@@ -82,7 +87,7 @@ async function main() {
   );
   assert.match(
     report.renderer.text,
-    /首次启动向导|环境检查/,
+    /两项设置，即可开始/,
     "React renderer must show the first-run wizard for a fresh data directory",
   );
   console.log("[desktop-smoke] packaged desktop shell passed");

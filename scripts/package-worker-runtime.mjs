@@ -67,7 +67,7 @@ try {
         version,
         private: true,
         main: "dist/worker-rpc-main.js",
-        dependencies: { "@agent-in-box/plugin-runtime": "0.1.0" },
+        dependencies: { "@agent-in-box/plugin-runtime": version },
       },
       null,
       2,

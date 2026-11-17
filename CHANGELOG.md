@@ -1,0 +1,58 @@
+# Changelog
+
+## [0.2.0](https://github.com/great-magician-01/agent-in-box/compare/v0.1.0...v0.2.0) (2026-11-17)
+
+
+### Features
+
+* add authenticated x11 guest agent and provider integration tests ([429d370](https://github.com/great-magician-01/agent-in-box/commit/429d370706854fe98be2c2775ea65d0fae780a71))
+* add brand logo, MIT license, and rewrite README ([#4](https://github.com/great-magician-01/agent-in-box/issues/4)) ([6611163](https://github.com/great-magician-01/agent-in-box/commit/6611163fca900c94c35667bc902ddeeb49897d9f))
+* add model profiles, observer sidebar and one-click Linux VM ([2a14db9](https://github.com/great-magician-01/agent-in-box/commit/2a14db97d531e048b3940cdd10664803e7358aaa))
+* add pi worker engine adapter and real task validation ([e58e98d](https://github.com/great-magician-01/agent-in-box/commit/e58e98d18192f3ea7f82fecac92aa0b44256d0c6))
+* add qemu provider and desktop display input validation ([4385b32](https://github.com/great-magician-01/agent-in-box/commit/4385b327b48ed69601c7e6c08d22aaaf0070d190))
+* add waiting_human task state and human verification storage ([bc189e5](https://github.com/great-magician-01/agent-in-box/commit/bc189e5d6759fe8fd7a5af293deb726c696952c6))
+* codex-style chat shell, theme switch, sidebar sessions ([cea7c8d](https://github.com/great-magician-01/agent-in-box/commit/cea7c8de2556ecb6af5217e5e1f56b923e1edc97))
+* complete phase 0 validation and freeze linux stack ([d0778a0](https://github.com/great-magician-01/agent-in-box/commit/d0778a09fe1181fa080a56e50fec2866d3fcdbd3))
+* complete phase 1 protocol and persistence layer ([50f9855](https://github.com/great-magician-01/agent-in-box/commit/50f9855e2ee71b32f24c41daf286c6be7d2145b4))
+* complete phase 10 local feishu and qq bots ([097f35a](https://github.com/great-magician-01/agent-in-box/commit/097f35ad91197bd6cfb5641efb31614ed25b310c))
+* complete phase 11 web auth and desktop experience ([8a48959](https://github.com/great-magician-01/agent-in-box/commit/8a489598bf250053f3ceed73524bf4498cba8860))
+* complete phase 12 security recovery and acceptance ([561a873](https://github.com/great-magician-01/agent-in-box/commit/561a8735e1d0ca02e03080b4dd007a7b3b4180d7))
+* complete phase 13 windows vm and mixed os acceptance ([c96bf15](https://github.com/great-magician-01/agent-in-box/commit/c96bf1514e8bd0947bd7bcf4625f65b26e2bc49c))
+* complete phase 2 electron shell onboarding and storage manager ([7db37b6](https://github.com/great-magician-01/agent-in-box/commit/7db37b665486035093a8f832bfe5889529516282))
+* complete phase 3 VM lifecycle and add CI ([6c0c327](https://github.com/great-magician-01/agent-in-box/commit/6c0c327e2e9a89a686bc1215c0b3162811b62398))
+* complete phase 4 guest console and execution leases ([60470e8](https://github.com/great-magician-01/agent-in-box/commit/60470e8f7c42445d617bd2992d44f2d4b9b5f075))
+* complete phase 5 projects and task board ([b0f226f](https://github.com/great-magician-01/agent-in-box/commit/b0f226ffe93ab9c5ec19ca5ee8888c88376bf891))
+* complete phase 6 worker runtime and model broker ([3c770a6](https://github.com/great-magician-01/agent-in-box/commit/3c770a6a3a1c2264d18d5930ef8d6ab9861d139c))
+* complete phase 7 computer use executor ([56b7443](https://github.com/great-magician-01/agent-in-box/commit/56b74430bebdf1a91be332658a628bff2c61f40b))
+* complete phase 8 router registry and archive ([90683ab](https://github.com/great-magician-01/agent-in-box/commit/90683ab978bc72e5098268f3246aa6eaf069d2c3))
+* complete phase 9 resource scheduling and shared environments ([bb666ac](https://github.com/great-magician-01/agent-in-box/commit/bb666ac34260b80b72c941b207b84463d72ceae6))
+* configurable model input modalities with worker image guard ([c0a5bf9](https://github.com/great-magician-01/agent-in-box/commit/c0a5bf9228af114a6312418ff7fd7aaa50f65f99))
+* domestic provider presets with fully custom providers ([6631b65](https://github.com/great-magician-01/agent-in-box/commit/6631b6556ae369700eb8481b6c2dbb1602994979))
+* integrate worker subagents and per-project MCP ([171e739](https://github.com/great-magician-01/agent-in-box/commit/171e739e3e3f689afc48ed83cde8826081c55a6f))
+* land on the session view and clean up desktop chrome ([d6123f3](https://github.com/great-magician-01/agent-in-box/commit/d6123f3f80cce4a804d4877cdbf73ce567caf8a7))
+* modernize project UI and VM setup guidance ([#8](https://github.com/great-magician-01/agent-in-box/issues/8)) ([53e8788](https://github.com/great-magician-01/agent-in-box/commit/53e8788b8592bba924202c551852752bb95d2514))
+* notify humans about human verification requests ([d45d58f](https://github.com/great-magician-01/agent-in-box/commit/d45d58fedead131757bcb64b596bb84e35e51830))
+* refine conversation-first workspace UI ([#7](https://github.com/great-magician-01/agent-in-box/issues/7)) ([870bd44](https://github.com/great-magician-01/agent-in-box/commit/870bd44e81972298905235f921db11f212569501))
+* report human verification from the computer-use worker ([5fd3053](https://github.com/great-magician-01/agent-in-box/commit/5fd3053b0a930a9f0423d823bb2c1502b07eb6c7))
+* show human verification panel in task details ([8d9d10d](https://github.com/great-magician-01/agent-in-box/commit/8d9d10de9f4bbdc30255dc00ca7cf2bae2f2777b))
+* stop worker turn on waiting_human and resume after resolution ([8b15b60](https://github.com/great-magician-01/agent-in-box/commit/8b15b601335ff843e6a94bf69685cd1efc05f3cf))
+* 零门槛初始化与 Agent 插件平台 ([#5](https://github.com/great-magician-01/agent-in-box/issues/5)) ([3d8a9f3](https://github.com/great-magician-01/agent-in-box/commit/3d8a9f3bfb8adeb5635bfffc3ee924f2239870a7))
+
+
+### Bug Fixes
+
+* address phase 13 static review findings ([#3](https://github.com/great-magician-01/agent-in-box/issues/3)) ([26e4902](https://github.com/great-magician-01/agent-in-box/commit/26e49029f8459b0e12dfe71f0e9d10a462941ca4))
+* align phase 5 restart smoke with worker restart recovery ([39819a9](https://github.com/great-magician-01/agent-in-box/commit/39819a94ec78f8c8a958f2a4daf8db26487b575f))
+* **ci:** make agent-runtime tests portable on Windows ([#1](https://github.com/great-magician-01/agent-in-box/issues/1)) ([5d36d6d](https://github.com/great-magician-01/agent-in-box/commit/5d36d6d643fd23610731d4db63457413c480c196))
+* **ci:** stabilize cancel test and repair deploy symlinks ([cbdb401](https://github.com/great-magician-01/agent-in-box/commit/cbdb401a7271da84002ee051a6dc92f7fe101746))
+* **desktop:** make autostart entry assertion portable on Windows ([#2](https://github.com/great-magician-01/agent-in-box/issues/2)) ([29cdaff](https://github.com/great-magician-01/agent-in-box/commit/29cdafff654b1c2b4ccae899a57a3129c5f9c11f))
+* drain bot outbound before duplicate event assertion ([47b61d1](https://github.com/great-magician-01/agent-in-box/commit/47b61d162dd0865941a9b1b59e893e2e3fd7c03b))
+* harden runtime failure and data-integrity paths ([330eb9f](https://github.com/great-magician-01/agent-in-box/commit/330eb9f3b6f41dbad7b983855839429fcf986387))
+* harden trust boundaries and lifecycle safety ([#6](https://github.com/great-magician-01/agent-in-box/issues/6)) ([448d8dc](https://github.com/great-magician-01/agent-in-box/commit/448d8dc13f999f92285ef69f533d383c0aa223e2))
+* keep the workspace full-width when the sidebar collapses ([a8dfa0e](https://github.com/great-magician-01/agent-in-box/commit/a8dfa0e1e8a5f152e282ebe2f1acfb32002f64a9))
+* make lease renewal test clock deterministic ([a0c6534](https://github.com/great-magician-01/agent-in-box/commit/a0c65345b6f0fd9ee497e6ab600a5d9bf64e77bb))
+* make Windows tests and runtime packaging tar portable ([3eb1ed4](https://github.com/great-magician-01/agent-in-box/commit/3eb1ed4f8efb3c9e10e8d0f30ad2b786ec272b80))
+* refresh provider presets and harden Windows host checks ([9ffdb40](https://github.com/great-magician-01/agent-in-box/commit/9ffdb40215598955a81e378190cb5f03ac2ac870))
+* repair linux process evidence and windows host probe timeout ([e4eb1a6](https://github.com/great-magician-01/agent-in-box/commit/e4eb1a6c34c8c751e87f93c64df8726f2433160b))
+* repair real router-worker model and lease integration ([3bed663](https://github.com/great-magician-01/agent-in-box/commit/3bed663be28c021137c69f8494524e4a75097c7e))
+* start sqlite transactions with begin immediate ([eb7821a](https://github.com/great-magician-01/agent-in-box/commit/eb7821a1816933b071840a5ee4597d372ee93ac9))

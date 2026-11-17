@@ -1,0 +1,25 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "packages": {
+    ".": {
+      "release-type": "node",
+      "package-name": "agent-in-box",
+      "include-component-in-tag": false,
+      "include-v-in-tag": true,
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        { "type": "json", "path": "apps/desktop/package.json", "jsonpath": "$.version" },
+        { "type": "json", "path": "apps/web/package.json", "jsonpath": "$.version" },
+        { "type": "json", "path": "packages/agent-runtime/package.json", "jsonpath": "$.version" },
+        { "type": "json", "path": "packages/bot-connector/package.json", "jsonpath": "$.version" },
+        { "type": "json", "path": "packages/computer-use/package.json", "jsonpath": "$.version" },
+        { "type": "json", "path": "packages/config/package.json", "jsonpath": "$.version" },
+        { "type": "json", "path": "packages/domain/package.json", "jsonpath": "$.version" },
+        { "type": "json", "path": "packages/plugin-runtime/package.json", "jsonpath": "$.version" },
+        { "type": "json", "path": "packages/protocol/package.json", "jsonpath": "$.version" },
+        { "type": "json", "path": "packages/ui/package.json", "jsonpath": "$.version" },
+        { "type": "json", "path": "services/control-plane/package.json", "jsonpath": "$.version" }
+      ]
+    }
+  }
+}

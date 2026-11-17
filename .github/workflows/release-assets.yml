@@ -1,4 +1,4 @@
-name: Release runtime assets
+name: Release assets
 
 on:
   push:
@@ -7,6 +7,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: release-assets-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   verify:
@@ -28,11 +32,62 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Validate release tag and package versions
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node scripts/check-release-version.mjs "$RELEASE_TAG"
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
       - run: go vet ./...
+
+  desktop:
+    name: Desktop ${{ matrix.name }}
+    needs: verify
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            os: windows-latest
+            artifact: release/agent-in-box-*-windows-x64.exe
+            smoke: pnpm smoke:desktop
+          - name: linux-x64
+            os: ubuntu-latest
+            artifact: release/agent-in-box-*-linux-x64.AppImage
+            smoke: xvfb-run -a pnpm smoke:desktop
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: pnpm install --frozen-lockfile
+      - name: Build self-contained desktop installer
+        run: pnpm package:desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - name: Smoke test packaged desktop
+        run: ${{ matrix.smoke }}
+      - name: Upload desktop installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.name }}
+          path: ${{ matrix.artifact }}
+          if-no-files-found: error
+          retention-days: 7
 
   qemu-windows:
     name: QEMU Windows toolchain
@@ -99,9 +154,10 @@ jobs:
           if-no-files-found: error
 
   publish:
-    name: Publish runtime asset manifest
-    needs: [qemu-windows, guest-runtime]
+    name: Publish GitHub Release assets
+    needs: [desktop, qemu-windows, guest-runtime]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: write
     steps:
@@ -120,9 +176,18 @@ jobs:
             `${JSON.stringify({ schemaVersion: 1, qemu: { "windows-x64": qemu }, guestRuntime: guest }, null, 2)}\n`,
           );
           NODE
+      - name: Checksum desktop installers
+        working-directory: runtime-assets
+        run: >-
+          sha256sum
+          agent-in-box-*-windows-x64.exe
+          agent-in-box-*-linux-x64.AppImage
+          > desktop-SHA256SUMS
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: ${{ github.event_name == 'push' }}
           files: |
             runtime-assets/qemu-windows-x64.tar.gz
             runtime-assets/qemu-windows-x64.tar.gz.sha256
@@ -130,4 +195,7 @@ jobs:
             runtime-assets/guest-runtime-linux-amd64.tar.gz
             runtime-assets/guest-runtime-linux-amd64.tar.gz.sha256
             runtime-assets/runtime-assets.json
+            runtime-assets/agent-in-box-*-windows-x64.exe
+            runtime-assets/agent-in-box-*-linux-x64.AppImage
+            runtime-assets/desktop-SHA256SUMS
           fail_on_unmatched_files: true

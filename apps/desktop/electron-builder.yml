@@ -35,13 +35,14 @@ extraResources:
 
 asar: true
 compression: normal
+afterPack: ../../scripts/electron-after-pack.mjs
 
 win:
   target:
     - target: nsis
       arch:
         - x64
-  artifactName: agent-in-box-${version}-${arch}.${ext}
+  artifactName: agent-in-box-${version}-windows-${arch}.${ext}
   icon: build/icon.ico
 
 nsis:
@@ -61,7 +62,11 @@ nsis:
 
 linux:
   target:
-    - AppImage
+    - target: AppImage
+      arch:
+        - x64
+  artifactName: agent-in-box-${version}-linux-x64.${ext}
+  executableName: agent-in-box
   category: Utility
   icon: build/icon.png
 

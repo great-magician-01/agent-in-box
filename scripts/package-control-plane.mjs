@@ -58,8 +58,9 @@ if (restore.status !== 0) {
 }
 
 // electron-builder always excludes folders literally named node_modules from
-// extraResources. Rename the pnpm deploy tree and expose it through NODE_PATH;
-// the internal relative symlinks keep working because .pnpm moves with it.
+// extraResources. Stage the pnpm deploy tree as runtime_modules; the afterPack
+// hook restores the standard name so CommonJS and ESM both resolve packages.
+// Expose it through NODE_PATH as a fallback for CommonJS dependencies.
 const deployedModules = path.join(target, "node_modules");
 const runtimeModules = path.join(target, "runtime_modules");
 if (existsSync(deployedModules)) {

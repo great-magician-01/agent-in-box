@@ -401,7 +401,7 @@ const supervisor = new ControlPlaneSupervisor({
     ...(app.isPackaged
       ? {
           NODE_PATH: [
-            path.join(process.resourcesPath, "control-plane", "runtime_modules"),
+            path.join(process.resourcesPath, "control-plane", "node_modules"),
             process.env.NODE_PATH,
           ]
             .filter(Boolean)

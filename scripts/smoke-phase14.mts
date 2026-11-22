@@ -10,6 +10,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { smokeAuthHeaders } from "./smoke-auth.mjs";
 import type { ModelConfigurationView, RouterView, VmInstanceView } from "@agent-in-box/protocol";
 
+import { writeSmokeToken } from "./smoke-token.mjs";
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const temporary = await mkdtemp(path.join(os.tmpdir(), "agent-in-box-phase14-"));
 const configDirectory = path.join(temporary, "config");
@@ -81,24 +82,28 @@ async function waitForHealth(): Promise<void> {
 
 async function startControlPlane(): Promise<void> {
   await writeFile(path.join(temporary, "provisioning.key"), provisioningSecret, { mode: 0o600 });
-  const child = spawn(process.execPath, [path.join(repository, "services/control-plane/dist/main.js")], {
-    cwd: repository,
-    env: {
-      ...process.env,
-      CONTROL_PLANE_HOST: "127.0.0.1",
-      CONTROL_PLANE_PORT: String(controlPlanePort),
-      AGENT_IN_BOX_DATA_ROOT: temporary,
-      AGENT_IN_BOX_CONFIG_DIR: configDirectory,
-      AGENT_IN_BOX_PROVISIONING_PORT: String(provisioningPort),
-      AGENT_IN_BOX_GUEST_RUNTIME_DIR: path.join(
-        repository,
-        "release",
-        "guest-runtime",
-        "linux-amd64",
-      ),
+  const child = spawn(
+    process.execPath,
+    [path.join(repository, "services/control-plane/dist/main.js")],
+    {
+      cwd: repository,
+      env: {
+        ...process.env,
+        CONTROL_PLANE_HOST: "127.0.0.1",
+        CONTROL_PLANE_PORT: String(controlPlanePort),
+        AGENT_IN_BOX_DATA_ROOT: temporary,
+        AGENT_IN_BOX_CONFIG_DIR: configDirectory,
+        AGENT_IN_BOX_PROVISIONING_PORT: String(provisioningPort),
+        AGENT_IN_BOX_GUEST_RUNTIME_DIR: path.join(
+          repository,
+          "release",
+          "guest-runtime",
+          "linux-amd64",
+        ),
+      },
+      stdio: ["ignore", "inherit", "inherit"],
     },
-    stdio: ["ignore", "inherit", "inherit"],
-  });
+  );
   children.push(child);
   await waitForHealth();
 }
@@ -112,12 +117,8 @@ try {
   const now = new Date().toISOString();
   const storageRoot = path.join(temporary, "vms", vmId);
   await mkdir(storageRoot, { recursive: true, mode: 0o700 });
-  await writeFile(path.join(storageRoot, "guest-agent.token"), "phase14-guest-token", {
-    mode: 0o600,
-  });
-  await writeFile(path.join(storageRoot, "worker-rpc.token"), "phase14-worker-token", {
-    mode: 0o600,
-  });
+  await writeSmokeToken(path.join(storageRoot, "guest-agent.token"), "phase14-guest-token");
+  await writeSmokeToken(path.join(storageRoot, "worker-rpc.token"), "phase14-worker-token");
   await seed.db
     .insertInto("images")
     .values({

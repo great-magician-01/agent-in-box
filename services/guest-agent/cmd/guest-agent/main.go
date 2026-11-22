@@ -34,7 +34,7 @@ func defaultGuestRoots() string {
 			roots = append(roots, temp)
 		}
 	} else {
-		roots = append(roots, "/home", "/tmp")
+		roots = append(roots, "/home/aib-worker", "/var/lib/agent-in-box/workspaces")
 	}
 	return strings.Join(roots, string(os.PathListSeparator))
 }
@@ -94,19 +94,10 @@ func main() {
 	verifyRoots := flag.String("verify-roots", defaultVerifyRoots(), "path-list-separated absolute guest roots allowed for read-only completion file evidence (';' on Windows, ':' on Linux)")
 	workspaceRoots := flag.String("workspace-roots", defaultWorkspaceRoots(), "path-list-separated absolute guest roots allowed for project workspace archive and restore")
 	maxWorkspaceArchiveBytes := flag.Int64("workspace-max-bytes", 512<<20, "largest workspace archive accepted or produced (capped at 512 MiB)")
-	allowedClientCIDRs := flag.String("allowed-client-cidrs", "", "comma-separated client CIDRs allowed to call the authenticated API; empty allows any peer")
+	allowedClientCIDRs := flag.String("allowed-client-cidrs", "10.0.2.2/32", "comma-separated client CIDRs allowed to call the authenticated API; empty is rejected")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	token := ""
-	if *tokenFile != "" {
-		data, err := os.ReadFile(*tokenFile)
-		if err != nil {
-			logger.Error("read guest token", "error", err)
-			os.Exit(1)
-		}
-		token = strings.TrimSpace(string(data))
-	}
 
 	desktop, err := guestagent.NewDesktop(*display)
 	if err != nil {
@@ -118,8 +109,9 @@ func main() {
 	}
 
 	healthHandler := health.NewHandler("guest-agent", version, "")
+	clientCIDRs := splitCommaList(*allowedClientCIDRs)
 	rpc := guestagent.NewServerWithOptions(guestagent.ServerOptions{
-		Token:                    token,
+		Token:                    "",
 		TokenFile:                *tokenFile,
 		AgentVersion:             version,
 		Desktop:                  desktop,
@@ -130,8 +122,16 @@ func main() {
 		VerifyRoots:              splitVerifyRoots(*verifyRoots),
 		WorkspaceRoots:           splitVerifyRoots(*workspaceRoots),
 		MaxWorkspaceArchiveBytes: *maxWorkspaceArchiveBytes,
-		AllowedClientCIDRs:       splitCommaList(*allowedClientCIDRs),
+		AllowedClientCIDRs:       clientCIDRs,
 	})
+	if len(clientCIDRs) == 0 {
+		logger.Error("invalid guest-agent security configuration", "error", "at least one allowed client CIDR is required")
+		os.Exit(1)
+	}
+	if err := rpc.Validate(); err != nil {
+		logger.Error("invalid guest-agent security configuration", "error", err)
+		os.Exit(1)
+	}
 	mux := http.NewServeMux()
 	mux.Handle("/healthz", healthHandler)
 	mux.Handle("/readyz", healthHandler)
@@ -141,6 +141,10 @@ func main() {
 		Addr:              *addr,
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Minute,
+		WriteTimeout:      15 * time.Minute,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    32 * 1024,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

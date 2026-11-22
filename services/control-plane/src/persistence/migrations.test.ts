@@ -66,6 +66,28 @@ describe("database migrations", () => {
     expect(JSON.parse(project.agent_config_json)).toEqual({ mcpEnabled: false });
   });
 
+  it("adds execution generation and maintenance lease fields", () => {
+    const columns = (table: string): string[] =>
+      (ctx.app.sqlite.pragma(`table_info(${table})`) as Array<{ name: string }>).map(
+        (column) => column.name,
+      );
+
+    expect(columns("workers")).toContain("current_execution_attempt");
+    expect(columns("tasks")).toContain("target_worker_id");
+    expect(columns("vm_leases")).toContain("preemptible");
+    for (const table of [
+      "task_execution_state",
+      "model_tokens",
+      "cua_tokens",
+      "cua_actions",
+      "cua_approvals",
+      "cua_screenshots",
+      "human_verifications",
+    ]) {
+      expect(columns(table)).toContain("execution_attempt");
+    }
+  });
+
   it("is idempotent", async () => {
     const applied = await ctx.app.migrate();
     expect(applied).toEqual([]);

@@ -60,10 +60,7 @@ async function stopChild(child: ChildProcess | undefined, timeoutMs = 15_000): P
   if (!child || child.exitCode !== null || child.signalCode !== null) return;
   const exited = once(child, "exit");
   child.kill("SIGTERM");
-  const done = await Promise.race([
-    exited.then(() => true),
-    delay(timeoutMs).then(() => false),
-  ]);
+  const done = await Promise.race([exited.then(() => true), delay(timeoutMs).then(() => false)]);
   if (!done && child.exitCode === null && child.signalCode === null) {
     child.kill("SIGKILL");
     await once(child, "exit");
@@ -183,9 +180,7 @@ async function createNotificationTask(): Promise<string> {
     pathToFileURL(path.join(repository, "services/control-plane/dist", name)).href;
   const { AppDatabase } = await import(dist("persistence/database.js"));
   const { TaskRepository } = await import(dist("persistence/repositories/task-repository.js"));
-  const { OutboxRepository } = await import(
-    dist("persistence/repositories/outbox-repository.js")
-  );
+  const { OutboxRepository } = await import(dist("persistence/repositories/outbox-repository.js"));
   const { TaskService } = await import(dist("persistence/services/task-service.js"));
   const database = AppDatabase.open({ filename: path.join(temporary, "agent-in-box.sqlite") });
   try {
@@ -194,8 +189,7 @@ async function createNotificationTask(): Promise<string> {
       new TaskRepository(database.db),
       new OutboxRepository(database.db),
     );
-    const vmId = (await database.db.selectFrom("vm_instances").select("id").executeTakeFirst())
-      ?.id;
+    const vmId = (await database.db.selectFrom("vm_instances").select("id").executeTakeFirst())?.id;
     if (!vmId) throw new Error("seeded VM missing");
     const conversation = await database.db
       .selectFrom("conversations")
@@ -431,9 +425,11 @@ try {
     body: "{}",
   });
   assert.equal(marked.status, 200);
-  const afterRead = (await request("/api/v1/notifications", {
-    headers: { cookie: cookie.cookie },
-  })).body as { unreadCount: number };
+  const afterRead = (
+    await request("/api/v1/notifications", {
+      headers: { cookie: cookie.cookie },
+    })
+  ).body as { unreadCount: number };
   assert.equal(afterRead.unreadCount, 0);
   const dismissed = await request(`/api/v1/notifications/${notification.id}/dismiss`, {
     method: "POST",
@@ -458,9 +454,11 @@ try {
   const uploaded = upload.body as { id: string; originalName: string; sha256: string };
   assert.equal(uploaded.originalName, "周报 2026.txt");
   assert.equal(uploaded.sha256, createHash("sha256").update(uploadBody).digest("hex"));
-  const list = (await request(`/api/v1/inbox?projectId=${projectId}`, {
-    headers: bearerHeaders(),
-  })).body as { items: Array<{ id: string }> };
+  const list = (
+    await request(`/api/v1/inbox?projectId=${projectId}`, {
+      headers: bearerHeaders(),
+    })
+  ).body as { items: Array<{ id: string }> };
   assert.equal(list.items.length, 1);
   const download = await fetch(`${baseUrl}/api/v1/inbox/${uploaded.id}/content`, {
     headers: bearerHeaders(),

@@ -146,6 +146,7 @@ export class ProvisioningService implements OnModuleInit, OnModuleDestroy {
         provisioning_message: message.slice(0, 2000),
       })
       .where("id", "=", vmId)
+      .where("provisioning_state", "in", ["none", "waiting", "installing", "failed"])
       .execute();
   }
 

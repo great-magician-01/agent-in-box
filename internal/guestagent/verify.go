@@ -1,11 +1,11 @@
 package guestagent
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -66,6 +66,8 @@ func (s *Server) verify(w http.ResponseWriter, r *http.Request) {
 	}
 	timeout := s.effectiveActionTimeout(requestedTimeout)
 	deadline := time.Now().Add(timeout)
+	ctx, cancel := context.WithDeadline(r.Context(), deadline)
+	defer cancel()
 	results := make([]VerifyCheckResult, 0, len(request.Checks))
 	allOK := true
 	for _, check := range request.Checks {
@@ -79,7 +81,7 @@ func (s *Server) verify(w http.ResponseWriter, r *http.Request) {
 			allOK = false
 			continue
 		}
-		result := s.verifyCheck(check)
+		result := s.verifyCheck(ctx, check)
 		if !result.OK {
 			allOK = false
 		}
@@ -93,10 +95,10 @@ func (s *Server) verify(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, VerifyResult{ActionID: actionID, OK: allOK, Checks: results})
 }
 
-func (s *Server) verifyCheck(check VerifyCheck) VerifyCheckResult {
+func (s *Server) verifyCheck(ctx context.Context, check VerifyCheck) VerifyCheckResult {
 	switch check.Type {
 	case "file":
-		return s.verifyFile(check)
+		return s.verifyFile(ctx, check)
 	case "process":
 		return verifyProcess(check)
 	default:
@@ -109,7 +111,7 @@ func (s *Server) verifyCheck(check VerifyCheck) VerifyCheckResult {
 	}
 }
 
-func (s *Server) verifyFile(check VerifyCheck) VerifyCheckResult {
+func (s *Server) verifyFile(ctx context.Context, check VerifyCheck) VerifyCheckResult {
 	result := VerifyCheckResult{Type: "file", Path: check.Path}
 	path := strings.TrimSpace(check.Path)
 	if path == "" || path != filepath.Clean(path) || !filepath.IsAbs(path) {
@@ -136,7 +138,12 @@ func (s *Server) verifyFile(check VerifyCheck) VerifyCheckResult {
 		return verifyFailure(result, "path_outside_roots", "resolved evidence path is outside the configured verification roots")
 	}
 	path = resolved
-	info, err = os.Stat(path)
+	file, err := openEvidenceFile(path, s.verifyRoots)
+	if err != nil {
+		return verifyFailure(result, "file_unreadable", err.Error())
+	}
+	defer file.Close()
+	info, err = file.Stat()
 	if err != nil || !info.Mode().IsRegular() {
 		return verifyFailure(result, "not_regular_file", "evidence path is not a regular file")
 	}
@@ -149,13 +156,14 @@ func (s *Server) verifyFile(check VerifyCheck) VerifyCheckResult {
 	if expected != "" && !isSHA256Hex(expected) {
 		return verifyFailure(result, "invalid_sha256", "sha256 must be 64 hexadecimal characters")
 	}
-	if expected != "" || info.Size() <= maxVerifyHashBytes {
-		hash, err := hashRegularFile(path)
-		if err != nil {
-			return verifyFailure(result, "file_unreadable", err.Error())
-		}
-		result.SHA256 = hash
+	if info.Size() > maxVerifyHashBytes {
+		return verifyFailure(result, "file_too_large", "evidence file exceeds the hash size limit")
 	}
+	hash, err := hashRegularFile(ctx, file, info.Size())
+	if err != nil {
+		return verifyFailure(result, "file_unreadable", err.Error())
+	}
+	result.SHA256 = hash
 	if expected != "" && result.SHA256 != expected {
 		return verifyFailure(result, "sha256_mismatch", "file SHA-256 does not match the declared hash")
 	}
@@ -208,15 +216,38 @@ func verifyFailure(result VerifyCheckResult, code, message string) VerifyCheckRe
 	return result
 }
 
-func hashRegularFile(path string) (string, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return "", fmt.Errorf("open evidence file: %w", err)
+func openEvidenceFile(path string, roots []string) (*os.File, error) {
+	for _, candidateRoot := range roots {
+		rootPath, err := filepath.EvalSymlinks(candidateRoot)
+		if err != nil {
+			continue
+		}
+		relative, err := filepath.Rel(rootPath, path)
+		if err != nil || relative == "." || relative == ".." || filepath.IsAbs(relative) ||
+			strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			continue
+		}
+		root, err := os.OpenRoot(rootPath)
+		if err != nil {
+			continue
+		}
+		file, openErr := root.Open(relative)
+		_ = root.Close()
+		if openErr == nil {
+			return file, nil
+		}
 	}
-	defer file.Close()
+	return nil, fmt.Errorf("evidence file cannot be opened within the configured roots")
+}
+
+func hashRegularFile(ctx context.Context, file *os.File, size int64) (string, error) {
 	hash := sha256.New()
-	if _, err := io.Copy(hash, file); err != nil {
-		return "", fmt.Errorf("hash evidence file: %w", err)
+	written, err := copyNContext(ctx, hash, file, size)
+	if err != nil {
+		return "", fmt.Errorf("read evidence file: %w", err)
+	}
+	if written != size {
+		return "", fmt.Errorf("evidence file changed while hashing")
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }

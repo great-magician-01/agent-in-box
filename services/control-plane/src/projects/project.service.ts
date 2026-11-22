@@ -246,7 +246,12 @@ export class ProjectService {
     }
     await this.db.transaction().execute(async (trx) => {
       const [taskNow, workerNow, archiveNow] = await Promise.all([
-        trx.selectFrom("tasks").select("id").where("project_id", "=", projectId).limit(1).executeTakeFirst(),
+        trx
+          .selectFrom("tasks")
+          .select("id")
+          .where("project_id", "=", projectId)
+          .limit(1)
+          .executeTakeFirst(),
         trx
           .selectFrom("workers")
           .select("id")

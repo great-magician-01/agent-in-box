@@ -18,6 +18,7 @@ export interface TaskUpdatePatch {
   status?: TaskStatus;
   priority?: number;
   assignedWorkerId?: string | null;
+  targetWorkerId?: string | null;
   attemptCount?: number;
   startedAt?: string | null;
   completedAt?: string | null;
@@ -57,6 +58,7 @@ export class TaskRepository {
         vm_id: task.vmId,
         origin_conversation_id: task.originConversationId,
         assigned_worker_id: task.assignedWorkerId,
+        target_worker_id: task.targetWorkerId,
         parent_task_id: task.parentTaskId,
         objective: task.objective,
         status: task.status,
@@ -156,6 +158,7 @@ export class TaskRepository {
     if (patch.status !== undefined) update.status = patch.status;
     if (patch.priority !== undefined) update.priority = patch.priority;
     if (patch.assignedWorkerId !== undefined) update.assigned_worker_id = patch.assignedWorkerId;
+    if (patch.targetWorkerId !== undefined) update.target_worker_id = patch.targetWorkerId;
     if (patch.attemptCount !== undefined) update.attempt_count = patch.attemptCount;
     if (patch.startedAt !== undefined) update.started_at = patch.startedAt;
     if (patch.completedAt !== undefined) update.completed_at = patch.completedAt;

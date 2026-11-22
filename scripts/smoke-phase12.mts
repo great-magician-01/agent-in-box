@@ -279,18 +279,27 @@ async function loadControlPlaneClasses(): Promise<{
   sha256File: (file: string) => Promise<string>;
   inspectMigrationBackup: (file: string) => Promise<void>;
 }> {
-  const [{ AppDatabase }, { CatalogRepository }, taskRepository, outboxRepository, workerRepository, leaseRepository, taskService, leaseService, backup] =
-    await Promise.all([
-      import(distUrl("persistence/database.js")),
-      import(distUrl("persistence/repositories/catalog-repository.js")),
-      import(distUrl("persistence/repositories/task-repository.js")),
-      import(distUrl("persistence/repositories/outbox-repository.js")),
-      import(distUrl("persistence/repositories/worker-repository.js")),
-      import(distUrl("persistence/repositories/lease-repository.js")),
-      import(distUrl("persistence/services/task-service.js")),
-      import(distUrl("persistence/services/lease-service.js")),
-      import(distUrl("persistence/migration-backup.js")),
-    ]);
+  const [
+    { AppDatabase },
+    { CatalogRepository },
+    taskRepository,
+    outboxRepository,
+    workerRepository,
+    leaseRepository,
+    taskService,
+    leaseService,
+    backup,
+  ] = await Promise.all([
+    import(distUrl("persistence/database.js")),
+    import(distUrl("persistence/repositories/catalog-repository.js")),
+    import(distUrl("persistence/repositories/task-repository.js")),
+    import(distUrl("persistence/repositories/outbox-repository.js")),
+    import(distUrl("persistence/repositories/worker-repository.js")),
+    import(distUrl("persistence/repositories/lease-repository.js")),
+    import(distUrl("persistence/services/task-service.js")),
+    import(distUrl("persistence/services/lease-service.js")),
+    import(distUrl("persistence/migration-backup.js")),
+  ]);
   return {
     AppDatabase,
     CatalogRepository,
@@ -326,7 +335,11 @@ async function seedFailureAndPerformanceFixtures(): Promise<number> {
     };
     selectFrom(table: string): {
       selectAll(): {
-        where(column: string, operator: string, value: string): {
+        where(
+          column: string,
+          operator: string,
+          value: string,
+        ): {
           executeTakeFirst(): Promise<unknown>;
         };
       };
@@ -480,10 +493,7 @@ async function seedFailureAndPerformanceFixtures(): Promise<number> {
   }
 
   // Force one pending migration so startup has to create a pre-migration backup.
-  await db
-    .deleteFrom("schema_migrations")
-    .where("id", "=", "011_phase12_hardening")
-    .execute();
+  await db.deleteFrom("schema_migrations").where("id", "=", "011_phase12_hardening").execute();
   await database.close();
   return performanceTaskCount + 1;
 }
@@ -608,10 +618,7 @@ try {
   const afterMigration = await api<DiagnosticsReport>("/api/v1/diagnostics");
   assert.equal(afterMigration.database.pendingMigrations.length, 0);
   assert.ok(afterMigration.database.migrationBackups.length >= 1);
-  passed(
-    "迁移前数据库备份先通过完整性校验并写入 SHA-256，再应用迁移",
-    path.basename(backupFile),
-  );
+  passed("迁移前数据库备份先通过完整性校验并写入 SHA-256，再应用迁移", path.basename(backupFile));
 
   const runningTask = await api<TaskDetail>(`/api/v1/tasks/${runningTaskId}`);
   assert.equal(runningTask.task.status, "failed");

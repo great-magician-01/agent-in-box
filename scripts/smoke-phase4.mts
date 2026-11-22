@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { once } from "node:events";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { writeSmokeToken } from "./smoke-token.mjs";
 import { createServer, type Server } from "node:http";
 import net, { type AddressInfo, type Socket } from "node:net";
 import os from "node:os";
@@ -127,8 +128,8 @@ try {
   const supervisorTokenFile = path.join(temporary, "supervisor-acl.token");
   const guestTokenFile = path.join(temporary, "vms", vmId, "guest-agent.token");
   await mkdir(path.dirname(guestTokenFile), { recursive: true });
-  await writeFile(supervisorTokenFile, supervisorToken, { mode: 0o600 });
-  await writeFile(guestTokenFile, guestToken, { mode: 0o600 });
+  await writeSmokeToken(supervisorTokenFile, supervisorToken);
+  await writeSmokeToken(guestTokenFile, guestToken);
 
   let vncInput = Buffer.alloc(0);
   const serverRfbHandshake = rfbHandshake();
@@ -299,6 +300,8 @@ try {
       `127.0.0.1:${guestPort}`,
       "-token-file",
       guestTokenFile,
+      "-allowed-client-cidrs",
+      "127.0.0.1/32",
       "-update-dir",
       path.join(temporary, "updates"),
     ],
@@ -440,25 +443,37 @@ try {
   ]);
   console.log("Phase 4 smoke: VNC WebSocket open");
   const handshakeDeadline = Date.now() + 5000;
-  while (serverHandshake.length < serverRfbHandshake.length && Date.now() < handshakeDeadline)
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  if (serverHandshake.length < serverRfbHandshake.length)
-    throw new Error("VNC handshake timed out");
+  const waitForHandshakeBytes = async (count: number): Promise<void> => {
+    while (serverHandshake.length < count && Date.now() < handshakeDeadline)
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    if (serverHandshake.length < count) throw new Error("VNC handshake timed out");
+  };
+  // The proxy terminates upstream security and speaks the no-auth RFB 3.8
+  // handshake to the client, so the client must answer the version and choose
+  // the single None security type before ServerInit is forwarded.
+  await waitForHandshakeBytes(12);
+  socket.send(Buffer.from("RFB 003.008" + String.fromCharCode(10)), { binary: true });
+  await waitForHandshakeBytes(14);
+  if (serverHandshake[12] !== 1 || serverHandshake[13] !== 1)
+    throw new Error("Proxy did not offer the loopback no-auth security type");
+  socket.send(Buffer.from([1]), { binary: true });
+  await waitForHandshakeBytes(serverRfbHandshake.length);
   console.log("Phase 4 smoke: VNC handshake received");
   const closed = once(socket, "close");
+  const inputOffset = vncInput.length;
   const pointer = Buffer.from([5, 1, 0, 100, 0, 200]);
   socket.send(pointer, { binary: true });
   const deadline = Date.now() + 3000;
-  while (!vncInput.equals(pointer) && Date.now() < deadline)
+  while (!vncInput.subarray(inputOffset).equals(pointer) && Date.now() < deadline)
     await new Promise((resolve) => setTimeout(resolve, 10));
-  if (!vncInput.equals(pointer))
+  if (!vncInput.subarray(inputOffset).equals(pointer))
     throw new Error("Leased VNC pointer input did not reach RFB server");
   const extendedKey = Buffer.from([255, 0, 1, 0, 0, 0, 0, 65, 0, 0, 0, 65]);
   const expectedInput = Buffer.concat([pointer, extendedKey]);
   socket.send(extendedKey, { binary: true });
-  while (!vncInput.equals(expectedInput) && Date.now() < deadline)
+  while (!vncInput.subarray(inputOffset).equals(expectedInput) && Date.now() < deadline)
     await new Promise((resolve) => setTimeout(resolve, 10));
-  if (!vncInput.equals(expectedInput))
+  if (!vncInput.subarray(inputOffset).equals(expectedInput))
     throw new Error("Leased QEMU extended keyboard input did not reach RFB server");
   console.log("Phase 4 smoke: leased pointer and QEMU extended key reached RFB peer");
   const released = await api<{ released: boolean }>(
@@ -481,7 +496,7 @@ try {
       setTimeout(() => reject(new Error("VNC Lease revocation close timed out")), 5000),
     ),
   ]);
-  if (closeCode !== 1008 || !vncInput.equals(expectedInput))
+  if (closeCode !== 1008 || !vncInput.subarray(inputOffset).equals(expectedInput))
     throw new Error("Input after Lease release was not blocked");
   passed("noVNC WebSocket 代理逐帧校验人工 Lease，释放后输入立即失败关闭");
 

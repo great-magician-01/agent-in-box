@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
+import { Body, Controller, Get, Headers, Param, Post, Query } from "@nestjs/common";
 import type {
   ConversationMessageRecord,
   WorkerArchiveBlockers,
@@ -63,8 +63,9 @@ export class WorkerController {
   prompt(
     @Param("id") id: string,
     @Body() input: WorkerPromptRequest,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ): Promise<{ taskId: string; worker: WorkerView }> {
-    return this.workers.prompt(id, input);
+    return this.workers.prompt(id, input, idempotencyKey);
   }
 
   @Post(":id/steer")

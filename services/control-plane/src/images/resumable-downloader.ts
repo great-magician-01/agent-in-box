@@ -117,18 +117,24 @@ async function assertRegularFile(filePath: string): Promise<boolean> {
   }
 }
 
-async function hashFile(filePath: string): Promise<string> {
+async function hashFile(filePath: string, signal?: AbortSignal): Promise<string> {
+  signal?.throwIfAborted();
   const hash = createHash("sha256");
   await new Promise<void>((resolve, reject) => {
-    const input = createReadStream(filePath);
+    const input = createReadStream(filePath, { ...(signal ? { signal } : {}) });
     input.on("data", (chunk: Buffer) => hash.update(chunk));
     input.once("error", reject);
     input.once("end", resolve);
   });
+  signal?.throwIfAborted();
   return hash.digest("hex");
 }
 
-async function matches(filePath: string, descriptor: ImageArtifactManifest): Promise<boolean> {
+async function matches(
+  filePath: string,
+  descriptor: ImageArtifactManifest,
+  signal?: AbortSignal,
+): Promise<boolean> {
   if (!(await assertRegularFile(filePath))) {
     return false;
   }
@@ -136,7 +142,7 @@ async function matches(filePath: string, descriptor: ImageArtifactManifest): Pro
   if (descriptor.sizeBytes > 0 && info.size !== descriptor.sizeBytes) {
     return false;
   }
-  return (await hashFile(filePath)) === descriptor.sha256.toLowerCase();
+  return (await hashFile(filePath, signal)) === descriptor.sha256.toLowerCase();
 }
 
 function parseContentRange(value: string | null): { start: number; end: number; total: number } {
@@ -196,7 +202,7 @@ export class ResumableImageDownloader {
     const partialPath = `${finalPath}.partial`;
 
     await options.onVerifying?.();
-    if (await matches(finalPath, descriptor)) {
+    if (await matches(finalPath, descriptor, options.signal)) {
       const info = await stat(finalPath);
       return {
         path: finalPath,
@@ -220,7 +226,7 @@ export class ResumableImageDownloader {
       }
     }
     if (offset > 0 && offset === descriptor.sizeBytes) {
-      if (await matches(partialPath, descriptor)) {
+      if (await matches(partialPath, descriptor, options.signal)) {
         await rename(partialPath, finalPath);
         return {
           path: finalPath,
@@ -299,6 +305,17 @@ export class ResumableImageDownloader {
         await response.body?.cancel();
         await rm(partialPath, { force: true });
         throw new ImageDownloadError("size_mismatch", "服务器续传总大小与 Manifest 不一致");
+      }
+      const declaredLength = Number(response.headers.get("content-length") ?? -1);
+      const rangeLength = range.end - range.start + 1;
+      if (
+        rangeLength <= 0 ||
+        (range.total > 0 && range.end !== range.total - 1) ||
+        (declaredLength >= 0 && declaredLength !== rangeLength)
+      ) {
+        await response.body?.cancel();
+        await rm(partialPath, { force: true });
+        throw new ImageDownloadError("invalid_response", "服务器续传范围或响应长度不一致");
       }
       totalBytes ||= range.total;
     } else {
@@ -389,7 +406,8 @@ export class ResumableImageDownloader {
       );
     }
     await options.onVerifying?.();
-    const actualChecksum = await hashFile(partialPath);
+    const actualChecksum = await hashFile(partialPath, options.signal);
+    options.signal?.throwIfAborted();
     if (actualChecksum !== descriptor.sha256.toLowerCase()) {
       await rm(partialPath, { force: true });
       throw new ImageDownloadError("checksum_mismatch", "镜像 SHA-256 校验失败，未启用该文件");

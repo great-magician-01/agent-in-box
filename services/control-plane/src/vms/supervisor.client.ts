@@ -155,7 +155,10 @@ export class SupervisorClient {
       typeof body.instanceNonce !== "string" ||
       body.instanceNonce !== this.instanceNonce
     ) {
-      throw new PersistenceError("unavailable", "VM Supervisor 实例身份不匹配，已拒绝发送 ACL 令牌");
+      throw new PersistenceError(
+        "unavailable",
+        "VM Supervisor 实例身份不匹配，已拒绝发送 ACL 令牌",
+      );
     }
   }
 

@@ -6,6 +6,7 @@ package qmp
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -46,7 +47,51 @@ func Dial(ctx context.Context, address string, events func(event string, data js
 	if err != nil {
 		return nil, fmt.Errorf("dial qmp %s: %w", address, err)
 	}
+	return newClient(ctx, conn, events)
+}
 
+// DialUnix connects to a QMP server listening on a Unix domain socket. The
+// socket lives in the per-VM 0700 directory, so filesystem permissions are the
+// authentication boundary; there is no TCP listener to reach.
+func DialUnix(ctx context.Context, path string, events func(event string, data json.RawMessage)) (*Client, error) {
+	var dialer net.Dialer
+	conn, err := dialer.DialContext(ctx, "unix", path)
+	if err != nil {
+		return nil, fmt.Errorf("dial qmp unix socket %s: %w", path, err)
+	}
+	return newClient(ctx, conn, events)
+}
+
+// DialTLS connects to a QMP TCP endpoint and performs a mutually authenticated
+// TLS handshake. config must verify the server certificate (for example by
+// pinning its SHA-256 fingerprint) and present the per-VM client certificate;
+// an unauthenticated fallback is deliberately not provided.
+func DialTLS(
+	ctx context.Context,
+	address string,
+	config *tls.Config,
+	events func(event string, data json.RawMessage),
+) (*Client, error) {
+	if config == nil || config.InsecureSkipVerify {
+		return nil, fmt.Errorf("dial qmp %s over TLS: a verifying tls.Config is required", address)
+	}
+	var dialer net.Dialer
+	raw, err := dialer.DialContext(ctx, "tcp", address)
+	if err != nil {
+		return nil, fmt.Errorf("dial qmp %s: %w", address, err)
+	}
+	conn := tls.Client(raw, config.Clone())
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = conn.SetDeadline(deadline)
+	}
+	if err := conn.HandshakeContext(ctx); err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("qmp tls handshake with %s: %w", address, err)
+	}
+	return newClient(ctx, conn, events)
+}
+
+func newClient(ctx context.Context, conn net.Conn, events func(event string, data json.RawMessage)) (*Client, error) {
 	client := &Client{
 		conn:   conn,
 		reader: bufio.NewReader(conn),
@@ -156,6 +201,21 @@ func (c *Client) QueryStatus(ctx context.Context) (Status, error) {
 	var status Status
 	err := c.Execute(ctx, "query-status", nil, &status)
 	return status, err
+}
+
+// UUID is the result of query-uuid.
+type UUID struct {
+	UUID string `json:"UUID"`
+}
+
+// QueryUUID reports the QEMU machine UUID. Callers use it to prove that the
+// loopback endpoint belongs to the VM they think they are driving.
+func (c *Client) QueryUUID(ctx context.Context) (string, error) {
+	var result UUID
+	if err := c.Execute(ctx, "query-uuid", nil, &result); err != nil {
+		return "", err
+	}
+	return result.UUID, nil
 }
 
 // SystemPowerdown requests a guest ACPI shutdown.

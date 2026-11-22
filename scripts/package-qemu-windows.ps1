@@ -42,6 +42,14 @@ Source code and build scripts: https://www.qemu.org/ and https://github.com/msys
 This archive is assembled from the MSYS2 UCRT64 package for local VM execution.
 "@ | Set-Content -Encoding UTF8 $license
 
+# Verify the packaged binaries really are the pinned version. A silent MSYS2
+# drift would otherwise publish an archive whose manifest version is a lie.
+$qemuVersionOutput = & (Join-Path $qemuRoot "bin\qemu-system-x86_64.exe") --version
+if ($LASTEXITCODE -ne 0) { throw "packaged qemu-system-x86_64 --version failed" }
+if ($qemuVersionOutput -notmatch [regex]::Escape("version $Version")) {
+  throw "QEMU version mismatch: expected $Version, got $qemuVersionOutput"
+}
+
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 $outputAbsolute = (Resolve-Path $OutputDirectory).Path
 $archive = Join-Path $outputAbsolute "qemu-windows-x64.tar.gz"

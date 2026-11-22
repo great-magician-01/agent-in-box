@@ -9,6 +9,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { smokeAuthHeaders } from "./smoke-auth.mjs";
+import { WORKER_RPC_PROTOCOL_VERSION } from "../packages/agent-runtime/dist/index.js";
 import type {
   ConversationMessageRecord,
   ModelRequestRecord,
@@ -19,6 +20,7 @@ import type {
 import type { Kysely } from "kysely";
 import type { DatabaseSchema } from "../services/control-plane/src/persistence/schema";
 
+import { writeSmokeToken } from "./smoke-token.mjs";
 interface CheckResult {
   name: string;
   passed: boolean;
@@ -30,7 +32,11 @@ const temporary = await mkdtemp(path.join(os.tmpdir(), "agent-in-box-phase6-"));
 const configDirectory = path.join(temporary, "config");
 const resultPath =
   process.env.AGENT_IN_BOX_PHASE6_RESULT?.trim() ||
-  path.join(repository, "tests/phase6/results", `${new Date().toISOString().slice(0, 10)}-smoke.json`);
+  path.join(
+    repository,
+    "tests/phase6/results",
+    `${new Date().toISOString().slice(0, 10)}-smoke.json`,
+  );
 const checks: CheckResult[] = [];
 const children: ChildProcess[] = [];
 const controlPlanePort = await freePort();
@@ -72,7 +78,11 @@ function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-async function waitFor(predicate: () => Promise<boolean> | boolean, label: string, timeout = 20_000): Promise<void> {
+async function waitFor(
+  predicate: () => Promise<boolean> | boolean,
+  label: string,
+  timeout = 20_000,
+): Promise<void> {
   const deadline = Date.now() + timeout;
   while (!(await predicate())) {
     if (Date.now() > deadline) throw new Error(`Timed out waiting for ${label}`);
@@ -84,10 +94,7 @@ async function stopChild(child: ChildProcess | undefined, timeoutMs = 15_000): P
   if (!child || child.exitCode !== null || child.signalCode !== null) return;
   const exited = once(child, "exit");
   child.kill("SIGTERM");
-  const done = await Promise.race([
-    exited.then(() => true),
-    delay(timeoutMs).then(() => false),
-  ]);
+  const done = await Promise.race([exited.then(() => true), delay(timeoutMs).then(() => false)]);
   if (!done && child.exitCode === null && child.signalCode === null) {
     child.kill("SIGKILL");
     await once(child, "exit");
@@ -166,7 +173,9 @@ try {
   const dist = (name: string) =>
     pathToFileURL(path.join(repository, "services/control-plane/dist", name)).href;
   const { AppDatabase } = await import(dist("persistence/database.js"));
-  const { CatalogRepository } = await import(dist("persistence/repositories/catalog-repository.js"));
+  const { CatalogRepository } = await import(
+    dist("persistence/repositories/catalog-repository.js")
+  );
   const { ModelTokenService } = await import(dist("models/model-token.service.js"));
   const { PiWorkerEngine, WorkerRpcServer } = await import(
     pathToFileURL(path.join(repository, "packages/agent-runtime/dist/index.js")).href
@@ -175,7 +184,7 @@ try {
 
   await mkdir(path.join(temporary, "vms"), { recursive: true });
   await writeFile(credentialsPath, JSON.stringify({ mock: upstreamSecret }), { mode: 0o600 });
-  await writeFile(supervisorTokenPath, "phase6-supervisor-token", { mode: 0o600 });
+  await writeSmokeToken(supervisorTokenPath, "phase6-supervisor-token");
   await writeFile(commandLog, "");
 
   const seed = AppDatabase.open({ filename: path.join(temporary, "agent-in-box.sqlite") });
@@ -219,11 +228,15 @@ try {
   });
   await seed.db
     .updateTable("vm_instances")
-    .set({ power_state: "running", guest_health: "healthy", last_started_at: new Date().toISOString() })
+    .set({
+      power_state: "running",
+      guest_health: "healthy",
+      last_started_at: new Date().toISOString(),
+    })
     .where("id", "=", vm.id)
     .execute();
   await mkdir(vm.storageRoot, { recursive: true });
-  await writeFile(path.join(vm.storageRoot, "worker-rpc.token"), workerRpcToken, { mode: 0o600 });
+  await writeSmokeToken(path.join(vm.storageRoot, "worker-rpc.token"), workerRpcToken);
   await seed.close();
   vmId = vm.id;
   projectId = project.id;
@@ -280,7 +293,10 @@ try {
 
   const upstream = createServer((request, response) => {
     upstreamRequests += 1;
-    if (request.url !== "/v1/chat/completions" || request.headers.authorization !== `Bearer ${upstreamSecret}`) {
+    if (
+      request.url !== "/v1/chat/completions" ||
+      request.headers.authorization !== `Bearer ${upstreamSecret}`
+    ) {
       response.writeHead(401, { "content-type": "application/json" });
       response.end(JSON.stringify({ error: { message: "bad upstream auth" } }));
       return;
@@ -341,7 +357,9 @@ try {
     .execute();
   assert.equal(tokenRows.length, 1);
   assert.equal(
-    createHash("sha256").update(brokerToken as string).digest("hex"),
+    createHash("sha256")
+      .update(brokerToken as string)
+      .digest("hex"),
     (tokenRows[0] as { token_hash: string }).token_hash,
   );
   const guestModels = await readFile(modelsPath(), "utf8");
@@ -352,7 +370,10 @@ try {
     method: "POST",
     body: JSON.stringify({ text: "Quick desktop check" }),
   });
-  await waitFor(async () => (await task(quick.taskId)).task.status === "blocked", "quick task blocked");
+  await waitFor(
+    async () => (await task(quick.taskId)).task.status === "blocked",
+    "quick task blocked",
+  );
   const quickDetail = await task(quick.taskId);
   assert.equal(quickDetail.task.errorCode, "awaiting_verification");
   assert.equal(quickDetail.task.assignedWorkerId, workerId);
@@ -374,11 +395,17 @@ try {
     method: "POST",
     body: JSON.stringify({ text: "[hold] Long desktop task" }),
   });
-  await waitFor(async () => (await task(hold.taskId)).task.status === "running", "hold task running");
-  const steered = await api<{ disposition: string; taskId: string }>(`/api/v1/workers/${workerId}/steer`, {
-    method: "POST",
-    body: JSON.stringify({ text: "Prefer the terminal" }),
-  });
+  await waitFor(
+    async () => (await task(hold.taskId)).task.status === "running",
+    "hold task running",
+  );
+  const steered = await api<{ disposition: string; taskId: string }>(
+    `/api/v1/workers/${workerId}/steer`,
+    {
+      method: "POST",
+      body: JSON.stringify({ text: "Prefer the terminal" }),
+    },
+  );
   assert.equal(steered.disposition, "queued");
   assert.equal(steered.taskId, hold.taskId);
   const beforeCancel = await task(hold.taskId);
@@ -387,24 +414,35 @@ try {
     method: "POST",
     body: JSON.stringify({ reason: "Smoke cancel" }),
   });
-  await waitFor(async () => (await task(hold.taskId)).task.status === "cancelled", "cancelled task");
+  await waitFor(
+    async () => (await task(hold.taskId)).task.status === "cancelled",
+    "cancelled task",
+  );
   await waitFor(async () => (await worker()).worker.status === "idle", "worker idle after cancel");
   await waitFor(async () => {
     const log = await readFile(commandLog, "utf8");
-    return log.trim().split("\n").some((line) => (JSON.parse(line) as { type: string }).type === "abort");
+    return log
+      .trim()
+      .split("\n")
+      .some((line) => (JSON.parse(line) as { type: string }).type === "abort");
   }, "Pi RPC abort command");
   passed("Steer 与 Follow-up 区分，任务取消会触发 Pi Abort 并释放 Lease");
 
   const oldToken = workerRpcToken;
-  await writeFile(path.join(vm.storageRoot, "worker-rpc.token"), rotatedWorkerRpcToken, { mode: 0o600 });
+  await writeSmokeToken(path.join(vm.storageRoot, "worker-rpc.token"), rotatedWorkerRpcToken);
   const oldResponse = await fetch(`http://127.0.0.1:${workerPort}/v1/version`, {
     headers: { authorization: `Bearer ${oldToken}` },
   });
   assert.equal(oldResponse.status, 401);
   await oldResponse.arrayBuffer();
-  const newResponse = await fetch(`http://127.0.0.1:${workerPort}/v1/version?protocolVersion=0.1.0`, {
-    headers: { authorization: `Bearer ${rotatedWorkerRpcToken}` },
-  });
+  const newResponse = await fetch(
+    `http://127.0.0.1:${workerPort}/v1/version?protocolVersion=${encodeURIComponent(
+      WORKER_RPC_PROTOCOL_VERSION,
+    )}`,
+    {
+      headers: { authorization: `Bearer ${rotatedWorkerRpcToken}` },
+    },
+  );
   assert.equal(newResponse.status, 200);
   await newResponse.arrayBuffer();
   passed("Guest Worker RPC 令牌原子轮换后旧令牌立即失效");
@@ -420,7 +458,11 @@ try {
   const brokerResponse = await fetch(`http://127.0.0.1:${brokerPort}/v1/chat/completions`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${issued.token}` },
-    body: JSON.stringify({ model: "mock-cua", stream: true, messages: [{ role: "user", content: "hi" }] }),
+    body: JSON.stringify({
+      model: "mock-cua",
+      stream: true,
+      messages: [{ role: "user", content: "hi" }],
+    }),
   });
   assert.equal(brokerResponse.status, 200);
   const streamed = await brokerResponse.text();
@@ -436,7 +478,9 @@ try {
     const row = rows[0] as { status?: string; usage_json?: string | null } | undefined;
     return row?.status === "completed" && Boolean(row.usage_json);
   }, "broker usage record");
-  const brokerRequests = await api<ModelRequestRecord[]>("/api/v1/models/requests?workerId=" + encodeURIComponent(workerId));
+  const brokerRequests = await api<ModelRequestRecord[]>(
+    "/api/v1/models/requests?workerId=" + encodeURIComponent(workerId),
+  );
   assert.equal(brokerRequests[0]?.status, "completed");
   assert.equal(brokerRequests[0]?.usage?.inputTokens, 17);
   assert.equal(brokerRequests[0]?.usage?.outputTokens, 5);
@@ -461,17 +505,28 @@ try {
     method: "POST",
     body: JSON.stringify({ text: "[hold] Cross-restart task" }),
   });
-  await waitFor(async () => (await task(restartTask.taskId)).task.status === "running", "restart task running");
+  await waitFor(
+    async () => (await task(restartTask.taskId)).task.status === "running",
+    "restart task running",
+  );
   await stopChild(controlPlane);
   assert.equal(upstreamRequests, 1);
   await startControlPlane();
-  await waitFor(async () => (await worker()).worker.lastErrorCode === "control_plane_restarted", "worker restart reconcile");
-  await waitFor(async () => (await task(restartTask.taskId)).task.errorCode === "worker_runtime_restarted", "task restart failure");
+  await waitFor(
+    async () => (await worker()).worker.lastErrorCode === "control_plane_restarted",
+    "worker restart reconcile",
+  );
+  await waitFor(
+    async () => (await task(restartTask.taskId)).task.errorCode === "worker_runtime_restarted",
+    "task restart failure",
+  );
   assert.equal((await task(restartTask.taskId)).task.status, "failed");
   assert.notEqual((await worker()).worker.agentSessionRef, null);
   passed("控制平面重启不重复执行，Worker 绑定与会话引用保留");
 
-  const resumedWorker = await api<WorkerResumeResult>(`/api/v1/workers/${workerId}/resume`, { method: "POST" });
+  const resumedWorker = await api<WorkerResumeResult>(`/api/v1/workers/${workerId}/resume`, {
+    method: "POST",
+  });
   assert.equal(resumedWorker.restoreMode, "native");
   assert.equal(resumedWorker.worker.runtime.connected, true);
   await waitFor(async () => (await worker()).worker.status === "idle", "resumed worker idle");
@@ -480,7 +535,9 @@ try {
 
   const archived = await api<WorkerView>(`/api/v1/workers/${workerId}/archive`, { method: "POST" });
   assert.equal(archived.worker.status, "archived");
-  const restored = await api<WorkerResumeResult>(`/api/v1/workers/${workerId}/resume`, { method: "POST" });
+  const restored = await api<WorkerResumeResult>(`/api/v1/workers/${workerId}/resume`, {
+    method: "POST",
+  });
   assert.equal(restored.restoreMode, "native");
   await waitFor(async () => (await worker()).worker.status === "idle", "restored worker idle");
   assert.equal(restored.worker.runtime.connected, true);
@@ -490,7 +547,10 @@ try {
     method: "POST",
     body: JSON.stringify({ text: "Post-resume check" }),
   });
-  await waitFor(async () => (await task(postResume.taskId)).task.status === "blocked", "post-resume task");
+  await waitFor(
+    async () => (await task(postResume.taskId)).task.status === "blocked",
+    "post-resume task",
+  );
   passed("恢复后的 Worker 可继续接收任务");
 } catch (error) {
   checks.push({

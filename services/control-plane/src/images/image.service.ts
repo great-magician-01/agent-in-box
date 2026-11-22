@@ -218,6 +218,18 @@ export class ImageService implements OnModuleInit, OnModuleDestroy {
         );
       }
       if (!existing) {
+        const fileNameOwner = await this.db
+          .selectFrom("images")
+          .select("id")
+          .where("file_name", "=", entry.fileName)
+          .where("id", "!=", entry.id)
+          .executeTakeFirst();
+        if (fileNameOwner) {
+          throw new PersistenceError(
+            "conflict",
+            `镜像 ${entry.id} 复用了历史镜像文件名 ${entry.fileName}；请使用新的文件名`,
+          );
+        }
         const now = nowIso();
         await this.db
           .insertInto("images")

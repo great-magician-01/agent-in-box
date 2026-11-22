@@ -21,6 +21,7 @@ import type {
   WorkerView,
 } from "@agent-in-box/protocol";
 
+import { writeSmokeToken } from "./smoke-token.mjs";
 interface CheckResult {
   name: string;
   passed: boolean;
@@ -221,9 +222,7 @@ try {
   const fakePi = path.join(repository, "packages/agent-runtime/src/testing/fake-pi.mjs");
 
   await mkdir(path.join(temporary, "vms"), { recursive: true });
-  await writeFile(path.join(temporary, "supervisor-acl.token"), "phase8-supervisor-token", {
-    mode: 0o600,
-  });
+  await writeSmokeToken(path.join(temporary, "supervisor-acl.token"), "phase8-supervisor-token");
 
   const seed = AppDatabase.open({ filename: path.join(temporary, "agent-in-box.sqlite") });
   await seed.migrate();
@@ -276,8 +275,8 @@ try {
     .where("id", "=", vm.id)
     .execute();
   await mkdir(vm.storageRoot, { recursive: true });
-  await writeFile(path.join(vm.storageRoot, "worker-rpc.token"), workerRpcToken, { mode: 0o600 });
-  await writeFile(path.join(vm.storageRoot, "guest-agent.token"), guestToken, { mode: 0o600 });
+  await writeSmokeToken(path.join(vm.storageRoot, "worker-rpc.token"), workerRpcToken);
+  await writeSmokeToken(path.join(vm.storageRoot, "guest-agent.token"), guestToken);
   await seed.close();
   vmId = vm.id;
   projectId = project.id;

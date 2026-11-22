@@ -16,7 +16,7 @@ import {
   type RestoreProjectBackupRequest,
   type VmProjectReference,
 } from "@agent-in-box/protocol";
-import { guestPathEqualsOrWithin, guestPathsEqual } from "@agent-in-box/domain";
+import { guestPathEqualsOrWithin, guestPathsEqual, type VmLeaseRecord } from "@agent-in-box/domain";
 import { NotFoundError, PersistenceError } from "../persistence/errors";
 import { DatabaseService } from "../persistence/database.service";
 import { OutboxRepository } from "../persistence/repositories/outbox-repository";
@@ -73,11 +73,22 @@ export class ProjectBackupService implements OnModuleInit {
     // them failed so restore/delete are not blocked forever.
     await this.db
       .updateTable("project_backups")
-      .set({ status: "failed", error_message: "控制平面重启中断了备份操作" })
-      .where("status", "in", ["creating", "restoring"])
+      .set({ status: "failed", error_message: "控制平面重启中断了备份创建" })
+      .where("status", "=", "creating")
       .execute()
       .catch((error: unknown) => {
         this.logger.warn(`Failed to reconcile interrupted project backups: ${String(error)}`);
+      });
+    await this.db
+      .updateTable("project_backups")
+      .set({
+        status: "available",
+        error_message: "控制平面重启中断了恢复；已保留每绑定进度，可重新恢复",
+      })
+      .where("status", "=", "restoring")
+      .execute()
+      .catch((error: unknown) => {
+        this.logger.warn(`Failed to reconcile interrupted project restores: ${String(error)}`);
       });
   }
 
@@ -192,42 +203,48 @@ export class ProjectBackupService implements OnModuleInit {
     const backupDirectory = this.backupDirectory(projectId, backupId);
     try {
       await mkdir(backupDirectory, { recursive: true, mode: 0o700 });
-      for (let index = 0; index < bindingRows.length; index += 1) {
-        const row = bindingRows[index]!;
-        const binding = bindings[index]!;
-        const vm = vmRows.get(binding.vm_id)!;
-        const runtime = await this.supervisor.get(binding.vm_id);
-        if (!runtime.guestHostPort) {
-          throw new PersistenceError("unavailable", `VM「${vm.name}」没有 Guest Agent 回环端口`);
-        }
-        const lease = await this.leases.acquire({
-          vmId: binding.vm_id,
-          owner: "human",
-          taskId: null,
-          ttlMs: BACKUP_LEASE_TTL_MS,
-        });
-        try {
-          const destination = this.resolveBackupFile(row.file_path!);
-          const result = await this.guest.downloadWorkspace(
-            { hostPort: runtime.guestHostPort, storageRoot: vm.storage_root },
-            binding.guest_workspace_path,
-            destination,
-          );
-          await this.db
-            .updateTable("project_backup_bindings")
-            .set({
-              status: "available",
-              sha256: result.sha256,
-              size_bytes: result.sizeBytes,
-              file_count: result.fileCount,
-              error_message: null,
-            })
-            .where("id", "=", row.id)
-            .execute();
-        } finally {
-          await this.leases.release(binding.vm_id, lease.id).catch(() => undefined);
-        }
-      }
+      await this.withMaintenanceLeases(
+        bindingRows.map((row) => row.vm_id),
+        async (maintenanceLeases) => {
+          for (let index = 0; index < bindingRows.length; index += 1) {
+            const row = bindingRows[index]!;
+            const binding = bindings[index]!;
+            const vm = vmRows.get(binding.vm_id)!;
+            const lease = maintenanceLeases.get(binding.vm_id)!;
+            await this.assertBindingFree(binding, lease.id);
+            const runtime = await this.supervisor.get(binding.vm_id);
+            if (!runtime.guestHostPort) {
+              throw new PersistenceError(
+                "unavailable",
+                `VM「${vm.name}」没有 Guest Agent 回环端口`,
+              );
+            }
+            const destination = this.resolveBackupFile(row.file_path!);
+            await this.runWithMaintenanceLease(lease, async () => {
+              const result = await this.guest.downloadWorkspace(
+                { hostPort: runtime.guestHostPort!, storageRoot: vm.storage_root },
+                binding.guest_workspace_path,
+                destination,
+              );
+              const current = await this.leases.getActive(lease.vmId);
+              if (!current || current.id !== lease.id) {
+                throw new PersistenceError("lease_conflict", "备份期间维护 Lease 已变化");
+              }
+              await this.db
+                .updateTable("project_backup_bindings")
+                .set({
+                  status: "available",
+                  sha256: result.sha256,
+                  size_bytes: result.sizeBytes,
+                  file_count: result.fileCount,
+                  error_message: null,
+                })
+                .where("id", "=", row.id)
+                .execute();
+            });
+          }
+        },
+      );
       await this.db
         .updateTable("project_backups")
         .set({ status: "available", completed_at: nowIso() })
@@ -451,52 +468,70 @@ export class ProjectBackupService implements OnModuleInit {
     }
     const restored: string[] = [];
     try {
-      for (const binding of bindings) {
-        if (!binding.file_path || !binding.sha256) {
-          throw new PersistenceError("conflict", `备份绑定 ${binding.binding_id} 缺少文件或哈希`);
-        }
-        const file = this.resolveBackupFile(binding.file_path);
-        const info = await stat(file).catch(() => null);
-        if (!info?.isFile()) {
-          throw new PersistenceError("unavailable", `备份文件缺失：${binding.file_path}`);
-        }
-        const vm = await this.db
-          .selectFrom("vm_instances")
-          .select(["id", "name", "storage_root"])
-          .where("id", "=", binding.vm_id)
-          .executeTakeFirst();
-        if (!vm) throw new NotFoundError(`VM 不存在：${binding.vm_id}`);
-        const runtime = await this.supervisor.get(binding.vm_id);
-        if (runtime.powerState !== "running" || !runtime.guestHostPort) {
-          throw new PersistenceError("conflict", `VM「${vm.name}」未运行，不能恢复项目目录`);
-        }
-        const lease = await this.leases.acquire({
-          vmId: binding.vm_id,
-          owner: "human",
-          taskId: null,
-          ttlMs: BACKUP_LEASE_TTL_MS,
-        });
-        try {
-          const result = await this.guest.restoreWorkspace(
-            { hostPort: runtime.guestHostPort, storageRoot: vm.storage_root },
-            binding.guest_workspace_path,
-            file,
-            binding.sha256,
-          );
-          await this.db
-            .updateTable("project_backup_bindings")
-            .set({
-              status: "restored",
-              size_bytes: result.sizeBytes,
-              file_count: result.fileCount,
-            })
-            .where("id", "=", binding.id)
-            .execute();
-          restored.push(binding.binding_id);
-        } finally {
-          await this.leases.release(binding.vm_id, lease.id).catch(() => undefined);
-        }
+      const verification = await this.verify(projectId, backupId);
+      if (!verification.ok) {
+        throw new PersistenceError("conflict", "备份文件完整性校验失败，未开始恢复");
       }
+      await this.withMaintenanceLeases(
+        bindings.map((binding) => binding.vm_id),
+        async (maintenanceLeases) => {
+          for (const binding of bindings) {
+            if (!binding.file_path || !binding.sha256) {
+              throw new PersistenceError(
+                "conflict",
+                `备份绑定 ${binding.binding_id} 缺少文件或哈希`,
+              );
+            }
+            const lease = maintenanceLeases.get(binding.vm_id)!;
+            await this.assertBindingFree(
+              {
+                id: binding.binding_id,
+                project_id: projectId,
+                vm_id: binding.vm_id,
+                guest_workspace_path: binding.guest_workspace_path,
+              },
+              lease.id,
+            );
+            const file = this.resolveBackupFile(binding.file_path);
+            const info = await stat(file).catch(() => null);
+            if (!info?.isFile()) {
+              throw new PersistenceError("unavailable", `备份文件缺失：${binding.file_path}`);
+            }
+            const vm = await this.db
+              .selectFrom("vm_instances")
+              .select(["id", "name", "storage_root"])
+              .where("id", "=", binding.vm_id)
+              .executeTakeFirst();
+            if (!vm) throw new NotFoundError(`VM 不存在：${binding.vm_id}`);
+            const runtime = await this.supervisor.get(binding.vm_id);
+            if (runtime.powerState !== "running" || !runtime.guestHostPort) {
+              throw new PersistenceError("conflict", `VM「${vm.name}」未运行，不能恢复项目目录`);
+            }
+            await this.runWithMaintenanceLease(lease, async () => {
+              const result = await this.guest.restoreWorkspace(
+                { hostPort: runtime.guestHostPort!, storageRoot: vm.storage_root },
+                binding.guest_workspace_path,
+                file,
+                binding.sha256!,
+              );
+              const current = await this.leases.getActive(lease.vmId);
+              if (!current || current.id !== lease.id) {
+                throw new PersistenceError("lease_conflict", "恢复期间维护 Lease 已变化");
+              }
+              await this.db
+                .updateTable("project_backup_bindings")
+                .set({
+                  status: "restored",
+                  size_bytes: result.sizeBytes,
+                  file_count: result.fileCount,
+                })
+                .where("id", "=", binding.id)
+                .execute();
+            });
+            restored.push(binding.binding_id);
+          }
+        },
+      );
       const now = nowIso();
       await this.db
         .updateTable("project_backups")
@@ -513,7 +548,7 @@ export class ProjectBackupService implements OnModuleInit {
       const message = error instanceof Error ? error.message : String(error);
       await this.db
         .updateTable("project_backups")
-        .set({ status: "failed", error_message: message })
+        .set({ status: "available", error_message: message })
         .where("id", "=", backupId)
         .execute();
       throw error instanceof PersistenceError
@@ -594,23 +629,99 @@ export class ProjectBackupService implements OnModuleInit {
 
   async delete(projectId: string, backupId: string): Promise<{ deleted: true; backupId: string }> {
     const backup = await this.requireBackup(projectId, backupId);
-    if (backup.status === "restoring") {
-      throw new PersistenceError("conflict", "备份正在恢复，不能删除");
+    if (backup.status === "creating" || backup.status === "restoring") {
+      throw new PersistenceError("conflict", "备份正在创建或恢复，不能删除");
     }
-    await rm(this.backupDirectory(projectId, backupId), { recursive: true, force: true }).catch(
-      () => undefined,
-    );
-    await this.db.deleteFrom("project_backups").where("id", "=", backupId).execute();
+    if (backup.status !== "deleting") {
+      const claimed = await this.db
+        .updateTable("project_backups")
+        .set({ status: "deleting" })
+        .where("id", "=", backupId)
+        .where("status", "not in", ["creating", "restoring", "deleting"])
+        .executeTakeFirst();
+      if (Number(claimed.numUpdatedRows ?? 0) === 0) {
+        throw new PersistenceError("conflict", "备份状态已变化，不能删除");
+      }
+    }
+    try {
+      await rm(this.backupDirectory(projectId, backupId), { recursive: true, force: true });
+    } catch (error) {
+      if (backup.status !== "deleting") {
+        await this.db
+          .updateTable("project_backups")
+          .set({ status: backup.status })
+          .where("id", "=", backupId)
+          .where("status", "=", "deleting")
+          .execute();
+      }
+      throw error;
+    }
+    await this.db
+      .deleteFrom("project_backups")
+      .where("id", "=", backupId)
+      .where("status", "=", "deleting")
+      .execute();
     await this.outbox.append("project.backup_deleted", { projectId, backupId }, nowIso());
     return { deleted: true, backupId };
   }
 
-  private async assertBindingFree(binding: BindingRow): Promise<void> {
+  private async withMaintenanceLeases<T>(
+    vmIds: readonly string[],
+    operation: (leases: ReadonlyMap<string, VmLeaseRecord>) => Promise<T>,
+  ): Promise<T> {
+    const acquired: VmLeaseRecord[] = [];
+    const byVm = new Map<string, VmLeaseRecord>();
+    let renewal: NodeJS.Timeout | null = null;
+    try {
+      for (const vmId of [...new Set(vmIds)].sort()) {
+        const lease = await this.leases.acquire({
+          vmId,
+          owner: "human",
+          taskId: null,
+          ttlMs: BACKUP_LEASE_TTL_MS,
+          preemptible: false,
+        });
+        acquired.push(lease);
+        byVm.set(vmId, lease);
+      }
+      renewal = setInterval(() => {
+        void Promise.all(
+          acquired.map((lease) =>
+            this.leases.renew(lease.id, BACKUP_LEASE_TTL_MS).catch((error: unknown) => {
+              this.logger.warn(`Backup lease renewal failed for ${lease.vmId}: ${String(error)}`);
+            }),
+          ),
+        );
+      }, 30_000);
+      renewal.unref();
+      return await operation(byVm);
+    } finally {
+      if (renewal) clearInterval(renewal);
+      for (const lease of [...acquired].reverse()) {
+        await this.leases.release(lease.vmId, lease.id).catch(() => undefined);
+      }
+    }
+  }
+
+  private async runWithMaintenanceLease<T>(
+    lease: VmLeaseRecord,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    return this.leases.executeWithLease(lease.vmId, lease.id, "human", async () => {
+      const result = await operation();
+      const current = await this.leases.getActive(lease.vmId);
+      if (!current || current.id !== lease.id) {
+        throw new PersistenceError("lease_conflict", "备份操作已失去维护 Lease");
+      }
+      return result;
+    });
+  }
+
+  private async assertBindingFree(binding: BindingRow, maintenanceLeaseId?: string): Promise<void> {
     const [activeTask, workers, lease] = await Promise.all([
       this.db
         .selectFrom("tasks")
         .select("id")
-        .where("project_id", "=", binding.project_id)
         .where("vm_id", "=", binding.vm_id)
         .where("status", "in", ACTIVE_TASK_STATUSES)
         .limit(1)
@@ -618,20 +729,19 @@ export class ProjectBackupService implements OnModuleInit {
       this.db
         .selectFrom("workers")
         .select(["id", "status"])
-        .where("project_id", "=", binding.project_id)
         .where("vm_id", "=", binding.vm_id)
         .where("status", "in", ["starting", "running", "restoring", "archiving"])
         .limit(1)
         .executeTakeFirst(),
       this.db
         .selectFrom("vm_leases")
-        .select(["expires_at"])
+        .select(["id", "expires_at"])
         .where("vm_id", "=", binding.vm_id)
         .executeTakeFirst(),
     ]);
     if (activeTask) throw new PersistenceError("conflict", "项目在该 VM 上仍有活动任务，不能备份");
     if (workers) throw new PersistenceError("conflict", "项目在该 VM 上仍有活动 Worker，不能备份");
-    if (lease && Date.parse(lease.expires_at) > Date.now()) {
+    if (lease && lease.id !== maintenanceLeaseId && Date.parse(lease.expires_at) > Date.now()) {
       throw new PersistenceError("conflict", "VM 仍有 Execution Lease，不能备份项目目录");
     }
   }

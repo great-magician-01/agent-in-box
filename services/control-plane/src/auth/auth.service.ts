@@ -24,6 +24,8 @@ export interface AuthOptions {
   sessionTtlMs?: number;
   now?: () => Date;
   randomBytes?: (size: number) => Buffer;
+  /** Optional diagnostics sink; never receives the key itself. */
+  logger?: { warn?(message: string, context?: Record<string, unknown>): void };
 }
 
 export interface AuthSession {
@@ -299,13 +301,23 @@ export class AuthService implements OnModuleInit {
 
   private readAccessKey(): string {
     try {
+      const stat = fs.lstatSync(this.options.accessKeyPath);
+      if (!stat.isFile() || stat.isSymbolicLink()) {
+        throw new Error("access key is not a regular file");
+      }
+      if (process.platform !== "win32" && (stat.mode & 0o077) !== 0) {
+        // A group/world-readable access key is equivalent to no password on a
+        // shared machine. Fail closed instead of silently accepting it.
+        throw new Error("access key permissions are too open");
+      }
       const value = fs.readFileSync(this.options.accessKeyPath, "utf8").trim();
       if (value.length >= 32) {
         return value;
       }
-    } catch {
-      // Fall through to an explicit error: the control plane must not start
-      // with an unusable authentication credential.
+    } catch (error) {
+      this.options.logger?.warn?.("本机访问密钥不可用", {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
     throw new PersistenceError("unavailable", "本机访问密钥不可用，请检查配置目录权限");
   }

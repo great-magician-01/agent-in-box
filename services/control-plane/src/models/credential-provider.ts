@@ -158,7 +158,8 @@ function legacyKindForId(providerId: string): CredentialKind {
   return providerId.startsWith("bot-") ? "bot" : "model";
 }
 
-function isMissing(error: unknown): boolean {  return (
+function isMissing(error: unknown): boolean {
+  return (
     (typeof error === "object" &&
       error !== null &&
       (error as NodeJS.ErrnoException).code === "ENOENT") ||

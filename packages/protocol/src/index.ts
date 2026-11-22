@@ -157,6 +157,7 @@ export interface TaskRecord {
   vmId: Id;
   originConversationId: Id;
   assignedWorkerId: Id | null;
+  targetWorkerId: Id | null;
   parentTaskId: Id | null;
   objective: string;
   status: TaskStatus;
@@ -189,6 +190,7 @@ export interface WorkerRecord {
   engineVersion: string;
   status: WorkerStatus;
   currentTaskId: Id | null;
+  currentExecutionAttempt: number | null;
   capabilitySet: string[];
   createdAt: IsoTimestamp;
   lastActiveAt: IsoTimestamp;
@@ -1793,6 +1795,7 @@ export interface CuaActionRecord {
     dpi: number | null;
     scaleFactor: number | null;
   };
+  executionAttempt: number | null;
   status: CuaActionStatus;
   result: unknown | null;
   errorCode: string | null;
@@ -1810,6 +1813,7 @@ export interface CuaScreenshotRecord {
   taskId: Id;
   workerId: Id;
   vmId: Id;
+  executionAttempt: number | null;
   kind: CuaScreenshotKind;
   width: number;
   height: number;
@@ -1827,6 +1831,7 @@ export interface CuaApprovalRecord {
   taskId: Id;
   workerId: Id;
   actionId: Id;
+  executionAttempt: number | null;
   actionType: ComputerActionType;
   contextSummary: string;
   status: CuaApprovalStatus;
@@ -1853,6 +1858,7 @@ export interface HumanVerificationRecord {
   taskId: Id;
   workerId: Id;
   vmId: Id;
+  executionAttempt: number | null;
   reason: string;
   screenshotId: Id;
   status: HumanVerificationStatus;
@@ -1875,6 +1881,7 @@ export interface TaskExecutionStateView {
   taskId: Id;
   workerId: Id;
   vmId: Id;
+  executionAttempt: number;
   startedAt: IsoTimestamp;
   deadlineAt: IsoTimestamp;
   stepCount: number;
@@ -1904,6 +1911,7 @@ export type CuaCompletionEvidence =
 export interface CuaCompleteRequest {
   summary: string;
   evidence: CuaCompletionEvidence[];
+  requestId?: string;
 }
 
 export interface CuaEvidenceResult {

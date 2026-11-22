@@ -9,18 +9,44 @@ import { createTestContext, type TestContext } from "../persistence/testing/fixt
 import { ConsoleService } from "./console.service";
 import type { VmService } from "./vm.service";
 
-function rfbHandshake(): Buffer {
+const RFB_VERSION = "RFB 003.008\n";
+
+function serverInit(): Buffer {
   const init = Buffer.alloc(24);
   init.writeUInt16BE(1280, 0);
   init.writeUInt16BE(800, 2);
   init.writeUInt32BE(4, 20);
-  return Buffer.concat([
-    Buffer.from("RFB 003.008\n"),
-    Buffer.from([1, 1]),
-    Buffer.alloc(4),
-    init,
-    Buffer.from("test"),
-  ]);
+  return Buffer.concat([init, Buffer.from("test")]);
+}
+
+/** Reads exactly n bytes from a socket without assuming chunk boundaries. */
+function readExactly(socket: net.Socket, count: number): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    let buffer = Buffer.alloc(0);
+    const onData = (chunk: Buffer) => {
+      buffer = Buffer.concat([buffer, chunk]);
+      if (buffer.length >= count) {
+        cleanup();
+        socket.pause();
+        socket.off("data", onData);
+        const value = buffer.subarray(0, count);
+        const rest = buffer.subarray(count);
+        if (rest.length > 0) socket.unshift(rest);
+        resolve(value);
+      }
+    };
+    const onClose = () => {
+      cleanup();
+      reject(new Error("socket closed"));
+    };
+    const cleanup = () => {
+      socket.off("data", onData);
+      socket.off("close", onClose);
+    };
+    socket.on("data", onData);
+    socket.once("close", onClose);
+    socket.resume();
+  });
 }
 
 describe("ConsoleService", () => {
@@ -33,25 +59,36 @@ describe("ConsoleService", () => {
   let vncPort: number;
   let upstreamData: Buffer;
   let splitHandshake: boolean;
+  let activeSockets: net.Socket[];
 
   beforeEach(async () => {
     ctx = await createTestContext();
     leases = new LeaseService(ctx.app.db, new LeaseRepository(ctx.app.db));
     upstreamData = Buffer.alloc(0);
     splitHandshake = false;
+    activeSockets = [];
     vncServer = net.createServer((socket) => {
-      const handshake = rfbHandshake();
-      if (splitHandshake) {
-        socket.write(handshake.subarray(0, 12));
-        setTimeout(() => {
-          if (!socket.destroyed) socket.write(handshake.subarray(12));
-        }, 20);
-      } else {
-        socket.write(handshake);
-      }
-      socket.on("data", (chunk) => {
-        upstreamData = Buffer.concat([upstreamData, chunk]);
-      });
+      activeSockets.push(socket);
+      socket.write(RFB_VERSION);
+      void (async () => {
+        await readExactly(socket, 12); // client version
+        const security = Buffer.from([1, 1]);
+        if (splitHandshake) {
+          socket.write(security.subarray(0, 1));
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          socket.write(security.subarray(1));
+        } else {
+          socket.write(security);
+        }
+        await readExactly(socket, 1); // None
+        socket.write(Buffer.concat([Buffer.alloc(4), serverInit()]));
+        socket.on("data", (chunk: Buffer) => {
+          upstreamData = Buffer.concat([upstreamData, chunk]);
+        });
+        // readExactly pauses the socket; flowing mode is needed to observe the
+        // frames the proxy forwards after ServerInit.
+        socket.resume();
+      })().catch(() => socket.destroy());
     });
     vncServer.listen(0, "127.0.0.1");
     await once(vncServer, "listening");
@@ -74,20 +111,58 @@ describe("ConsoleService", () => {
 
   afterEach(async () => {
     consoles.onModuleDestroy();
+    for (const socket of activeSockets) socket.destroy();
     httpServer.close();
     vncServer.close();
     await ctx.close();
   });
+
+  async function openConsole(session: { webSocketUrl: string }): Promise<{
+    socket: WebSocket;
+    next: () => Promise<Buffer>;
+  }> {
+    const socket = new WebSocket(`ws://127.0.0.1:${httpPort}${session.webSocketUrl}`);
+    const pending: Buffer[] = [];
+    const waiters: Array<(value: Buffer) => void> = [];
+    // Attach before "open": the proxy sends its RFB version immediately after
+    // the upgrade, which may happen before the open event is observed.
+    socket.on("message", (data: Buffer) => {
+      const waiter = waiters.shift();
+      if (waiter) waiter(data);
+      else pending.push(data);
+    });
+    await once(socket, "open");
+    const next = (): Promise<Buffer> => {
+      const value = pending.shift();
+      if (value) return Promise.resolve(value);
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("no console frame")), 2_000);
+        waiters.push((frame) => {
+          clearTimeout(timer);
+          resolve(frame);
+        });
+      });
+    };
+    // The proxy speaks RFB 3.8 first, then a single None security type.
+    const version = await next();
+    expect(version.toString("ascii")).toBe(RFB_VERSION);
+    socket.send(Buffer.from(RFB_VERSION), { binary: true });
+    const security = await next();
+    expect(security).toEqual(Buffer.from([1, 1]));
+    socket.send(Buffer.from([1]), { binary: true });
+    const securityResult = await next();
+    expect(securityResult).toEqual(Buffer.alloc(4));
+    const init = await next();
+    expect(init.equals(serverInit())).toBe(true);
+    return { socket, next };
+  }
 
   it("uses one-time tickets and enforces the human Lease on every RFB input", async () => {
     const session = await consoles.openSession(ctx.vmId);
     expect(session.viewOnly).toBe(false);
     expect(session.lease).not.toBeNull();
     const url = `ws://127.0.0.1:${httpPort}${session.webSocketUrl}`;
-    const socket = new WebSocket(url);
-    await once(socket, "open");
-    const [firstFrame] = (await once(socket, "message")) as [Buffer];
-    expect(firstFrame.subarray(0, 12).toString()).toBe("RFB 003.008\n");
+    const { socket } = await openConsole(session);
 
     const reusedTicket = new WebSocket(url);
     const [ticketError] = await once(reusedTicket, "error");
@@ -113,11 +188,7 @@ describe("ConsoleService", () => {
     expect(session.lease).toBeNull();
     expect((await leases.control(ctx.vmId)).state).toBe("idle");
 
-    const socket = new WebSocket(`ws://127.0.0.1:${httpPort}${session.webSocketUrl}`);
-    await once(socket, "open");
-    const [firstFrame] = (await once(socket, "message")) as [Buffer];
-    expect(firstFrame.subarray(0, 12).toString()).toBe("RFB 003.008\n");
-
+    const { socket } = await openConsole(session);
     const update = Buffer.from([3, 1, 0, 0, 0, 0, 0, 100, 0, 100]);
     const key = Buffer.from([4, 1, 0, 0, 0, 0, 0, 65]);
     const pointer = Buffer.from([5, 1, 0, 100, 0, 200]);
@@ -130,15 +201,20 @@ describe("ConsoleService", () => {
     socket.close();
   });
 
-  it("does not let early input bypass the Lease when ServerInit is split", async () => {
+  it("buffers ServerInit when the security-type frame is split", async () => {
     splitHandshake = true;
     const session = await consoles.openSession(ctx.vmId);
-    const socket = new WebSocket(`ws://127.0.0.1:${httpPort}${session.webSocketUrl}`);
-    await once(socket, "open");
-    await once(socket, "message"); // Only the 12-byte RFB version has arrived.
+    // openConsole waits for ServerInit, which must arrive despite the split.
+    const { socket } = await openConsole(session);
+    socket.close();
+  });
+
+  it("rejects input after the Lease is gone without forwarding bytes", async () => {
+    const session = await consoles.openSession(ctx.vmId);
+    const { socket } = await openConsole(session);
+    await leases.release(ctx.vmId, session.lease!.id);
     const closed = once(socket, "close");
     socket.send(Buffer.from([4, 1, 0, 0, 0, 0, 0, 65]), { binary: true });
-    await leases.release(ctx.vmId, session.lease!.id);
     const [code] = (await closed) as [number];
     expect(code).toBe(1008);
     expect(upstreamData).toHaveLength(0);

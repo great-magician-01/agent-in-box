@@ -23,6 +23,7 @@ export interface ApprovalRequestInput {
   workerId: string;
   actionId: string;
   actionType: ComputerActionType;
+  executionAttempt: number;
   action: unknown;
   contextSummary: string;
   timeoutMs: number;
@@ -57,6 +58,7 @@ export class ApprovalService {
         worker_id: input.workerId,
         action_id: input.actionId,
         action_type: input.actionType,
+        execution_attempt: input.executionAttempt,
         action_json: JSON.stringify(input.action),
         context_summary: input.contextSummary.trim(),
         status: "pending",
@@ -105,7 +107,7 @@ export class ApprovalService {
     if (current.status !== "pending") {
       throw new PersistenceError("conflict", `审批已处于 ${current.status} 状态`);
     }
-    return this.finish(id, decision, resolvedBy, note?.trim() || null);
+    return this.finish(id, decision, resolvedBy, note?.trim() || null, true);
   }
 
   /** Timeout or cancellation is resolved by the execution layer, not a human. */
@@ -132,13 +134,20 @@ export class ApprovalService {
     return results;
   }
 
-  async cancelForTask(taskId: string, reason: string): Promise<CuaApprovalRecord[]> {
-    const rows = await this.db
+  async cancelForTask(
+    taskId: string,
+    reason: string,
+    executionAttempt?: number,
+  ): Promise<CuaApprovalRecord[]> {
+    let query = this.db
       .selectFrom("cua_approvals")
       .select("id")
       .where("task_id", "=", taskId)
-      .where("status", "=", "pending")
-      .execute();
+      .where("status", "=", "pending");
+    if (executionAttempt !== undefined) {
+      query = query.where("execution_attempt", "=", executionAttempt);
+    }
+    const rows = await query.execute();
     const results: CuaApprovalRecord[] = [];
     for (const row of rows) {
       const resolved = await this.finish(row.id, "cancelled", "system", reason);
@@ -180,9 +189,10 @@ export class ApprovalService {
     status: Exclude<CuaApprovalStatus, "pending">,
     resolvedBy: string,
     note: string | null,
+    requireUnexpired = false,
   ): Promise<CuaApprovalRecord> {
     const resolvedAt = this.now().toISOString();
-    const result = await this.db
+    let query = this.db
       .updateTable("cua_approvals")
       .set({
         status,
@@ -191,8 +201,9 @@ export class ApprovalService {
         resolution_note: note,
       })
       .where("id", "=", id)
-      .where("status", "=", "pending")
-      .executeTakeFirst();
+      .where("status", "=", "pending");
+    if (requireUnexpired) query = query.where("expires_at", ">", resolvedAt);
+    const result = await query.executeTakeFirst();
     let record: CuaApprovalRecord;
     if (Number(result.numUpdatedRows ?? 0) > 0) {
       record = await this.require(id);
@@ -204,6 +215,9 @@ export class ApprovalService {
         note,
       });
       return record;
+    }
+    if (requireUnexpired) {
+      throw new PersistenceError("conflict", "审批已到期或已被其他操作处理");
     }
     return this.require(id);
   }
@@ -224,6 +238,7 @@ function toRecord(row: {
   task_id: string;
   worker_id: string;
   action_id: string;
+  execution_attempt: number | null;
   action_type: string;
   context_summary: string;
   status: string;
@@ -238,6 +253,7 @@ function toRecord(row: {
     taskId: row.task_id,
     workerId: row.worker_id,
     actionId: row.action_id,
+    executionAttempt: row.execution_attempt,
     actionType: row.action_type as ComputerActionType,
     contextSummary: row.context_summary,
     status: row.status as CuaApprovalStatus,

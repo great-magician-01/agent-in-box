@@ -10,7 +10,7 @@ import type {
 } from "@agent-in-box/protocol";
 import { PersistenceError } from "../persistence/errors";
 import { nowIso } from "../persistence/time";
-import { assertSafeOutboundUrl } from "../security/outbound";
+import { assertSafeOutboundUrl, fetchSafeOutbound } from "../security/outbound";
 import type { ModelCredentialProvider } from "./credential-provider";
 import { ModelProviderService, type ResolvedModel } from "./model-provider.service";
 import { MODEL_CREDENTIAL_PROVIDER } from "./tokens";
@@ -109,7 +109,9 @@ export class ModelValidationService {
     @Inject(MODEL_VALIDATION_OPTIONS)
     options: ModelValidationOptions = {},
   ) {
-    this.fetchImpl = options.fetchImpl ?? fetch;
+    this.fetchImpl =
+      options.fetchImpl ??
+      ((input, init) => fetchSafeOutbound(String(input), init ?? {}, { allowLoopback: true }));
     this.timeoutMs = positiveInteger(options.timeoutMs, DEFAULT_TIMEOUT_MS);
     this.maxResponseBytes = positiveInteger(options.maxResponseBytes, DEFAULT_MAX_RESPONSE_BYTES);
     this.maxErrorBodyBytes = positiveInteger(

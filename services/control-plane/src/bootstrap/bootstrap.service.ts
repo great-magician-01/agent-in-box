@@ -139,7 +139,9 @@ export class BootstrapService implements OnModuleInit, OnModuleDestroy {
     // concurrent start/retry calls cannot both create the default VM.
     this.running = this.beginStart()
       .catch((error: unknown) => {
-        this.logger.warn(`Bootstrap start failed: ${error instanceof Error ? error.message : String(error)}`);
+        this.logger.warn(
+          `Bootstrap start failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
       })
       .finally(() => {
         this.running = null;

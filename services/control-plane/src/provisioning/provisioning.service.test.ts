@@ -146,4 +146,18 @@ describe("ProvisioningService", () => {
       provisioning_message: "apt failed",
     });
   });
+
+  it("does not let a late failure overwrite ready", async () => {
+    const base = baseUrl();
+    await fetch(`${base}ready`, { method: "POST" });
+    const response = await fetch(`${base}fail?message=late%20failure`, { method: "POST" });
+    expect(response.status).toBe(200);
+    const row = await ctx.app.db
+      .selectFrom("vm_instances")
+      .select(["provisioning_state", "provisioning_message"])
+      .where("id", "=", ctx.vmId)
+      .executeTakeFirstOrThrow();
+    expect(row.provisioning_state).toBe("ready");
+    expect(row.provisioning_message).not.toContain("late failure");
+  });
 });

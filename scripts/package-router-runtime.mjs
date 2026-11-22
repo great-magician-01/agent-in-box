@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import {
   copyFile,
@@ -17,6 +18,8 @@ import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const runtimeLockPath = path.join(repository, "scripts", "runtime-dependencies.json");
+const runtimeLock = JSON.parse(readFileSync(runtimeLockPath, "utf8"));
 const outputDirectory = path.join(repository, "release", "router-runtime");
 const piPackageName = "@earendil-works/pi-coding-agent";
 const piBinEntry = "dist/bundle/cli.js";
@@ -47,6 +50,7 @@ async function main() {
     const tarball = path.join(staging, "pi-coding-agent.tgz");
     const source = await obtainPiTarball(tarball, staging, piVersion);
     const tarballBytes = await readFile(tarball);
+    verifyPiIntegrity(tarballBytes, piVersion);
     const parsed = parsePiTarball(tarballBytes, piVersion);
 
     const piRoot = path.join(staging, "pi");
@@ -114,6 +118,18 @@ async function main() {
     if (staging) {
       await rm(staging, { recursive: true, force: true });
     }
+  }
+}
+
+export function verifyPiIntegrity(bytes, piVersion) {
+  if (runtimeLock.pi.version !== piVersion) {
+    throw new Error(
+      `Pi version ${piVersion} does not match runtime-dependencies.json (${runtimeLock.pi.version})`,
+    );
+  }
+  const actual = `sha512-${createHash("sha512").update(bytes).digest("base64")}`;
+  if (actual !== runtimeLock.pi.integrity) {
+    throw new Error(`Pi tarball integrity mismatch: got ${actual}`);
   }
 }
 

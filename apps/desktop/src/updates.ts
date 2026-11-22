@@ -1,4 +1,4 @@
-import { createHash, createPublicKey, randomUUID, verify } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type {
@@ -6,6 +6,7 @@ import type {
   DesktopUpdateState,
   DesktopUpdateStatus,
 } from "@agent-in-box/protocol";
+import { canonicalJson, verifySignature } from "./signature";
 
 const MAX_MANIFEST_BYTES = 256 * 1024;
 const MAX_DOWNLOAD_BYTES = 2 * 1024 * 1024 * 1024;
@@ -38,39 +39,13 @@ export interface SignedUpdateEnvelope {
   signature: string;
 }
 
-/** Deterministic JSON used as the signed payload. */
-export function canonicalJson(value: unknown): string {
-  const normalize = (item: unknown): unknown => {
-    if (Array.isArray(item)) return item.map(normalize);
-    if (typeof item === "object" && item !== null) {
-      const record = item as Record<string, unknown>;
-      return Object.fromEntries(
-        Object.keys(record)
-          .sort()
-          .map((key) => [key, normalize(record[key])]),
-      );
-    }
-    return item;
-  };
-  return JSON.stringify(normalize(value));
-}
-
-function publicKeyObject(value: string): ReturnType<typeof createPublicKey> {
-  const trimmed = value.trim();
-  if (trimmed.includes("BEGIN PUBLIC KEY")) {
-    return createPublicKey(trimmed);
-  }
-  return createPublicKey({
-    key: Buffer.from(trimmed, "base64"),
-    format: "der",
-    type: "spki",
-  });
-}
+export { canonicalJson };
 
 /**
  * Verifies the Ed25519 signature before any manifest field is trusted. The
- * signature covers the canonical form of `manifest`, not the wrapper, so a
- * publisher can sign the same manifest regardless of envelope formatting.
+ * signature covers the canonical form of `manifest` under the
+ * `desktop-update` purpose domain, so a runtime-asset signature can never be
+ * replayed as an update.
  */
 export function verifyUpdateEnvelope(raw: unknown, publicKey: string): UpdateManifest {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
@@ -87,16 +62,9 @@ export function verifyUpdateEnvelope(raw: unknown, publicKey: string): UpdateMan
   if (typeof envelope.manifest !== "object" || envelope.manifest === null) {
     throw new Error("更新 Manifest 缺少 manifest 字段");
   }
-  let signature: Buffer;
-  try {
-    signature = Buffer.from(envelope.signature, "base64");
-  } catch {
-    throw new Error("更新 Manifest 签名编码无效");
-  }
-  const payload = Buffer.from(canonicalJson(envelope.manifest), "utf8");
   let valid = false;
   try {
-    valid = verify(null, payload, publicKeyObject(publicKey), signature);
+    valid = verifySignature("desktop-update", envelope.manifest, publicKey, envelope.signature);
   } catch {
     throw new Error("更新签名公钥无效");
   }
@@ -150,21 +118,60 @@ export function isValidUpdateUrl(raw: string): boolean {
 }
 
 export function compareVersions(left: string, right: string): number {
-  const parse = (value: string): number[] => {
-    const core = value.trim().replace(/^v/i, "").split("-")[0]!;
-    const parts = core.split(".").map((part) => Number(part));
-    if (parts.length === 0 || parts.some((part) => !Number.isInteger(part) || part < 0)) {
+  interface Parsed {
+    core: number[];
+    prerelease: string[];
+  }
+  const parse = (value: string): Parsed => {
+    const trimmed = value.trim().replace(/^v/i, "");
+    const withoutBuild = trimmed.split("+")[0]!;
+    const [coreText, prereleaseText] = withoutBuild.split("-", 2) as [string, string | undefined];
+    const parts = coreText.split(".").map((part) => Number(part));
+    if (
+      coreText === "" ||
+      parts.length === 0 ||
+      parts.some((part) => !Number.isInteger(part) || part < 0) ||
+      parts.length > 3
+    ) {
       throw new Error(`无效版本号：${value}`);
     }
     while (parts.length < 3) parts.push(0);
-    return parts.slice(0, 3);
+    const prerelease =
+      prereleaseText === undefined
+        ? []
+        : prereleaseText.split(".").filter((identifier) => identifier !== "");
+    return { core: parts.slice(0, 3), prerelease };
+  };
+  const comparePrerelease = (a: string[], b: string[]): number => {
+    // A version without a prerelease is newer than any prerelease of the same
+    // core (1.0.0 > 1.0.0-rc.1), which is what lets stable builds replace RCs.
+    if (a.length === 0 && b.length === 0) return 0;
+    if (a.length === 0) return 1;
+    if (b.length === 0) return -1;
+    for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+      const leftIdentifier = a[index];
+      const rightIdentifier = b[index];
+      if (leftIdentifier === undefined) return -1;
+      if (rightIdentifier === undefined) return 1;
+      const leftNumeric = /^\d+$/.test(leftIdentifier);
+      const rightNumeric = /^\d+$/.test(rightIdentifier);
+      if (leftNumeric && rightNumeric) {
+        const leftValue = Number(leftIdentifier);
+        const rightValue = Number(rightIdentifier);
+        if (leftValue !== rightValue) return leftValue > rightValue ? 1 : -1;
+        continue;
+      }
+      if (leftNumeric !== rightNumeric) return leftNumeric ? -1 : 1;
+      if (leftIdentifier !== rightIdentifier) return leftIdentifier > rightIdentifier ? 1 : -1;
+    }
+    return 0;
   };
   const a = parse(left);
   const b = parse(right);
   for (let index = 0; index < 3; index += 1) {
-    if (a[index]! !== b[index]!) return a[index]! > b[index]! ? 1 : -1;
+    if (a.core[index]! !== b.core[index]!) return a.core[index]! > b.core[index]! ? 1 : -1;
   }
-  return 0;
+  return comparePrerelease(a.prerelease, b.prerelease);
 }
 
 export function parseUpdateManifest(
@@ -456,39 +463,205 @@ export const ROLLBACK_RESOURCE_ENTRIES = [
   "app.asar.unpacked",
   "control-plane",
   "web",
+  "vm-supervisor",
+  "guest-runtime",
+  "router-runtime",
+  "update-public-key.pem",
+  "runtime-public-key.pem",
 ] as const;
+
+const ROLLBACK_MANIFEST = "rollback-manifest.json";
+
+interface RollbackEntryDigest {
+  files: number;
+  bytes: number;
+  sha256: string;
+}
+
+interface RollbackManifest {
+  version: 1;
+  createdAt: string;
+  entries: Record<string, RollbackEntryDigest>;
+}
+
+async function hashTree(root: string): Promise<RollbackEntryDigest> {
+  const hasher = createHash("sha256");
+  let files = 0;
+  let bytes = 0;
+  const walk = async (directory: string, relative: string): Promise<void> => {
+    const entries = await fs.promises.readdir(directory, { withFileTypes: true });
+    entries.sort((left, right) => left.name.localeCompare(right.name));
+    for (const entry of entries) {
+      const absolute = path.join(directory, entry.name);
+      const name = relative ? `${relative}/${entry.name}` : entry.name;
+      if (entry.isSymbolicLink()) {
+        throw new Error(`回滚资源包含符号链接，已拒绝：${name}`);
+      }
+      if (entry.isDirectory()) {
+        await walk(absolute, name);
+        continue;
+      }
+      if (!entry.isFile()) {
+        throw new Error(`回滚资源包含非普通文件，已拒绝：${name}`);
+      }
+      const data = await fs.promises.readFile(absolute);
+      // Length-prefixed path and size keep the digest unambiguous.
+      hasher.update(`${Buffer.byteLength(name)}:`);
+      hasher.update(name);
+      hasher.update(`:${data.length}:`);
+      hasher.update(data);
+      files += 1;
+      bytes += data.length;
+    }
+  };
+  const stats = await fs.promises.stat(root);
+  if (stats.isDirectory()) {
+    await walk(root, "");
+  } else if (stats.isFile()) {
+    const data = await fs.promises.readFile(root);
+    hasher.update(`${path.basename(root)}:${data.length}:`);
+    hasher.update(data);
+    files = 1;
+    bytes = data.length;
+  }
+  return { files, bytes, sha256: hasher.digest("hex") };
+}
+
+async function readRollbackManifest(source: string): Promise<RollbackManifest> {
+  const raw = await fs.promises.readFile(path.join(source, ROLLBACK_MANIFEST), "utf8");
+  const parsed = JSON.parse(raw) as Partial<RollbackManifest>;
+  if (parsed.version !== 1 || typeof parsed.entries !== "object" || parsed.entries === null) {
+    throw new Error("回滚快照清单无效");
+  }
+  return parsed as RollbackManifest;
+}
 
 export async function createRollbackSnapshot(input: {
   resourcesPath: string;
   destination: string;
 }): Promise<boolean> {
-  await fs.promises.mkdir(input.destination, { recursive: true, mode: 0o700 });
-  let copied = false;
-  for (const entry of ROLLBACK_RESOURCE_ENTRIES) {
-    const source = path.join(input.resourcesPath, entry);
-    if (!fs.existsSync(source)) continue;
-    await fs.promises.cp(source, path.join(input.destination, entry), {
-      recursive: true,
-      force: true,
-    });
-    copied = true;
+  const existing = await fs.promises
+    .stat(input.destination)
+    .then(() => true)
+    .catch(() => false);
+  if (existing) {
+    try {
+      await verifyRollbackSnapshot(input.destination);
+      return true;
+    } catch {
+      // An incomplete snapshot is replaced below; a verified one is reused.
+      await fs.promises.rm(input.destination, { recursive: true, force: true });
+    }
   }
-  return copied;
+
+  const staging = `${input.destination}.staging-${randomUUID()}`;
+  await fs.promises.mkdir(staging, { recursive: true, mode: 0o700 });
+  const entries: Record<string, RollbackEntryDigest> = {};
+  try {
+    for (const entry of ROLLBACK_RESOURCE_ENTRIES) {
+      const source = path.join(input.resourcesPath, entry);
+      const present = await fs.promises
+        .stat(source)
+        .then(() => true)
+        .catch(() => false);
+      if (!present) continue;
+      const target = path.join(staging, entry);
+      await fs.promises.cp(source, target, { recursive: true, force: true, dereference: false });
+      entries[entry] = await hashTree(target);
+    }
+    if (Object.keys(entries).length === 0) {
+      throw new Error(`没有可回滚的已安装资源：${input.resourcesPath}`);
+    }
+    const manifest: RollbackManifest = {
+      version: 1,
+      createdAt: new Date().toISOString(),
+      entries,
+    };
+    await fs.promises.writeFile(
+      path.join(staging, ROLLBACK_MANIFEST),
+      JSON.stringify(manifest, null, 2),
+      { mode: 0o600 },
+    );
+    await fs.promises.mkdir(path.dirname(input.destination), { recursive: true, mode: 0o700 });
+    await fs.promises.rename(staging, input.destination);
+    return true;
+  } catch (error) {
+    await fs.promises.rm(staging, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+async function verifyRollbackSnapshot(source: string): Promise<RollbackManifest> {
+  if (!fs.existsSync(source)) {
+    throw new Error("回滚快照不存在，无法恢复旧版本");
+  }
+  const manifest = await readRollbackManifest(source);
+  for (const [entry, expected] of Object.entries(manifest.entries)) {
+    const digest = await hashTree(path.join(source, entry));
+    if (digest.sha256 !== expected.sha256 || digest.files !== expected.files) {
+      throw new Error(`回滚快照中的 ${entry} 校验失败`);
+    }
+  }
+  return manifest;
 }
 
 export async function restoreRollbackSnapshot(input: {
   source: string;
   resourcesPath: string;
 }): Promise<void> {
-  if (!fs.existsSync(input.source)) {
-    throw new Error("回滚快照不存在，无法恢复旧版本");
-  }
-  for (const entry of ROLLBACK_RESOURCE_ENTRIES) {
-    const backup = path.join(input.source, entry);
-    if (!fs.existsSync(backup)) continue;
-    const target = path.join(input.resourcesPath, entry);
-    await fs.promises.rm(target, { recursive: true, force: true });
-    await fs.promises.cp(backup, target, { recursive: true, force: true });
+  // Verify every file before replacing anything, so a corrupt backup cannot
+  // leave a mix of old and new runtime components.
+  const manifest = await verifyRollbackSnapshot(input.source);
+  const staging = path.join(input.resourcesPath, `.rollback-staging-${randomUUID()}`);
+  await fs.promises.mkdir(staging, { recursive: true, mode: 0o700 });
+  const staged = new Set<string>();
+  try {
+    for (const entry of Object.keys(manifest.entries)) {
+      const from = path.join(input.source, entry);
+      const to = path.join(staging, entry);
+      await fs.promises.cp(from, to, { recursive: true, force: true, dereference: false });
+      const digest = await hashTree(to);
+      if (digest.sha256 !== manifest.entries[entry]!.sha256) {
+        throw new Error(`暂存回滚资源 ${entry} 校验失败`);
+      }
+      staged.add(entry);
+    }
+    const restorePoint = new Date().toISOString().replace(/[:.]/g, "-");
+    const replaced: Array<{ target: string; previous: string }> = [];
+    try {
+      for (const entry of staged) {
+        const target = path.join(input.resourcesPath, entry);
+        const previous = `${target}.pre-rollback-${restorePoint}`;
+        const targetExists = await fs.promises
+          .stat(target)
+          .then(() => true)
+          .catch(() => false);
+        if (targetExists) {
+          await fs.promises.rename(target, previous);
+        }
+        try {
+          await fs.promises.rename(path.join(staging, entry), target);
+        } catch (error) {
+          if (targetExists) {
+            await fs.promises.rename(previous, target).catch(() => undefined);
+          }
+          throw error;
+        }
+        replaced.push({ target, previous });
+      }
+    } catch (error) {
+      // Best-effort roll back of the resources already swapped in this pass.
+      for (const item of replaced.reverse()) {
+        await fs.promises.rm(item.target, { recursive: true, force: true });
+        await fs.promises.rename(item.previous, item.target).catch(() => undefined);
+      }
+      throw error;
+    }
+    for (const item of replaced) {
+      await fs.promises.rm(item.previous, { recursive: true, force: true }).catch(() => undefined);
+    }
+  } finally {
+    await fs.promises.rm(staging, { recursive: true, force: true }).catch(() => undefined);
   }
 }
 

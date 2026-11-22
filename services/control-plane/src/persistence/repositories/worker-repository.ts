@@ -32,6 +32,7 @@ export class WorkerRepository {
       engineVersion: input.engineVersion,
       status: "starting",
       currentTaskId: null,
+      currentExecutionAttempt: null,
       capabilitySet: input.capabilitySet,
       createdAt: now,
       lastActiveAt: now,
@@ -60,6 +61,7 @@ export class WorkerRepository {
         engine_version: record.engineVersion,
         status: record.status,
         current_task_id: null,
+        current_execution_attempt: null,
         capability_set: JSON.stringify(record.capabilitySet),
         created_at: record.createdAt,
         last_active_at: record.lastActiveAt,
@@ -146,6 +148,7 @@ export class WorkerRepository {
       .set({
         status,
         current_task_id: currentTaskId,
+        ...(currentTaskId === null ? { current_execution_attempt: null } : {}),
         last_active_at: at,
       })
       .where("id", "=", workerId)
@@ -176,6 +179,7 @@ export class WorkerRepository {
     patch: {
       status?: WorkerStatus;
       currentTaskId?: string | null;
+      currentExecutionAttempt?: number | null;
       agentSessionRef?: string | null;
       sessionVersion?: string | null;
       pluginSnapshotId?: string | null;
@@ -194,6 +198,9 @@ export class WorkerRepository {
       .set({
         ...(patch.status !== undefined ? { status: patch.status } : {}),
         ...(patch.currentTaskId !== undefined ? { current_task_id: patch.currentTaskId } : {}),
+        ...(patch.currentExecutionAttempt !== undefined
+          ? { current_execution_attempt: patch.currentExecutionAttempt }
+          : {}),
         ...(patch.agentSessionRef !== undefined
           ? { agent_session_ref: patch.agentSessionRef }
           : {}),
@@ -242,7 +249,7 @@ export class WorkerRepository {
   async releaseClaim(workerId: string): Promise<void> {
     await this.db
       .updateTable("workers")
-      .set({ status: "idle", current_task_id: null })
+      .set({ status: "idle", current_task_id: null, current_execution_attempt: null })
       .where("id", "=", workerId)
       .execute();
   }
@@ -251,7 +258,12 @@ export class WorkerRepository {
   async markArchivingIfIdle(workerId: string): Promise<boolean> {
     const result = await this.db
       .updateTable("workers")
-      .set({ status: "archiving", current_task_id: null, last_active_at: nowIso() })
+      .set({
+        status: "archiving",
+        current_task_id: null,
+        current_execution_attempt: null,
+        last_active_at: nowIso(),
+      })
       .where("id", "=", workerId)
       .where("status", "=", "idle")
       .where("archived_at", "is", null)
@@ -274,6 +286,7 @@ export class WorkerRepository {
       .set({
         status: "archived",
         current_task_id: null,
+        current_execution_attempt: null,
         archived_at: at,
         last_active_at: at,
       })

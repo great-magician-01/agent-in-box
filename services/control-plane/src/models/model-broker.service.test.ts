@@ -11,6 +11,7 @@ import { TaskRepository } from "../persistence/repositories/task-repository";
 import { WorkerRepository } from "../persistence/repositories/worker-repository";
 import { TaskService } from "../persistence/services/task-service";
 import { createTestContext, type TestContext } from "../persistence/testing/fixtures";
+import { safeTestPort } from "../persistence/testing/safe-port";
 
 let ctx: TestContext;
 let upstream: Server;
@@ -52,7 +53,7 @@ beforeEach(async () => {
     }
     response.end("data: [DONE]\n\n");
   });
-  upstream.listen(0, "127.0.0.1");
+  upstream.listen(await safeTestPort(), "127.0.0.1");
   await once(upstream, "listening");
   const upstreamPort = (upstream.address() as AddressInfo).port;
   const providers = new ModelProviderService(ctx.app.db);
@@ -86,7 +87,7 @@ beforeEach(async () => {
   };
   broker = new ModelBrokerService(ctx.app.db, tokens, providers, credentials, {
     host: "127.0.0.1",
-    port: 0,
+    port: await safeTestPort(),
     requestTimeoutMs: 5000,
   });
   await broker.onModuleInit();
@@ -219,7 +220,7 @@ describe("ModelBrokerService", () => {
     });
     const claimed = await tasks.claimNext(ctx.vmId, workerId);
     expect(claimed?.id).toBe(created.task.id);
-    await tokens.bindTask(token.context.id, created.task.id);
+    await tokens.bindTask(token.context.id, created.task.id, claimed!.attemptCount);
     const allowed = await callBroker({ model: "mock-cua", messages: [] });
     expect(allowed.status).toBe(200);
 

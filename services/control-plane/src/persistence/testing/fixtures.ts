@@ -54,15 +54,29 @@ export async function createTestContext(): Promise<TestContext> {
     isPrimary: true,
   });
 
-  return {
+  // The context object is the source of truth: reopen tests replace
+  // `context.app` with a second connection, and close() must close that one.
+  const context: TestContext = {
     app,
     dir,
     projectId: project.id,
     vmId: vm.id,
     conversationId: conversation.id,
     async close() {
-      await this.app.close();
+      await context.app.close();
+      // Windows can keep the SQLite/WAL handles for a moment after close.
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        try {
+          rmSync(dir, { recursive: true, force: true });
+          return;
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException).code;
+          if (code !== "EBUSY" && code !== "EPERM") throw error;
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+      }
       rmSync(dir, { recursive: true, force: true });
     },
   };
+  return context;
 }

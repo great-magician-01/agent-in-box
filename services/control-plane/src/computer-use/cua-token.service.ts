@@ -18,6 +18,7 @@ export interface CuaTokenContext {
   vmId: string;
   sessionId: string;
   taskId: string | null;
+  executionAttempt: number | null;
   expiresAt: string;
 }
 
@@ -45,6 +46,7 @@ export class CuaTokenService implements OnModuleInit {
     vmId: string;
     sessionId: string;
     taskId?: string | null;
+    executionAttempt?: number | null;
   }): Promise<{ token: string; context: CuaTokenContext }> {
     const token = randomBytes(32).toString("base64url");
     const id = randomUUID();
@@ -59,6 +61,7 @@ export class CuaTokenService implements OnModuleInit {
         vm_id: input.vmId,
         session_id: input.sessionId,
         task_id: input.taskId ?? null,
+        execution_attempt: input.executionAttempt ?? null,
         expires_at: expiresAt,
         revoked_at: null,
         revoke_reason: null,
@@ -74,6 +77,7 @@ export class CuaTokenService implements OnModuleInit {
         vmId: input.vmId,
         sessionId: input.sessionId,
         taskId: input.taskId ?? null,
+        executionAttempt: input.executionAttempt ?? null,
         expiresAt,
       },
     };
@@ -114,11 +118,29 @@ export class CuaTokenService implements OnModuleInit {
     return context({ ...row, expires_at: expiresAt });
   }
 
-  async bindTask(id: string, taskId: string | null): Promise<void> {
+  async bindTask(
+    id: string,
+    taskId: string | null,
+    executionAttempt: number | null = null,
+  ): Promise<void> {
     await this.db
       .updateTable("cua_tokens")
-      .set({ task_id: taskId })
+      .set({
+        task_id: taskId,
+        execution_attempt: taskId === null ? null : executionAttempt,
+      })
       .where("id", "=", id)
+      .where("revoked_at", "is", null)
+      .execute();
+  }
+
+  async clearTask(id: string, taskId: string, executionAttempt: number): Promise<void> {
+    await this.db
+      .updateTable("cua_tokens")
+      .set({ task_id: null, execution_attempt: null })
+      .where("id", "=", id)
+      .where("task_id", "=", taskId)
+      .where("execution_attempt", "=", executionAttempt)
       .where("revoked_at", "is", null)
       .execute();
   }
@@ -171,6 +193,7 @@ function context(row: Selectable<CuaTokensTable>): CuaTokenContext {
     vmId: row.vm_id,
     sessionId: row.session_id,
     taskId: row.task_id,
+    executionAttempt: row.execution_attempt,
     expiresAt: row.expires_at,
   };
 }

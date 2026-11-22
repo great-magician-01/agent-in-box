@@ -24,35 +24,52 @@ export function WorkerConversation({
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const contextEpoch = useRef(0);
   const loadRequest = useRef(0);
+  const operationEpoch = useRef(0);
 
   const load = useCallback(async (): Promise<void> => {
     const request = ++loadRequest.current;
-    if (!workerId) {
-      setWorker(null);
-      setMessages([]);
+    const epoch = contextEpoch.current;
+    const targetWorkerId = workerId;
+    if (!targetWorkerId) {
+      if (contextEpoch.current === epoch && loadRequest.current === request) {
+        setWorker(null);
+        setMessages([]);
+      }
       return;
     }
     try {
       const [nextWorker, nextMessages] = await Promise.all([
-        api.worker(workerId),
-        api.workerMessages(workerId),
+        api.worker(targetWorkerId),
+        api.workerMessages(targetWorkerId),
       ]);
-      if (loadRequest.current !== request) return;
+      if (contextEpoch.current !== epoch || loadRequest.current !== request) return;
       setWorker(nextWorker);
       setMessages(nextMessages);
       setError(null);
     } catch (cause) {
-      if (loadRequest.current !== request) return;
+      if (contextEpoch.current !== epoch || loadRequest.current !== request) return;
       setError(errorMessage(cause));
     }
   }, [workerId]);
 
   useEffect(() => {
-    // A stale response must never be shown under the newly selected Worker.
+    const epoch = ++contextEpoch.current;
+    // Invalidate both loads and commands from the previously selected Worker.
+    operationEpoch.current += 1;
+    loadRequest.current += 1;
     setWorker(null);
     setMessages([]);
+    setText("");
+    setBusy(false);
     setError(null);
+    return () => {
+      if (contextEpoch.current !== epoch) return;
+      contextEpoch.current += 1;
+      operationEpoch.current += 1;
+      loadRequest.current += 1;
+    };
   }, [workerId]);
 
   useEffect(() => {
@@ -69,40 +86,56 @@ export function WorkerConversation({
   );
 
   async function submit(): Promise<void> {
-    if (!workerId || !text.trim() || !worker) return;
+    if (!workerId || !text.trim() || !worker || busy) return;
+    const targetWorkerId = workerId;
+    const epoch = contextEpoch.current;
+    const operation = ++operationEpoch.current;
+    const submittedText = text.trim();
+    const status = worker.worker.status;
+    const isCurrent = (): boolean =>
+      contextEpoch.current === epoch && operationEpoch.current === operation;
     setBusy(true);
     setError(null);
     try {
-      if (worker.worker.status === "running") {
-        await api.workerSteer(workerId, { text: text.trim() });
-      } else if (worker.worker.status === "idle") {
-        await api.workerPrompt(workerId, { text: text.trim() });
+      if (status === "running") {
+        await api.workerSteer(targetWorkerId, { text: submittedText });
+      } else if (status === "idle") {
+        await api.workerPrompt(targetWorkerId, { text: submittedText });
       } else {
-        await api.workerFollowUp(workerId, { text: text.trim() });
+        await api.workerFollowUp(targetWorkerId, { text: submittedText });
       }
+      if (!isCurrent()) return;
       setText("");
       await load();
+      if (!isCurrent()) return;
       jumpToLatest();
       onChanged?.();
     } catch (cause) {
-      setError(errorMessage(cause));
+      if (isCurrent()) setError(errorMessage(cause));
     } finally {
-      setBusy(false);
+      if (isCurrent()) setBusy(false);
     }
   }
 
   async function abort(): Promise<void> {
-    if (!workerId) return;
+    if (!workerId || busy) return;
+    const targetWorkerId = workerId;
+    const epoch = contextEpoch.current;
+    const operation = ++operationEpoch.current;
+    const isCurrent = (): boolean =>
+      contextEpoch.current === epoch && operationEpoch.current === operation;
     setBusy(true);
     setError(null);
     try {
-      await api.workerAbort(workerId);
+      await api.workerAbort(targetWorkerId);
+      if (!isCurrent()) return;
       await load();
+      if (!isCurrent()) return;
       onChanged?.();
     } catch (cause) {
-      setError(errorMessage(cause));
+      if (isCurrent()) setError(errorMessage(cause));
     } finally {
-      setBusy(false);
+      if (isCurrent()) setBusy(false);
     }
   }
 

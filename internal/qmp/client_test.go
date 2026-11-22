@@ -3,8 +3,10 @@ package qmp
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"net"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -54,6 +56,50 @@ func startFakeServer(t *testing.T, handler func(command recordedCommand) []strin
 		}
 	}()
 	return listener.Addr().String(), commands
+}
+
+func TestClientQueryUUID(t *testing.T) {
+	address, _ := startFakeServer(t, func(command recordedCommand) []string {
+		if command.Execute == "query-uuid" {
+			return []string{`{"return":{"UUID":"8f1d6a52-2c4b-4e18-9b47-3a0e5c6d7f80"}}`}
+		}
+		return []string{`{"return":{}}`}
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	client, err := Dial(ctx, address, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer client.Close()
+	uuid, err := client.QueryUUID(ctx)
+	if err != nil {
+		t.Fatalf("query uuid: %v", err)
+	}
+	if uuid != "8f1d6a52-2c4b-4e18-9b47-3a0e5c6d7f80" {
+		t.Fatalf("uuid = %q", uuid)
+	}
+}
+
+func TestDialUnixRequiresSocket(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	missing := filepath.Join(t.TempDir(), "missing.sock")
+	if _, err := DialUnix(ctx, missing, nil); err == nil {
+		t.Fatal("expected missing unix socket to fail")
+	}
+}
+
+func TestDialTLSRejectsInsecureConfig(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	// The config is rejected before any network access is attempted.
+	if _, err := DialTLS(ctx, "127.0.0.1:1", &tls.Config{InsecureSkipVerify: true}, nil); err == nil {
+		t.Fatal("expected InsecureSkipVerify to be rejected")
+	}
+	if _, err := DialTLS(ctx, "127.0.0.1:1", nil, nil); err == nil {
+		t.Fatal("expected a nil tls.Config to be rejected")
+	}
 }
 
 func TestClientHandshakeQueryAndEvents(t *testing.T) {

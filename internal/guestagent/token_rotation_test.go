@@ -6,11 +6,13 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"agent-in-box/internal/securefile"
 )
 
 func TestGuestAgentTokenFileRotationAndRevocation(t *testing.T) {
 	tokenFile := filepath.Join(t.TempDir(), "guest-agent.token")
-	if err := os.WriteFile(tokenFile, []byte("token-one\n"), 0o600); err != nil {
+	if err := securefile.InstallTokenAtomically(tokenFile, "token-one"); err != nil {
 		t.Fatal(err)
 	}
 	server := NewServerWithOptions(ServerOptions{TokenFile: tokenFile, Desktop: &fakeDesktop{}})
@@ -26,7 +28,7 @@ func TestGuestAgentTokenFileRotationAndRevocation(t *testing.T) {
 	if response := request("token-one"); response.Code != http.StatusOK {
 		t.Fatalf("initial token returned %d", response.Code)
 	}
-	if err := os.WriteFile(tokenFile, []byte("token-two\n"), 0o600); err != nil {
+	if err := securefile.InstallTokenAtomically(tokenFile, "token-two"); err != nil {
 		t.Fatal(err)
 	}
 	if response := request("token-one"); response.Code != http.StatusUnauthorized {

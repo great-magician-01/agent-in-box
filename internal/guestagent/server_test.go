@@ -92,6 +92,24 @@ func TestGuestAgentRestrictsClientCIDRs(t *testing.T) {
 	}
 }
 
+func TestGuestAgentRejectsInvalidClientCIDR(t *testing.T) {
+	server := NewServerWithOptions(ServerOptions{
+		Token:              "secret-token",
+		Desktop:            &fakeDesktop{},
+		AllowedClientCIDRs: []string{"not-a-cidr"},
+	})
+	if err := server.Validate(); err == nil {
+		t.Fatal("expected malformed CIDR to fail validation")
+	}
+	request := httptest.NewRequest(http.MethodGet, "/v1/capabilities", nil)
+	request.Header.Set("Authorization", "Bearer secret-token")
+	recorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("invalid CIDR must fail closed, got %d", recorder.Code)
+	}
+}
+
 func TestGuestAgentRejectsMissingTokenConfiguration(t *testing.T) {
 	server := NewServer("", &fakeDesktop{}, nil)
 	request := httptest.NewRequest(http.MethodGet, "/v1/capabilities", nil)

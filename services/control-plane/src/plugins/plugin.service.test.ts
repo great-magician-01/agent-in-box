@@ -144,27 +144,25 @@ describe("PluginService", () => {
     await expect(register(service, source)).rejects.toMatchObject({ code: "conflict" });
   });
 
-  it("requires AI registrations to present a passing report for the exact package hash", async () => {
+  it("treats the Guest test report as diagnostic rather than an authorization", async () => {
     const { root, service } = await createFixture();
     const source = await writePluginPackage(root);
-    const { packageSha256 } = await inspectPluginPackage(source);
-    const wrongHash = "0".repeat(64);
 
-    await expect(register(service, source, "ai")).rejects.toMatchObject({
-      code: "validation_failed",
-    });
-    await expect(
-      register(service, source, "ai", { status: "failed", packageSha256 }),
-    ).rejects.toMatchObject({ code: "validation_failed" });
-    await expect(
-      register(service, source, "ai", { status: "passed", packageSha256: wrongHash }),
-    ).rejects.toMatchObject({ code: "validation_failed" });
+    // A Guest can always claim "passed"; registration must not depend on it.
+    const unverified = await register(service, source, "ai");
+    expect(unverified.source).toBe("ai");
+    expect(unverified.testReport).toBeNull();
 
-    const report = { status: "passed", packageSha256, checks: ["manifest", "load"] };
-    const registered = await register(service, source, "ai", report);
+    const second = await createFixture();
+    const secondSource = await writePluginPackage(second.root);
+    const { packageSha256 } = await inspectPluginPackage(secondSource);
+    const report = { status: "failed", packageSha256 };
+    const registered = await register(second.service, secondSource, "ai", report);
     expect(registered.source).toBe("ai");
     expect(registered.testReport).toEqual(report);
-    expect(await service.list()).toHaveLength(1);
+    // Registering never enables: enablements require a local user action.
+    const enablements = await second.app.db.selectFrom("plugin_enablements").selectAll().execute();
+    expect(enablements).toHaveLength(0);
   });
 
   it("validates enablement parameters and requires an existing scope", async () => {
@@ -256,7 +254,7 @@ describe("PluginService", () => {
       entryPath: ENTRY,
     });
     const files = new Map(
-      packages[0].files.map((file) => [
+      packages[0]!.files.map((file) => [
         file.path,
         Buffer.from(file.dataBase64, "base64").toString("utf8"),
       ]),

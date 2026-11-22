@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -379,6 +380,48 @@ func TestContextCancellationKeepsResumablePartial(t *testing.T) {
 	if info.Size() <= 0 {
 		t.Fatalf("partial size = %d, want > 0", info.Size())
 	}
+}
+
+func TestHashStopsWhenCancelledDuringRead(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	reads := 0
+	reader := readerFunc(func(buffer []byte) (int, error) {
+		reads++
+		if reads == 1 {
+			copy(buffer, testImage(128))
+			cancel()
+			return 128, nil
+		}
+		t.Fatal("hashing continued after cancellation")
+		return 0, io.EOF
+	})
+	if _, err := hashReader(ctx, reader); !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
+	}
+}
+
+func TestActivationRejectsCancelledContext(t *testing.T) {
+	data := testImage(4096)
+	storage := t.TempDir()
+	finalPath := filepath.Join(storage, "cancel-activate.img")
+	partialPath := finalPath + partialSuffix
+	if err := os.WriteFile(partialPath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	manifest := manifestFor("https://example.invalid/image", filepath.Base(finalPath), data)
+	if _, err := New(storage).activate(ctx, partialPath, finalPath, int64(len(data)), manifest, 0, false, time.Now()); !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
+	}
+	mustHaveContent(t, partialPath, data)
+	mustNotExist(t, finalPath)
+}
+
+type readerFunc func([]byte) (int, error)
+
+func (read readerFunc) Read(buffer []byte) (int, error) {
+	return read(buffer)
 }
 
 func TestConcurrentSameTargetDownloadsOnce(t *testing.T) {

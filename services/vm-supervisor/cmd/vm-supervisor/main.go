@@ -15,7 +15,7 @@ import (
 	"agent-in-box/internal/vmsupervisor"
 )
 
-const version = "0.1.0"
+var version = "0.1.0"
 
 func main() {
 	defaultStorageRoot, err := vmsupervisor.DefaultStorageRoot(vmsupervisor.StoragePathOptions{})
@@ -60,14 +60,23 @@ func main() {
 		os.Exit(1)
 	}
 
+	shutdownRequested := make(chan struct{}, 1)
+	requestShutdown := func() {
+		select {
+		case shutdownRequested <- struct{}{}:
+		default:
+		}
+	}
+
 	supervisor, err := vmsupervisor.New(vmsupervisor.Config{
-		StorageRoot:   *storageRoot,
-		Provider:      provider,
-		Token:         token.Token,
-		Logger:        logger,
-		ServiceName:   "vm-supervisor",
-		Version:       version,
-		InstanceNonce: *instanceNonce,
+		StorageRoot:     *storageRoot,
+		Provider:        provider,
+		Token:           token.Token,
+		Logger:          logger,
+		ServiceName:     "vm-supervisor",
+		Version:         version,
+		InstanceNonce:   *instanceNonce,
+		RequestShutdown: requestShutdown,
 		QemuConfig: vmprovider.QemuConfig{
 			SystemBinary: *qemuSystem,
 			ImageBinary:  *qemuImg,
@@ -108,6 +117,8 @@ func main() {
 
 	select {
 	case <-ctx.Done():
+	case <-shutdownRequested:
+		logger.Info("vm-supervisor shutdown accepted from authenticated client")
 	case err := <-errCh:
 		if !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("vm-supervisor stopped unexpectedly", "error", err)

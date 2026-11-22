@@ -6,6 +6,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"agent-in-box/internal/securefile"
 )
 
 func TestValidateListenAddress(t *testing.T) {
@@ -83,7 +85,7 @@ func TestResolveACLTokenGeneratesSecureToken(t *testing.T) {
 
 func TestResolveACLTokenReadsExistingFileAndTrims(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "token")
-	if err := os.WriteFile(path, []byte("  file-token\n"), 0o600); err != nil {
+	if err := securefile.InstallTokenAtomically(path, "file-token"); err != nil {
 		t.Fatal(err)
 	}
 	result, err := ResolveACLToken(TokenOptions{
@@ -128,7 +130,7 @@ func TestResolveACLTokenEnvOverrideWhenFileMissing(t *testing.T) {
 
 func TestResolveACLTokenEnvFileLocation(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "env-token")
-	if err := os.WriteFile(path, []byte("from-env-file"), 0o600); err != nil {
+	if err := securefile.InstallTokenAtomically(path, "from-env-file"); err != nil {
 		t.Fatal(err)
 	}
 	result, err := ResolveACLToken(TokenOptions{

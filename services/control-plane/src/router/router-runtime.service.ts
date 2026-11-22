@@ -398,6 +398,7 @@ export class RouterRuntimeService implements OnModuleInit, OnModuleDestroy {
     if (!active) {
       throw new PersistenceError("conflict", "Router 会话未连接");
     }
+    this.toolBroker.cancel(conversationId);
     active.aborting = true;
     try {
       await active.engine.abort(active.sessionId);
@@ -660,6 +661,7 @@ export class RouterRuntimeService implements OnModuleInit, OnModuleDestroy {
   private async timeoutTurn(conversationId: string, active: ActiveRouter): Promise<void> {
     if (this.active !== active || !this.turnInFlight) return;
     this.logger.warn(`Router turn exceeded ${this.turnTimeoutMs} ms; aborting it`);
+    this.toolBroker.cancel(conversationId);
     active.aborting = true;
     try {
       await active.engine.abort(active.sessionId);
@@ -683,6 +685,7 @@ export class RouterRuntimeService implements OnModuleInit, OnModuleDestroy {
     errorCode: string | null,
   ): Promise<void> {
     if (this.active !== active) return;
+    this.toolBroker.cancel(conversationId);
     active.aborting = false;
     this.turnInFlight = false;
     if (active.turnTimer) {
@@ -711,6 +714,7 @@ export class RouterRuntimeService implements OnModuleInit, OnModuleDestroy {
 
   private async markFailed(conversationId: string, message: string): Promise<void> {
     this.turnInFlight = false;
+    this.toolBroker.cancel(conversationId);
     const active = this.active;
     this.active = null;
     if (active) {

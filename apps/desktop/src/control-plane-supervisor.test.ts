@@ -101,7 +101,13 @@ describe("control plane supervisor", () => {
     const child = new FakeChildProcess();
     let calls = 0;
     let captured:
-      { command: string; args: string[]; env?: NodeJS.ProcessEnv; cwd?: string } | undefined;
+      | {
+          command: string;
+          args: string[];
+          env?: NodeJS.ProcessEnv | undefined;
+          cwd?: string | undefined;
+        }
+      | undefined;
     const supervisor = new ControlPlaneSupervisor({
       entryPath: "/service/main.js",
       workingDirectory: "/service",
@@ -201,5 +207,99 @@ describe("control plane supervisor", () => {
     expect(children).toHaveLength(2);
     expect(children[0]?.signals).toEqual(["SIGTERM"]);
     expect(supervisor.getStatus().state).toBe("running");
+  });
+
+  it("stops an adopted instance through the authenticated shutdown channel", async () => {
+    let up = true;
+    let shutdownCalls = 0;
+    const supervisor = new ControlPlaneSupervisor({
+      entryPath: "/service/main.js",
+      workingDirectory: "/service",
+      port: 3000,
+      nodeCommand: "node",
+      instanceNonce,
+      logger: logger(),
+      fetchHealth: async () => (up ? health : null),
+      shutdown: async () => {
+        shutdownCalls += 1;
+        up = false;
+      },
+      spawnProcess: (() => {
+        throw new Error("must not spawn while adopting");
+      }) as unknown as typeof spawn,
+      stopTimeoutMs: 100,
+      shutdownConfirmMs: 200,
+    });
+
+    await supervisor.start();
+    expect(supervisor.getStatus().state).toBe("external");
+
+    await supervisor.stop();
+    expect(shutdownCalls).toBe(1);
+    expect(supervisor.getStatus().state).toBe("stopped");
+  });
+
+  it("does not report an adopted instance as stopped when shutdown is ineffective", async () => {
+    const supervisor = new ControlPlaneSupervisor({
+      entryPath: "/service/main.js",
+      workingDirectory: "/service",
+      port: 3000,
+      nodeCommand: "node",
+      instanceNonce,
+      logger: logger(),
+      fetchHealth: async () => health,
+      shutdown: async () => undefined,
+      spawnProcess: (() => {
+        throw new Error("must not spawn while adopting");
+      }) as unknown as typeof spawn,
+      stopTimeoutMs: 20,
+      shutdownConfirmMs: 50,
+    });
+
+    await supervisor.start();
+    await expect(supervisor.stop()).rejects.toThrow("仍在运行");
+    expect(supervisor.getStatus().state).toBe("failed");
+  });
+
+  it("refuses to claim an adopted instance is stopped without a shutdown channel", async () => {
+    const supervisor = new ControlPlaneSupervisor({
+      entryPath: "/service/main.js",
+      workingDirectory: "/service",
+      port: 3000,
+      nodeCommand: "node",
+      instanceNonce,
+      logger: logger(),
+      fetchHealth: async () => health,
+      spawnProcess: (() => {
+        throw new Error("must not spawn while adopting");
+      }) as unknown as typeof spawn,
+    });
+    await supervisor.start();
+    await expect(supervisor.stop()).rejects.toThrow("无法安全停止");
+    expect(supervisor.getStatus().state).toBe("failed");
+  });
+
+  it("surfaces asynchronous spawn errors instead of waiting for the startup timeout", async () => {
+    const child = new FakeChildProcess();
+    delete (child as unknown as { pid?: number }).pid;
+    const supervisor = new ControlPlaneSupervisor({
+      entryPath: "/service/main.js",
+      workingDirectory: "/service",
+      port: 3000,
+      nodeCommand: "node",
+      instanceNonce,
+      logger: logger(),
+      fetchHealth: async () => null,
+      spawnProcess: (() => {
+        setImmediate(() => child.emit("error", new Error("spawn node ENOENT")));
+        return child;
+      }) as unknown as typeof spawn,
+      startupTimeoutMs: 5_000,
+      stopTimeoutMs: 100,
+    });
+
+    await expect(supervisor.start()).rejects.toThrow("ENOENT");
+    expect(supervisor.getStatus().state).toBe("failed");
+    expect(supervisor.getStatus().pid).toBeNull();
   });
 });

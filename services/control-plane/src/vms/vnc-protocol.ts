@@ -1,109 +1,280 @@
+import net from "node:net";
+import tls, { type TLSSocket } from "node:tls";
+import { createHash } from "node:crypto";
+
 /**
- * Minimal RFB framing used at the trust boundary. The proxy forwards the
- * unauthenticated QEMU handshake, then understands client message boundaries so
- * keyboard, pointer and clipboard input can be checked against the VM Lease.
+ * RFB framing used at the trust boundary.
+ *
+ * The browser only ever speaks RFB 3.8 with the "None" security type to this
+ * proxy. The proxy performs the real upstream negotiation itself: a plain
+ * loopback no-auth handshake for legacy VMs, or VeNCrypt inside TLS with a
+ * pinned per-VM certificate for current VMs. Upstream security bytes are never
+ * forwarded to the renderer.
  */
-export class VncServerHandshake {
-  private buffer = Buffer.alloc(0);
-  private stage: "version" | "security-count" | "security-types" | "security-result" | "init" =
-    "version";
-  private securityBytes = 0;
-  private nameBytes = -1;
-  private complete = false;
 
-  get done(): boolean {
-    return this.complete;
-  }
+const RFB_VERSION = "RFB 003.008\n";
 
-  feed(chunk: Buffer): void {
-    if (this.complete) {
-      return;
-    }
-    this.buffer = Buffer.concat([this.buffer, chunk]);
-    while (!this.complete) {
-      if (this.stage === "version") {
-        if (this.buffer.length < 12) return;
-        if (!/^RFB \d{3}\.\d{3}\n$/.test(this.buffer.subarray(0, 12).toString("ascii"))) {
-          throw new Error("Invalid RFB version");
-        }
-        this.consume(12);
-        this.stage = "security-count";
-      } else if (this.stage === "security-count") {
-        if (this.buffer.length < 1) return;
-        this.securityBytes = this.buffer[0] ?? 0;
-        this.consume(1);
-        if (this.securityBytes === 0) throw new Error("RFB server rejected the connection");
-        this.stage = "security-types";
-      } else if (this.stage === "security-types") {
-        if (this.buffer.length < this.securityBytes) return;
-        if (!this.buffer.subarray(0, this.securityBytes).includes(1)) {
-          throw new Error("RFB server does not offer the loopback no-auth security type");
-        }
-        this.consume(this.securityBytes);
-        this.stage = "security-result";
-      } else if (this.stage === "security-result") {
-        if (this.buffer.length < 4) return;
-        if (this.buffer.readUInt32BE(0) !== 0) throw new Error("RFB security negotiation failed");
-        this.consume(4);
-        this.stage = "init";
-      } else {
-        if (this.nameBytes < 0) {
-          if (this.buffer.length < 24) return;
-          this.nameBytes = this.buffer.readUInt32BE(20);
-          if (this.nameBytes > 64 * 1024) throw new Error("RFB desktop name is too large");
-          this.consume(24);
-        }
-        if (this.buffer.length < this.nameBytes) return;
-        this.consume(this.nameBytes);
-        this.complete = true;
+export interface VncTlsOptions {
+  ca: string;
+  cert: string;
+  key: string;
+  /** Lowercase hex SHA-256 of the upstream server certificate. */
+  fingerprint: string;
+}
+
+export interface VncUpstreamOptions {
+  /** TLS is mandatory; a plain no-auth upstream is rejected. */
+  requireTls: boolean;
+  tls?: VncTlsOptions;
+}
+
+/**
+ * Exact-length reads in paused mode.
+ *
+ * Reading with socket.read(n) (instead of a "data" listener) leaves every byte
+ * beyond the requested count in the socket's internal buffer. That matters
+ * because the upstream connection is upgraded to TLS mid-stream: a flowing
+ * socket would have already drained the ServerInit or TLS bytes into user space
+ * where the TLS wrapper can never see them.
+ */
+export class ByteStream {
+  constructor(private readonly socket: net.Socket | TLSSocket) {}
+
+  async readExactly(count: number, timeoutMs: number): Promise<Buffer> {
+    const deadline = Date.now() + timeoutMs;
+    let collected = Buffer.alloc(0);
+    while (collected.length < count) {
+      const chunk = this.socket.read(count - collected.length);
+      if (chunk) {
+        collected = Buffer.concat([collected, chunk as Buffer]);
+        continue;
       }
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw new Error("RFB negotiation timed out");
+      await this.waitReadable(remaining);
     }
+    return collected;
   }
 
-  private consume(bytes: number): void {
-    this.buffer = this.buffer.subarray(bytes);
+  private waitReadable(timeoutMs: number): Promise<void> {
+    const socket = this.socket;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        cleanup();
+        reject(new Error("RFB negotiation timed out"));
+      }, timeoutMs);
+      timer.unref();
+      const onReadable = () => {
+        cleanup();
+        resolve();
+      };
+      const onClose = () => {
+        cleanup();
+        reject(new Error("RFB server closed the connection during negotiation"));
+      };
+      const onError = (error: Error) => {
+        cleanup();
+        reject(error);
+      };
+      const cleanup = () => {
+        clearTimeout(timer);
+        socket.off("readable", onReadable);
+        socket.off("close", onClose);
+        socket.off("end", onClose);
+        socket.off("error", onError);
+      };
+      socket.once("readable", onReadable);
+      socket.once("close", onClose);
+      socket.once("end", onClose);
+      socket.once("error", onError);
+    });
+  }
+}
+
+export interface VncUpstreamResult {
+  /** Socket carrying RFB application data (TLS socket for VeNCrypt). */
+  socket: net.Socket | TLSSocket;
+}
+
+const VENCRYPT_SECURITY_TYPE = 19;
+const VENCRYPT_X509_NONE = 256;
+const VENCRYPT_X509_VNC = 257;
+
+/**
+ * Negotiates the upstream VNC security handshake and returns the socket that
+ * carries RFB messages (the TLS socket for VeNCrypt). The caller attaches its
+ * data handler only after this resolves, so no security or TLS bytes can leak
+ * to the renderer.
+ */
+export async function negotiateVncUpstream(
+  socket: net.Socket,
+  options: VncUpstreamOptions,
+  timeoutMs = 15_000,
+): Promise<VncUpstreamResult> {
+  const stream = new ByteStream(socket);
+  // Paused mode is the whole point: bytes past the security result must stay in
+  // the socket so the TLS wrapper (or the caller's data handler) sees them.
+  socket.pause();
+  const version = await stream.readExactly(12, timeoutMs);
+  if (!/^RFB \d{3}\.\d{3}\n$/.test(version.toString("ascii"))) {
+    throw new Error("Invalid RFB version from VNC server");
+  }
+  socket.write(RFB_VERSION);
+
+  const count = (await stream.readExactly(1, timeoutMs))[0] ?? 0;
+  if (count === 0) throw new Error("VNC server rejected the connection");
+  const types = await stream.readExactly(count, timeoutMs);
+
+  if (types.includes(VENCRYPT_SECURITY_TYPE)) {
+    if (!options.tls) {
+      throw new Error("VNC server requires VeNCrypt but no certificate was configured");
+    }
+    socket.write(Buffer.from([VENCRYPT_SECURITY_TYPE]));
+    const major = (await stream.readExactly(1, timeoutMs))[0] ?? 0;
+    const minor = (await stream.readExactly(1, timeoutMs))[0] ?? 0;
+    if (major !== 0 || minor > 2) {
+      throw new Error(`Unsupported VeNCrypt version ${major}.${minor}`);
+    }
+    const subtypeCount = (await stream.readExactly(1, timeoutMs))[0] ?? 0;
+    if (subtypeCount === 0) throw new Error("VeNCrypt offered no subtypes");
+    const raw = await stream.readExactly(subtypeCount * 4, timeoutMs);
+    const subtypes: number[] = [];
+    for (let index = 0; index < subtypeCount; index += 1) {
+      subtypes.push(raw.readUInt32BE(index * 4));
+    }
+    const subtype = subtypes.includes(VENCRYPT_X509_VNC)
+      ? VENCRYPT_X509_VNC
+      : subtypes.includes(VENCRYPT_X509_NONE)
+        ? VENCRYPT_X509_NONE
+        : -1;
+    if (subtype < 0) {
+      throw new Error("VeNCrypt offered no X509 subtype");
+    }
+    const choice = Buffer.alloc(4);
+    choice.writeUInt32BE(subtype, 0);
+    socket.write(choice);
+
+    // The TLS handshake starts immediately after the subtype selection; the
+    // client speaks first, so no server bytes can be pending here.
+    const secure = tls.connect({
+      socket,
+      ca: [options.tls.ca],
+      cert: options.tls.cert,
+      key: options.tls.key,
+      servername: "agent-in-box-qemu",
+      rejectUnauthorized: true,
+      minVersion: "TLSv1.2",
+    });
+    await onceSecure(secure, timeoutMs);
+    const peer = secure.getPeerCertificate();
+    if (!peer || !peer.raw || peer.raw.length === 0) {
+      throw new Error("VNC server presented no certificate");
+    }
+    const fingerprint = createHash("sha256").update(peer.raw).digest("hex");
+    if (fingerprint !== options.tls.fingerprint.toLowerCase()) {
+      throw new Error("VNC server certificate fingerprint mismatch");
+    }
+    const secureStream = new ByteStream(secure);
+    const result = await secureStream.readExactly(4, timeoutMs);
+    if (result.readUInt32BE(0) !== 0) {
+      throw new Error("VeNCrypt authentication failed");
+    }
+    return { socket: secure };
+  }
+
+  if (types.includes(1) && !options.requireTls) {
+    socket.write(Buffer.from([1]));
+    const result = await stream.readExactly(4, timeoutMs);
+    if (result.readUInt32BE(0) !== 0) {
+      throw new Error("RFB security negotiation failed");
+    }
+    return { socket };
+  }
+
+  throw new Error(
+    options.requireTls
+      ? "VNC server did not offer TLS"
+      : "VNC server does not offer the loopback no-auth security type",
+  );
+}
+
+function onceSecure(socket: tls.TLSSocket, timeoutMs: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error("VNC TLS handshake timed out"));
+    }, timeoutMs);
+    timer.unref();
+    const onSecure = () => {
+      cleanup();
+      resolve();
+    };
+    const onError = (error: Error) => {
+      cleanup();
+      reject(error);
+    };
+    const cleanup = () => {
+      clearTimeout(timer);
+      socket.off("secureConnect", onSecure);
+      socket.off("error", onError);
+    };
+    socket.once("secureConnect", onSecure);
+    socket.once("error", onError);
+  });
+}
+
+export interface VncDownstreamResult {
+  /** Bytes the proxy must send to the browser for this chunk. */
+  reply: Buffer | null;
+  /** Client bytes that follow the security choice (forwarded after ServerInit). */
+  pending: Buffer;
+  done: boolean;
+}
+
+/**
+ * Consumes the browser's no-auth RFB 3.8 negotiation. The proxy sends the
+ * server version and the single "None" security type itself; the client's
+ * version and security selection are consumed rather than forwarded upstream.
+ */
+export class VncDownstreamHandshake {
+  private buffer = Buffer.alloc(0);
+  private stage: "version" | "security" | "done" = "version";
+
+  feed(chunk: Buffer): VncDownstreamResult {
+    this.buffer = Buffer.concat([this.buffer, chunk]);
+    let reply: Buffer | null = null;
+    while (this.stage !== "done") {
+      if (this.stage === "version") {
+        if (this.buffer.length < 12) break;
+        const version = this.buffer.subarray(0, 12);
+        if (version.toString("ascii") !== RFB_VERSION) {
+          throw new Error("Only RFB 3.8 clients are supported");
+        }
+        this.buffer = this.buffer.subarray(12);
+        reply = Buffer.concat([reply ?? Buffer.alloc(0), Buffer.from([1, 1])]);
+        this.stage = "security";
+        continue;
+      }
+      if (this.buffer.length < 1) break;
+      const choice = this.buffer[0];
+      this.buffer = this.buffer.subarray(1);
+      if (choice !== 1) {
+        throw new Error("Only the no-auth security type is offered to the client");
+      }
+      // RFB 3.8 still expects a SecurityResult even for the None type.
+      reply = Buffer.concat([reply ?? Buffer.alloc(0), Buffer.alloc(4)]);
+      this.stage = "done";
+    }
+    if (this.buffer.length > 1024 * 1024) throw new Error("RFB pre-init buffer is too large");
+    const pending = this.buffer;
+    this.buffer = Buffer.alloc(0);
+    return { reply, pending, done: this.stage === "done" };
   }
 }
 
 export interface VncClientFrame {
   data: Buffer;
   requiresLease: boolean;
-}
-
-export interface VncNegotiationResult {
-  negotiation: Buffer[];
-  pending: Buffer;
-}
-
-/** Only the three exact RFB 3.8 no-auth client negotiation messages may pass
- * before ServerInit. Everything later is buffered for Lease-aware framing. */
-export class VncClientNegotiation {
-  private buffer = Buffer.alloc(0);
-  private stage: "version" | "security" | "init" | "done" = "version";
-
-  feed(chunk: Buffer): VncNegotiationResult {
-    this.buffer = Buffer.concat([this.buffer, chunk]);
-    const negotiation: Buffer[] = [];
-    while (this.stage !== "done") {
-      const needed = this.stage === "version" ? 12 : 1;
-      if (this.buffer.length < needed) break;
-      const message = this.buffer.subarray(0, needed);
-      this.buffer = this.buffer.subarray(needed);
-      if (this.stage === "version" && message.toString("ascii") !== "RFB 003.008\n") {
-        throw new Error("Only RFB 3.8 clients are supported");
-      }
-      if (this.stage === "security" && message[0] !== 1) {
-        throw new Error("Only loopback no-auth RFB negotiation is supported");
-      }
-      negotiation.push(message);
-      this.stage =
-        this.stage === "version" ? "security" : this.stage === "security" ? "init" : "done";
-    }
-    if (this.buffer.length > 1024 * 1024) throw new Error("RFB pre-init buffer is too large");
-    const pending = this.buffer;
-    this.buffer = Buffer.alloc(0);
-    return { negotiation, pending };
-  }
 }
 
 export class VncClientFramer {

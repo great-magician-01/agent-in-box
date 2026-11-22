@@ -151,7 +151,8 @@ async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
     signal: init.signal ?? AbortSignal.timeout(30_000),
   });
   if (response.status === 401 && !path.endsWith("/auth/login")) {
-    csrfToken = null;
+    // App owns CSRF updates. A late 401 must not clear a token installed by a
+    // newer authentication response before App can sequence the session query.
     window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
   }
   if (!response.ok) {
@@ -368,27 +369,19 @@ function taskBoardQuery(filters: TaskListFilters): string {
 
 export const api = {
   health: fetchHealth,
-  authSession: async () => {
-    const result = await apiFetch<LocalAuthSessionView>("/api/v1/auth/session");
-    setCsrfToken(result.csrfToken);
-    return result;
-  },
-  login: async (body: LocalAuthLoginRequest) => {
-    const result = await apiFetch<LocalAuthSessionView>("/api/v1/auth/login", {
+  // Deliberately side-effect free: App sequences all session responses before
+  // publishing either authentication state or the matching CSRF token.
+  authSession: () => apiFetch<LocalAuthSessionView>("/api/v1/auth/session"),
+  login: (body: LocalAuthLoginRequest) =>
+    apiFetch<LocalAuthSessionView>("/api/v1/auth/login", {
       method: "POST",
       body: JSON.stringify(body),
-    });
-    setCsrfToken(result.csrfToken);
-    return result;
-  },
-  logout: async () => {
-    const result = await apiFetch<LocalAuthSessionView>("/api/v1/auth/logout", {
+    }),
+  logout: () =>
+    apiFetch<LocalAuthSessionView>("/api/v1/auth/logout", {
       method: "POST",
       body: JSON.stringify({}),
-    });
-    setCsrfToken(null);
-    return result;
-  },
+    }),
   rotateAccessKey: () =>
     apiFetch<LocalAuthRotateResult>("/api/v1/auth/rotate", {
       method: "POST",

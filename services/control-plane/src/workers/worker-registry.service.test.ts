@@ -85,8 +85,6 @@ async function insertTask(
     originConversationId: harness.conversationId,
     assignedWorkerId: null,
     parentTaskId: null,
-    objective: input.objective,
-    status: input.status,
     priority: 0,
     attemptCount: 0,
     createdAt: now,
@@ -97,6 +95,7 @@ async function insertTask(
     result: null,
     errorCode: null,
     errorMessage: null,
+    targetWorkerId: null,
     ...input,
   };
   await harness.taskRepository.insertTask(task);
@@ -248,6 +247,7 @@ describe("WorkerRegistryService", () => {
         task_id: taskId,
         acquired_at: new Date().toISOString(),
         expires_at: new Date(Date.now() + 60_000).toISOString(),
+        preemptible: 1,
       })
       .execute();
 

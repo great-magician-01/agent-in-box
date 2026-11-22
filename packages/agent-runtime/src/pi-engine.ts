@@ -17,6 +17,7 @@ import {
   type WorkerPluginPackageSpec,
   type WorkerSessionHandle,
   type WorkerSessionSpec,
+  type WorkerTurnContext,
 } from "./index";
 import { PiRpcProcess } from "./pi-rpc-process";
 
@@ -53,6 +54,7 @@ interface PiSession {
   sessionFile: string | null;
   closing: boolean;
   homeDirectory: string;
+  currentTurn: WorkerTurnContext | null;
   plugins?: SessionPlugin[];
 }
 
@@ -249,6 +251,7 @@ export class PiWorkerEngine implements WorkerEngine {
         sessionFile,
         closing: false,
         homeDirectory,
+        currentTurn: null,
         plugins: sessionPlugins,
         ...handle,
       };
@@ -345,6 +348,11 @@ export class PiWorkerEngine implements WorkerEngine {
 
   async prompt(sessionId: string, input: WorkerInput): Promise<void> {
     const session = this.getSession(sessionId);
+    const turn = input.turn;
+    if (session.currentTurn) throw new Error("The previous Worker turn has not finished");
+    // Bind before writing the RPC request. A lost response can never turn into
+    // an untracked Pi turn whose later events are attributed to another task.
+    if (turn) session.currentTurn = turn;
     await session.process.command("prompt", {
       message: input.text,
       ...(await this.readImages(input.attachments, input.images)),
@@ -353,6 +361,7 @@ export class PiWorkerEngine implements WorkerEngine {
 
   async steer(sessionId: string, input: WorkerInput): Promise<"queued" | "handled"> {
     const session = this.getSession(sessionId);
+    assertExpectedTurn(session.currentTurn, input.turn);
     const data = await session.process.command<{ disposition?: string }>("steer", {
       message: input.text,
       ...(await this.readImages(input.attachments, input.images)),
@@ -362,6 +371,7 @@ export class PiWorkerEngine implements WorkerEngine {
 
   async followUp(sessionId: string, input: WorkerInput): Promise<"queued" | "handled"> {
     const session = this.getSession(sessionId);
+    assertExpectedTurn(session.currentTurn, input.turn);
     const data = await session.process.command<{ disposition?: string }>("follow_up", {
       message: input.text,
       ...(await this.readImages(input.attachments, input.images)),
@@ -369,26 +379,42 @@ export class PiWorkerEngine implements WorkerEngine {
     return data.disposition === "handled" ? "handled" : "queued";
   }
 
-  async abort(sessionId: string): Promise<void> {
-    await this.getSession(sessionId).process.command("abort");
+  async abort(sessionId: string, expectedTurn?: WorkerTurnContext): Promise<void> {
+    const session = this.getSession(sessionId);
+    assertExpectedTurn(session.currentTurn, expectedTurn);
+    await session.process.command("abort");
+  }
+
+  async close(sessionId: string): Promise<void> {
+    const session = this.getSession(sessionId);
+    session.closing = true;
+    this.sessions.delete(sessionId);
+    await session.process.close();
+    await rm(path.join(session.homeDirectory, ".pi", "agent", "models.json"), { force: true });
   }
 
   subscribe(sessionId: string, listener: (event: WorkerEngineEvent) => void): () => void {
     const session = this.getSession(sessionId);
     return session.process.onEvent((event) => {
+      const turn = session.currentTurn ?? undefined;
       if (event.type === "process_exit") {
         if (session.closing || event.expected === true) {
-          listener({ type: "session_ended", reason: "completed" });
+          listener({ type: "session_ended", reason: "completed", ...(turn ? { turn } : {}) });
         } else {
           listener({
             type: "session_failed",
             message: `Pi RPC exited unexpectedly (code=${String(event.code)}, signal=${String(event.signal)})`,
+            ...(turn ? { turn } : {}),
           });
         }
+        session.currentTurn = null;
         return;
       }
       const mapped = mapPiEvent(event);
-      if (mapped) listener(mapped);
+      if (mapped) {
+        listener({ ...mapped, ...(turn ? { turn } : {}) });
+        if (mapped.type === "turn_finished") session.currentTurn = null;
+      }
     });
   }
 
@@ -584,6 +610,21 @@ function subagentChildArgs(
   }
   if (noBuiltinTools) args.push("--no-builtin-tools");
   return args;
+}
+
+function assertExpectedTurn(
+  current: WorkerTurnContext | null,
+  expected: WorkerTurnContext | undefined,
+): void {
+  if (!expected) return;
+  if (
+    !current ||
+    current.turnId !== expected.turnId ||
+    current.taskId !== expected.taskId ||
+    current.executionAttempt !== expected.executionAttempt
+  ) {
+    throw new Error("Worker turn identity does not match the active execution");
+  }
 }
 
 function mapPiEvent(event: Record<string, unknown>): WorkerEngineEvent | null {

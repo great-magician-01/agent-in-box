@@ -34,9 +34,16 @@ const privateKey = createPrivateKey(readFileSync(keyPath, "utf8"));
 if (privateKey.asymmetricKeyType !== "ed25519") {
   throw new Error("private key must be Ed25519");
 }
+// Purpose-scoped payload: the desktop verifier signs the domain string, a
+// newline, and the canonical JSON of the manifest.
+const DOMAIN = "agent-in-box/desktop-update/v1";
 const signature = sign(
   null,
-  Buffer.from(canonicalJson(manifest), "utf8"),
+  Buffer.from(
+    `${DOMAIN}
+${canonicalJson(manifest)}`,
+    "utf8",
+  ),
   privateKey,
 ).toString("base64");
 writeFileSync(outputPath, `${JSON.stringify({ manifest, signature }, null, 2)}\n`, {
@@ -45,6 +52,7 @@ writeFileSync(outputPath, `${JSON.stringify({ manifest, signature }, null, 2)}\n
 console.log(
   JSON.stringify({
     output: outputPath,
+    domain: DOMAIN,
     publicKey: privateKey.asymmetricKeyType,
     signatureBytes: Buffer.from(signature, "base64").length,
   }),

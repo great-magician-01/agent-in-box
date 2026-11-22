@@ -3,6 +3,7 @@ import { AuthModule } from "./auth/auth.module";
 import { PersistenceModule } from "./persistence/persistence.module";
 import { HealthController } from "./health.controller";
 import { RuntimeController } from "./runtime.controller";
+import { ShutdownController } from "./shutdown.controller";
 import { SettingsModule } from "./settings/settings.module";
 import { StorageModule } from "./storage/storage.module";
 import { HostModule } from "./host/host.module";
@@ -49,6 +50,6 @@ import { PluginModule } from "./plugins/plugin.module";
     BootstrapModule,
     PluginModule,
   ],
-  controllers: [HealthController, RuntimeController],
+  controllers: [HealthController, RuntimeController, ShutdownController],
 })
 export class AppModule {}

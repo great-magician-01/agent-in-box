@@ -17,6 +17,7 @@ export interface AcquireLeaseInput {
   owner: "worker" | "human";
   taskId: string | null;
   ttlMs?: number;
+  preemptible?: boolean;
   now?: Date;
 }
 
@@ -65,6 +66,9 @@ export class LeaseService {
           if (sameWorker) {
             return existingActive;
           }
+          if (!existingActive.preemptible) {
+            throw new LeaseConflictError(input.vmId);
+          }
           // Human takeover is deliberate preemption. Workers must never preempt
           // one another or a human; a new human session also revokes old consoles.
           if (input.owner !== "human") {
@@ -82,6 +86,7 @@ export class LeaseService {
           taskId: input.taskId,
           acquiredAt: now.toISOString(),
           expiresAt: new Date(now.getTime() + ttlMs).toISOString(),
+          preemptible: input.preemptible !== false,
         };
         await this.leases.insert(lease, trx);
         await this.writeControlEvent(trx, controlState(existingActive), controlState(lease), lease);

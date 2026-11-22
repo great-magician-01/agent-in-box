@@ -140,4 +140,16 @@ describe("validateLocalRequest", () => {
     ).toThrow(/跨站/);
     expect(() => validateLocalRequest(request({ host: "evil.example:3000" }))).toThrow(/回环/);
   });
+
+  it("refuses a group- or world-readable access key on POSIX", async () => {
+    if (process.platform === "win32") return;
+    const auth = new AuthService(ctx.app.db, { accessKeyPath });
+    auth.ensureAccessKey();
+    fs.chmodSync(accessKeyPath, 0o644);
+    await expect(
+      auth.login({ accessKey: fs.readFileSync(accessKeyPath, "utf8").trim() }),
+    ).rejects.toMatchObject({
+      code: "unavailable",
+    });
+  });
 });

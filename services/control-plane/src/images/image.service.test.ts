@@ -11,7 +11,9 @@ import type { DatabaseService } from "../persistence/database.service";
 import { ImageService } from "./image.service";
 
 function bytes(size: number): Buffer {
-  return Buffer.alloc(size, 0).map((_, index) => (index * 131 + 17) % 251);
+  const buffer = Buffer.alloc(size, 0);
+  for (let index = 0; index < size; index += 1) buffer[index] = (index * 131 + 17) % 251;
+  return buffer;
 }
 
 function sha256(data: Buffer): string {
@@ -258,6 +260,27 @@ describe("ImageService", () => {
     await writeFile(manifestPath, JSON.stringify(manifest));
     await expect(images.refresh()).rejects.toThrow(/新的版本 ID/);
     expect(await readFile(oldPath)).toEqual(data);
+    expect((await images.get("linux-v1")).status).toBe("available");
+    await images.onModuleDestroy();
+  });
+
+  it("rejects a new image ID that reuses a historical file name", async () => {
+    const original = bytes(64 * 1024);
+    const server = createServer((_request, response) => response.end(original));
+    servers.push(server);
+    const url = await listen(server);
+    await writeManifest(url, original);
+    const images = service();
+    await images.onModuleInit();
+    const available = await images.download("linux-v1");
+    const oldPath = available.localPath!;
+
+    const replacement = Buffer.from(bytes(64 * 1024).map((byte) => byte ^ 0xff));
+    const manifest = await writeManifest(url, replacement, "v2");
+    manifest.images[0]!.fileName = "linux-v1.qcow2";
+    await writeFile(manifestPath, JSON.stringify(manifest));
+    await expect(images.refresh()).rejects.toThrow(/历史镜像文件名/);
+    expect(await readFile(oldPath)).toEqual(original);
     expect((await images.get("linux-v1")).status).toBe("available");
     await images.onModuleDestroy();
   });

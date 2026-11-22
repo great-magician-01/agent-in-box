@@ -13,10 +13,14 @@ import { nowIso } from "../persistence/time";
 
 export const INBOX_OPTIONS = Symbol("INBOX_OPTIONS");
 export const DEFAULT_INBOX_MAX_BYTES = 256 * 1024 * 1024;
+/** Total inbox storage per installation; uploads fail closed beyond this. */
+export const DEFAULT_INBOX_TOTAL_BYTES = 2 * 1024 * 1024 * 1024;
 const MAX_NAME_LENGTH = 180;
 
 export interface InboxOptions {
   maxBytes?: number;
+  /** Total bytes allowed across active inbox files. */
+  totalBytes?: number;
   now?: () => Date;
 }
 
@@ -45,6 +49,7 @@ export function sanitizeFileName(raw: string): string {
 @Injectable()
 export class InboxService {
   private readonly maxBytes: number;
+  private readonly totalBytes: number;
   private readonly now: () => Date;
 
   constructor(
@@ -53,6 +58,7 @@ export class InboxService {
     @Inject(INBOX_OPTIONS) private readonly options: InboxOptions,
   ) {
     this.maxBytes = options.maxBytes ?? DEFAULT_INBOX_MAX_BYTES;
+    this.totalBytes = Math.max(this.maxBytes, options.totalBytes ?? DEFAULT_INBOX_TOTAL_BYTES);
     this.now = options.now ?? (() => new Date());
   }
 
@@ -62,6 +68,15 @@ export class InboxService {
 
   maxUploadBytes(): number {
     return this.maxBytes;
+  }
+
+  private async usedBytes(): Promise<number> {
+    const result = await this.db
+      .selectFrom("inbox_files")
+      .select((expression) => expression.fn.sum<number>("size_bytes").as("total"))
+      .where("deleted_at", "is", null)
+      .executeTakeFirst();
+    return Number(result?.total ?? 0);
   }
 
   async upload(input: {
@@ -94,6 +109,19 @@ export class InboxService {
       }
     }
 
+    const alreadyUsed = await this.usedBytes();
+    if (
+      alreadyUsed >= this.totalBytes ||
+      (input.declaredBytes !== undefined &&
+        input.declaredBytes !== null &&
+        alreadyUsed + input.declaredBytes > this.totalBytes)
+    ) {
+      throw new PersistenceError(
+        "conflict",
+        `收件箱总容量已超过上限 ${Math.floor(this.totalBytes / 1024 / 1024)} MiB，请先删除旧文件`,
+      );
+    }
+
     await fs.promises.mkdir(this.directory(), { recursive: true, mode: 0o700 });
     const id = randomUUID();
     const storedPath = path.join(this.directory(), `${id}-${name}`);
@@ -105,6 +133,12 @@ export class InboxService {
       for await (const chunk of input.stream) {
         const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
         size += buffer.length;
+        if (alreadyUsed + size > this.totalBytes) {
+          throw new PersistenceError(
+            "conflict",
+            `收件箱总容量超过上限 ${Math.floor(this.totalBytes / 1024 / 1024)} MiB`,
+          );
+        }
         if (size > this.maxBytes) {
           throw new PersistenceError(
             "validation_failed",

@@ -22,4 +22,28 @@ export default async function restoreControlPlaneNodeModules(context) {
     throw new Error(`Refusing to replace an existing packaged dependency tree: ${nodeModules}`);
   }
   await rename(stagedModules, nodeModules);
+
+  // A release artifact must be able to verify its own update feed. Local
+  // packaging may omit the key, in which case the app fails closed (no update
+  // checks) instead of trusting an unverified manifest.
+  if (process.env.AGENT_IN_BOX_REQUIRE_RELEASE_SIGNING === "1") {
+    for (const keyName of ["update-public-key.pem", "runtime-public-key.pem"]) {
+      const key = await stat(path.join(resourcesDirectory, keyName)).catch(() => null);
+      if (!key?.isFile()) {
+        throw new Error(`Release packaging requires ${path.join(resourcesDirectory, keyName)}`);
+      }
+    }
+    for (const required of [
+      "vm-supervisor",
+      "guest-runtime",
+      "router-runtime",
+      "control-plane",
+      "web",
+    ]) {
+      const directory = await stat(path.join(resourcesDirectory, required)).catch(() => null);
+      if (!directory?.isDirectory()) {
+        throw new Error(`Release packaging is missing required resource: ${required}`);
+      }
+    }
+  }
 }

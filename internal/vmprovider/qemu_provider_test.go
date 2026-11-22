@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"agent-in-box/internal/securefile"
 )
 
 func TestValidateSpec(t *testing.T) {
@@ -285,7 +287,8 @@ func TestQemuProviderCreateSnapshotAndDelete(t *testing.T) {
 		t.Fatalf("get state: %+v %v", state, err)
 	}
 	console, err := provider.AttachConsole(ctx, "vm-1")
-	if err != nil || !strings.HasPrefix(console, "vnc://127.0.0.2:") {
+	if err != nil || !strings.HasPrefix(console, "vnc+tls://127.0.0.2:") ||
+		!strings.Contains(console, "fingerprint=") || !strings.Contains(console, "cert=") {
 		t.Fatalf("console: %q %v", console, err)
 	}
 
@@ -304,6 +307,93 @@ func TestQemuProviderCreateSnapshotAndDelete(t *testing.T) {
 		if !strings.Contains(string(logData), expected) {
 			t.Fatalf("qemu-img log missing %q:\n%s", expected, logData)
 		}
+	}
+}
+
+func TestBuildQemuArgsUsesSecureTransports(t *testing.T) {
+	root := t.TempDir()
+	vmDir := filepath.Join(root, "vm-transport")
+	if err := os.MkdirAll(vmDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	credentials, err := loadVMCredentials(vmDir)
+	if err != nil {
+		t.Fatalf("credentials: %v", err)
+	}
+	for _, name := range []string{tlsCACertFile, tlsServerCertFile, tlsServerKeyFile, tlsClientCertFile, tlsClientKeyFile} {
+		path := filepath.Join(credentials.Dir, name)
+		if _, err := securefile.ReadToken(path); err != nil {
+			t.Fatalf("%s is not a protected credential file: %v", name, err)
+		}
+		if runtime.GOOS != "windows" {
+			info, statErr := os.Stat(path)
+			if statErr != nil {
+				t.Fatalf("missing %s: %v", name, statErr)
+			}
+			if info.Mode().Perm()&0o077 != 0 {
+				t.Fatalf("%s permissions are %o, want owner-only", name, info.Mode().Perm())
+			}
+		}
+	}
+	if len(credentials.Fingerprint) != 64 {
+		t.Fatalf("fingerprint = %q", credentials.Fingerprint)
+	}
+	if _, err := pinnedClientConfig(credentials); err != nil {
+		t.Fatalf("pinned client config: %v", err)
+	}
+
+	base := vmMetadata{
+		Spec: VmSpec{
+			ID: "vm-transport", UUID: testVMUUID, BaseImagePath: "/images/base.qcow2",
+			CPUCount: 2, MemoryMB: 2048, QMPPort: 14445, VNCDisplay: 2,
+		},
+		State: VmState{DiskPath: filepath.Join(vmDir, "disk.qcow2")},
+	}
+
+	base.State.Transport = transportUnix
+	unixArgs, err := buildQemuArgs(&base, "kvm", "max")
+	if err != nil {
+		t.Fatal(err)
+	}
+	unixJoined := strings.Join(unixArgs, " ")
+	if !strings.Contains(unixJoined, "unix:") || !strings.Contains(unixJoined, "qmp.sock") {
+		t.Fatalf("unix transport args missing qmp socket: %s", unixJoined)
+	}
+	if strings.Contains(unixJoined, "-qmp tcp:") {
+		t.Fatalf("unix transport kept an unauthenticated qmp listener: %s", unixJoined)
+	}
+	if !strings.Contains(unixJoined, "tls-creds=vnc-tls0") || !strings.Contains(unixJoined, "verify-peer=on") {
+		t.Fatalf("unix transport VNC is not TLS protected: %s", unixJoined)
+	}
+
+	base.State.Transport = transportTLS
+	tlsArgs, err := buildQemuArgs(&base, "whpx", "qemu64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tlsJoined := strings.Join(tlsArgs, " ")
+	for _, expected := range []string{
+		"tls-creds-x509,id=vnc-tls0",
+		"tls-creds-x509,id=qmp-tls0",
+		"tls-creds=qmp-tls0",
+		"tls-creds=vnc-tls0",
+		"-qmp chardev=qmp0",
+	} {
+		if !strings.Contains(tlsJoined, expected) {
+			t.Fatalf("tls transport args missing %q: %s", expected, tlsJoined)
+		}
+	}
+	if strings.Contains(tlsJoined, "-qmp tcp:") {
+		t.Fatalf("tls transport kept an unauthenticated qmp listener: %s", tlsJoined)
+	}
+
+	base.State.Transport = transportLegacy
+	legacyArgs, err := buildQemuArgs(&base, "whpx", "qemu64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(legacyArgs, " "), "tcp:127.0.0.2:14445") {
+		t.Fatal("legacy transport no longer reproduces historical args")
 	}
 }
 
@@ -333,19 +423,72 @@ func TestUsedVmResourcesSeparatesPortsAndLegacyVncSentinel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	used := provider.usedVmResources()
-	if !used.qmpPorts[41001] || !used.sshPorts[41002] ||
-		!used.guestPorts[41003] || !used.workerPorts[41004] {
-		t.Fatalf("ports not reserved: %+v", used)
+	used, err := provider.usedVmResources()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for port, role := range map[int]string{41001: "qmp", 41002: "ssh", 41003: "guest", 41004: "worker"} {
+		if owner, ok := used.ports[port]; !ok || !strings.Contains(owner, role) {
+			t.Fatalf("port %d (%s) not reserved as expected: %+v", port, role, used.ports)
+		}
 	}
 	if used.vncDisplays[0] {
 		t.Fatal("legacy display 0 must remain the unset sentinel")
 	}
-	display, err := freeVNCDisplay(used.vncDisplays)
+	display, err := freeVNCDisplay(used)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if display < 1 {
 		t.Fatalf("new display must not reuse the sentinel, got %d", display)
+	}
+}
+
+func TestUsedVmResourcesRejectsCrossRoleAndCrossVmConflicts(t *testing.T) {
+	root := t.TempDir()
+	writeMetadata := func(id string, spec VmSpec) {
+		t.Helper()
+		dir := filepath.Join(root, id)
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		data, err := json.Marshal(vmMetadata{Spec: spec, State: VmState{ID: id, PowerState: PowerStopped}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, metadataFilename), data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeMetadata("vm-1", VmSpec{
+		ID: "vm-1", BaseImagePath: "base", CPUCount: 1, MemoryMB: 512, DiskSizeGB: 1,
+		QMPPort: 42001, SSHHostPort: 42002, VNCDisplay: 3,
+	})
+	provider, err := NewQemuProvider(QemuConfig{StorageRoot: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Another VM's QMP port must not be reusable as this VM's guest port, and
+	// VNC's implied 5903 must be in the same namespace.
+	used, err := provider.usedVmResources()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := used.reserve(42001, "guest"); err == nil {
+		t.Fatal("cross-role port conflict was accepted")
+	}
+	if err := used.reserve(5903, "worker"); err == nil {
+		t.Fatal("VNC port was not reserved in the TCP namespace")
+	}
+	if used.vncDisplays[3] != true {
+		t.Fatal("VNC display was not reserved")
+	}
+
+	// Corrupt metadata must fail closed instead of silently freeing its ports.
+	if err := os.WriteFile(filepath.Join(root, "vm-1", metadataFilename), []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.usedVmResources(); err == nil {
+		t.Fatal("corrupt metadata was skipped silently")
 	}
 }

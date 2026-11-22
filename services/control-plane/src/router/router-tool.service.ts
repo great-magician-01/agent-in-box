@@ -23,6 +23,7 @@ export interface RouterToolContext {
    * Omitted for direct/internal callers; those get a fresh key per invocation.
    */
   toolCallId?: string;
+  signal?: AbortSignal;
 }
 
 type RouterToolHandler = (
@@ -90,7 +91,10 @@ export class RouterToolService {
     if (typeof args !== "object" || args === null || Array.isArray(args)) {
       throw new PersistenceError("validation_failed", "Router 工具参数必须是 JSON 对象");
     }
-    return spec.handler(args as Record<string, unknown>, context);
+    context.signal?.throwIfAborted();
+    const result = await spec.handler(args as Record<string, unknown>, context);
+    context.signal?.throwIfAborted();
+    return result;
   }
 
   private listProjects(): RouterToolSpec {
@@ -525,6 +529,7 @@ export class RouterToolService {
           originConversationId: context.conversationId,
           objective,
           priority,
+          targetWorkerId: worker.id,
           dependsOn,
           idempotencyKey: `router:${context.conversationId}:assign:${sha256(
             JSON.stringify({
@@ -673,7 +678,7 @@ export class RouterToolService {
           additionalProperties: false,
         },
       },
-      handler: async (args) => {
+      handler: async (args, context) => {
         const mode = optionalString(args, "mode") ?? "auto";
         if (mode !== "auto" && mode !== "native" && mode !== "summary") {
           throw new PersistenceError("validation_failed", "恢复模式必须是 auto、native 或 summary");
@@ -681,6 +686,7 @@ export class RouterToolService {
         const result = await this.workers.resume(
           requiredString(args, "workerId", MAX_COMPACT_TEXT),
           { mode },
+          context.signal,
         );
         return {
           worker: compactWorkerRecord(result.worker.worker),
@@ -705,9 +711,10 @@ export class RouterToolService {
           additionalProperties: false,
         },
       },
-      handler: async (args) => {
+      handler: async (args, context) => {
         const worker = await this.workers.archive(
           requiredString(args, "workerId", MAX_COMPACT_TEXT),
+          { ...(context.signal ? { signal: context.signal } : {}) },
         );
         return compactWorkerRecord(worker.worker);
       },
@@ -736,7 +743,7 @@ export class RouterToolService {
       .where("id", "=", workerId)
       .executeTakeFirst();
     if (!row) throw new PersistenceError("not_found", `Worker 不存在：${workerId}`);
-    if (row.status === "archived") {
+    if (["failed", "archiving", "archived"].includes(row.status)) {
       throw new PersistenceError(
         "conflict",
         "已归档 Worker 不能直接分配任务，请先恢复或新建 Worker",
@@ -751,6 +758,7 @@ export class RouterToolService {
       engineVersion: row.engine_version,
       status: row.status as WorkerRecord["status"],
       currentTaskId: row.current_task_id,
+      currentExecutionAttempt: row.current_execution_attempt,
       capabilitySet: parseJsonArray(row.capability_set),
       createdAt: row.created_at,
       lastActiveAt: row.last_active_at,

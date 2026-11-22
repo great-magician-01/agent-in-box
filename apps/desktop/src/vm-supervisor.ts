@@ -1,6 +1,8 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import type { DesktopVmRuntimeState, VmRuntimeStatus } from "@agent-in-box/protocol";
 import type { LoggerLike } from "./logger";
+import type { ServiceShutdownHandler } from "./service-shutdown";
+import { terminateChild } from "./process-stop";
 
 export interface VmSupervisorOptions {
   entryPath: string;
@@ -16,11 +18,18 @@ export interface VmSupervisorOptions {
   restartLimit?: number;
   restartWindowMs?: number;
   stopTimeoutMs?: number;
+  /** How long an adopted supervisor may take to disappear after accepting shutdown. */
+  shutdownConfirmMs?: number;
   spawnProcess?: typeof spawn;
   fetchHealth?: (url: string, timeoutMs: number) => Promise<VmSupervisorHealth | null>;
   now?: () => number;
   /** Installation nonce the spawned supervisor echoes from /healthz. */
   instanceNonce?: string;
+  /**
+   * Authenticated stop for a supervisor this shell did not spawn. Without it,
+   * stop() fails instead of reporting an adopted process as stopped.
+   */
+  shutdown?: ServiceShutdownHandler;
 }
 
 export interface VmSupervisorHealth {
@@ -77,6 +86,7 @@ export class VmSupervisor {
       | "restartLimit"
       | "restartWindowMs"
       | "stopTimeoutMs"
+      | "shutdownConfirmMs"
     >
   > &
     VmSupervisorOptions;
@@ -87,8 +97,11 @@ export class VmSupervisor {
     lastError: null,
   };
   private child: ChildProcess | null = null;
+  private childExited = true;
+  private childError: Error | null = null;
   private expectedStop = false;
   private startPromise: Promise<void> | null = null;
+  private stopPromise: Promise<void> | null = null;
   private restartTimer: NodeJS.Timeout | null = null;
   private restartTimestamps: number[] = [];
   private readonly listeners = new Set<StatusListener>();
@@ -113,6 +126,7 @@ export class VmSupervisor {
       restartLimit: 3,
       restartWindowMs: 60_000,
       stopTimeoutMs: 5000,
+      shutdownConfirmMs: 10_000,
       ...options,
     };
     this.logger = options.logger;
@@ -171,33 +185,82 @@ export class VmSupervisor {
   async stop(): Promise<void> {
     this.clearRestartTimer();
     this.expectedStop = true;
+    if (this.stopPromise) return this.stopPromise;
+    this.stopPromise = this.doStop().finally(() => {
+      this.stopPromise = null;
+    });
+    return this.stopPromise;
+  }
+
+  private async doStop(): Promise<void> {
     const child = this.child;
-    if (!child) {
+    if (!child || this.childExited) {
+      if (this.internal.state === "running" && !child) {
+        await this.stopAdoptedInstance();
+        return;
+      }
       this.child = null;
       this.setState("stopped", { pid: null, message: "VM 运行组件已停止" });
       return;
     }
     this.setState("stopped", { message: "正在停止 VM 运行组件" });
-    const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
-    try {
-      child.kill("SIGTERM");
-    } catch {
-      // Already gone.
-    }
-    const winner = await Promise.race([
-      exited.then(() => "exited" as const),
-      delay(this.options.stopTimeoutMs).then(() => "timeout" as const),
-    ]);
-    if (winner === "timeout") {
-      try {
-        child.kill("SIGKILL");
-      } catch {
-        // Already gone.
-      }
-      await Promise.race([exited, delay(2000)]);
+    const exited = await terminateChild(child, {
+      gracefulMs: this.options.stopTimeoutMs,
+      forceMs: 2000,
+      detachedGroup: !this.options.spawnProcess,
+    });
+    if (!exited) {
+      this.setState("error", {
+        pid: child.pid ?? null,
+        message: "VM 运行组件未能在停止期限内退出",
+        lastError: "stop timeout",
+      });
+      throw new Error("VM 运行组件未能在停止期限内退出");
     }
     this.child = null;
+    this.childExited = true;
     this.setState("stopped", { pid: null, message: "VM 运行组件已停止" });
+  }
+
+  private async stopAdoptedInstance(): Promise<void> {
+    const shutdown = this.options.shutdown;
+    if (!shutdown) {
+      this.setState("error", {
+        message: "VM 运行组件由其他进程运行，当前未配置认证停止通道",
+        lastError: "shutdown channel unavailable",
+      });
+      throw new Error("VM 运行组件由其他进程运行，无法安全停止");
+    }
+    this.setState("running", { message: "正在停止外部 VM 运行组件" });
+    try {
+      await shutdown({
+        baseUrl: `http://${this.options.host}:${this.options.port}`,
+        instanceNonce: this.instanceNonce,
+        timeoutMs: this.options.stopTimeoutMs,
+      });
+    } catch (error) {
+      this.setState("error", {
+        message: "外部 VM 运行组件停止失败",
+        lastError: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+    const probe = this.options.fetchHealth ?? fetchVmSupervisorHealth;
+    const healthUrl = `http://${this.options.host}:${this.options.port}/healthz`;
+    const deadline = this.now() + this.options.stopTimeoutMs + this.options.shutdownConfirmMs;
+    while (this.now() < deadline) {
+      const health = await probe(healthUrl, this.options.healthTimeoutMs);
+      if (!health) {
+        this.setState("stopped", { pid: null, message: "VM 运行组件已停止" });
+        return;
+      }
+      await delay(200);
+    }
+    this.setState("error", {
+      message: "外部 VM 运行组件接受了停止请求，但仍在响应",
+      lastError: "shutdown not effective",
+    });
+    throw new Error("外部 VM 运行组件仍在运行");
   }
 
   private isOurs(health: VmSupervisorHealth): boolean {
@@ -205,7 +268,8 @@ export class VmSupervisor {
     return health.ok && health.instanceNonce === this.instanceNonce;
   }
 
-  private async doStart(): Promise<void> {    this.clearRestartTimer();
+  private async doStart(): Promise<void> {
+    this.clearRestartTimer();
     this.expectedStop = false;
     const healthUrl = `http://${this.options.host}:${this.options.port}/healthz`;
     const probe = this.options.fetchHealth ?? fetchVmSupervisorHealth;
@@ -231,6 +295,7 @@ export class VmSupervisor {
     const qemuImg = process.platform === "win32" ? "qemu-img.exe" : "qemu-img";
     const env: NodeJS.ProcessEnv = { ...process.env, ...this.options.env };
     const command = this.options.spawnProcess ?? spawn;
+    const detached = !this.options.spawnProcess && process.platform !== "win32";
     const child = command(
       this.options.entryPath,
       [
@@ -249,9 +314,12 @@ export class VmSupervisor {
         env,
         stdio: ["ignore", "pipe", "pipe"],
         windowsHide: true,
+        ...(detached ? { detached: true } : {}),
       },
     );
     this.child = child;
+    this.childExited = false;
+    this.childError = null;
     child.stdout?.on("data", (data: Buffer) => {
       this.logger.info(`vm-supervisor: ${data.toString("utf8").trimEnd()}`);
     });
@@ -259,10 +327,22 @@ export class VmSupervisor {
       this.logger.warn(`vm-supervisor: ${data.toString("utf8").trimEnd()}`);
     });
     child.once("error", (error) => {
-      this.setState("error", { lastError: error.message, message: "VM Supervisor 启动失败" });
+      // Asynchronous spawn failure (ENOENT, EACCES): no pid was assigned, so the
+      // handle must not survive as if a supervisor were running.
+      this.childError = error;
+      this.childExited = true;
+      if (this.child === child) {
+        this.child = null;
+      }
+      this.setState("error", {
+        pid: null,
+        lastError: error.message,
+        message: "VM Supervisor 启动失败",
+      });
     });
     child.once("exit", (code, signal) => {
       this.child = null;
+      this.childExited = true;
       if (this.expectedStop) {
         this.setState("stopped", { pid: null, message: "VM 运行组件已停止" });
         return;
@@ -274,7 +354,11 @@ export class VmSupervisor {
 
     const deadline = this.now() + this.options.startupTimeoutMs;
     while (this.now() < deadline) {
-      if (child.exitCode !== null) {
+      const spawnError = this.lastSpawnError();
+      if (spawnError) {
+        throw new Error(`VM Supervisor 启动失败：${spawnError.message}`);
+      }
+      if (child.exitCode !== null || this.childExited) {
         throw new Error(`VM Supervisor 启动后立即退出（code=${child.exitCode}）`);
       }
       const health = await probe(healthUrl, this.options.healthTimeoutMs);
@@ -340,6 +424,10 @@ export class VmSupervisor {
   private emit(): void {
     const status = this.getStatus();
     for (const listener of this.listeners) listener(status);
+  }
+
+  private lastSpawnError(): Error | null {
+    return this.childError;
   }
 }
 

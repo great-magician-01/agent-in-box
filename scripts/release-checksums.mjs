@@ -60,9 +60,43 @@ function collect() {
   return files.sort();
 }
 
-const files = collect();
+function collectPlanned() {
+  const tag = (process.env.RELEASE_TAG ?? "").trim();
+  if (!/^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(tag)) {
+    console.error("--plan requires RELEASE_TAG to be a semantic version tag");
+    process.exit(1);
+  }
+  const version = tag.replace(/^v/, "");
+  const planned = [
+    `agent-in-box-${version}-windows-x64.exe`,
+    `agent-in-box-${version}-linux-x64.AppImage`,
+    "release-provenance.json",
+    "runtime-assets.json",
+  ].map((name) => path.join(release, name));
+  const missing = planned.filter((file) => !existsSync(file) || !statSync(file).isFile());
+  if (missing.length > 0) {
+    console.error(
+      `release plan is incomplete; missing: ${missing.map((file) => path.basename(file)).join(", ")}`,
+    );
+    process.exit(1);
+  }
+  const provenance = JSON.parse(
+    readFileSync(path.join(release, "release-provenance.json"), "utf8"),
+  );
+  if (provenance.tag !== tag || provenance.packageVersion !== version) {
+    console.error(
+      `release provenance does not match ${tag}; refusing to checksum a mixed artifact set`,
+    );
+    process.exit(1);
+  }
+  return planned.sort();
+}
+
+const files = process.argv.includes("--plan") ? collectPlanned() : collect();
 if (files.length === 0) {
-  console.error(`no release artifacts found under ${release}; refusing to write an empty checksum file`);
+  console.error(
+    `no release artifacts found under ${release}; refusing to write an empty checksum file`,
+  );
   process.exit(1);
 }
 const artifacts = [];

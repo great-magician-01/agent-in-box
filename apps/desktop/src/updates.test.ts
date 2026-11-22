@@ -8,13 +8,13 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   UpdateManager,
   backupDatabase,
-  canonicalJson,
   compareVersions,
   createRollbackSnapshot,
   parseUpdateManifest,
   restoreDatabase,
   restoreRollbackSnapshot,
 } from "./updates";
+import { signedPayload } from "./signature";
 
 const temporaryDirectories: string[] = [];
 
@@ -24,11 +24,9 @@ const testPublicKey = testKeys.publicKey.export({ type: "spki", format: "pem" })
 function signedManifest(manifest: unknown): string {
   return JSON.stringify({
     manifest,
-    signature: sign(
-      null,
-      Buffer.from(canonicalJson(manifest), "utf8"),
-      testKeys.privateKey,
-    ).toString("base64"),
+    signature: sign(null, signedPayload("desktop-update", manifest), testKeys.privateKey).toString(
+      "base64",
+    ),
   });
 }
 
@@ -304,5 +302,59 @@ describe("update rollback files", () => {
     fs.writeFileSync(databasePath, "after");
     await restoreDatabase({ backupPath: backup, databasePath });
     expect(fs.readFileSync(databasePath, "utf8")).toBe("before");
+  });
+
+  it("orders prereleases before the matching stable version", () => {
+    expect(compareVersions("1.0.0-rc.1", "1.0.0")).toBe(-1);
+    expect(compareVersions("1.0.0", "1.0.0-rc.1")).toBe(1);
+    expect(compareVersions("1.0.0-rc.1", "1.0.0-rc.2")).toBe(-1);
+    expect(compareVersions("1.0.0-beta.11", "1.0.0-beta.2")).toBe(1);
+    expect(compareVersions("1.0.0-alpha", "1.0.0-alpha.1")).toBe(-1);
+    expect(compareVersions("1.0.0+build.5", "1.0.0+build.6")).toBe(0);
+  });
+
+  it("covers every installed runtime component and rejects a tampered snapshot", async () => {
+    const root = temporaryDirectory();
+    const resources = path.join(root, "resources");
+    for (const directory of ["control-plane", "vm-supervisor", "guest-runtime", "router-runtime"]) {
+      fs.mkdirSync(path.join(resources, directory), { recursive: true });
+      fs.writeFileSync(path.join(resources, directory, "component"), "v1");
+    }
+    fs.writeFileSync(path.join(resources, "app.asar"), "v1");
+    fs.writeFileSync(path.join(resources, "update-public-key.pem"), "key");
+    const snapshot = path.join(root, "backup", "resources");
+    expect(await createRollbackSnapshot({ resourcesPath: resources, destination: snapshot })).toBe(
+      true,
+    );
+    for (const entry of ["vm-supervisor", "guest-runtime", "router-runtime"]) {
+      expect(fs.existsSync(path.join(snapshot, entry, "component"))).toBe(true);
+    }
+
+    // Damage one snapshotted file; restore must verify everything before it
+    // replaces any live component.
+    fs.writeFileSync(path.join(snapshot, "vm-supervisor", "component"), "tampered");
+    fs.writeFileSync(path.join(resources, "app.asar"), "v2");
+    await expect(
+      restoreRollbackSnapshot({ source: snapshot, resourcesPath: resources }),
+    ).rejects.toThrow("校验失败");
+    expect(fs.readFileSync(path.join(resources, "app.asar"), "utf8")).toBe("v2");
+    expect(fs.readFileSync(path.join(resources, "vm-supervisor", "component"), "utf8")).toBe("v1");
+  });
+
+  it("restores an intact snapshot over modified components", async () => {
+    const root = temporaryDirectory();
+    const resources = path.join(root, "resources");
+    fs.mkdirSync(path.join(resources, "vm-supervisor"), { recursive: true });
+    fs.writeFileSync(path.join(resources, "app.asar"), "v1");
+    fs.writeFileSync(path.join(resources, "vm-supervisor", "component"), "v1");
+    const snapshot = path.join(root, "backup", "resources");
+    expect(await createRollbackSnapshot({ resourcesPath: resources, destination: snapshot })).toBe(
+      true,
+    );
+    fs.writeFileSync(path.join(resources, "app.asar"), "v2");
+    fs.writeFileSync(path.join(resources, "vm-supervisor", "component"), "v2");
+    await restoreRollbackSnapshot({ source: snapshot, resourcesPath: resources });
+    expect(fs.readFileSync(path.join(resources, "app.asar"), "utf8")).toBe("v1");
+    expect(fs.readFileSync(path.join(resources, "vm-supervisor", "component"), "utf8")).toBe("v1");
   });
 });

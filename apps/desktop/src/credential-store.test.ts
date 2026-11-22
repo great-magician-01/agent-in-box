@@ -149,8 +149,8 @@ describe("credential store", () => {
     expect(() =>
       store.save({ kind: "model", providerId: "../escape", secret: "long-enough" }),
     ).toThrow("Provider");
-    expect(() =>
-      store.save({ kind: "model", providerId: "anthropic", secret: "short" }),
-    ).toThrow("长度");
+    expect(() => store.save({ kind: "model", providerId: "anthropic", secret: "short" })).toThrow(
+      "长度",
+    );
   });
 });

@@ -46,7 +46,10 @@ class FakeRouterEngine implements WorkerEngine {
     };
   }
 
-  async resume(archiveRef: string, spec?: WorkerSessionSpec): Promise<WorkerSessionHandle> {
+  async resume(
+    archiveRef: string,
+    spec?: WorkerSessionSpec,
+  ): Promise<WorkerSessionHandle & { mode: "native" }> {
     this.resumeRefs.push(archiveRef);
     if (spec) this.specs.push(spec);
     if (this.resumeError) throw this.resumeError;
@@ -88,6 +91,10 @@ class FakeRouterEngine implements WorkerEngine {
 
   async archive(): Promise<{ archiveRef: string; summary: string }> {
     return { archiveRef: "/router/archive.jsonl", summary: "archived" };
+  }
+
+  async close(): Promise<void> {
+    this.disposeCalls += 1;
   }
 
   async dispose(): Promise<void> {
@@ -154,12 +161,12 @@ async function createHarness(
     providers,
     tokens,
     { port: 6719 } as ModelBrokerService,
-    { port: 6721 } as RouterToolBrokerService,
+    { port: 6721, cancel: () => undefined } as unknown as RouterToolBrokerService,
     tools,
     outbox,
     {
       dataRoot: ctx.dir,
-      connectionFactory: () => engine,
+      connectionFactory: () => engine as WorkerEngine,
       toolTokenTtlMs: 60_000,
       ...(options.turnTimeoutMs !== undefined ? { turnTimeoutMs: options.turnTimeoutMs } : {}),
     },
@@ -347,7 +354,6 @@ describe("RouterRuntimeService", () => {
     await waitFor(
       async () => (await harness.service.view()).status === "failed",
       "router timeout failure",
-      4000,
     );
     expect(harness.engine.abortCalls).toBe(1);
     expect((await harness.service.view()).lastError).toContain("超过最大时长");

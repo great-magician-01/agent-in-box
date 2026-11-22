@@ -65,6 +65,8 @@ func (f *fakeQMP) counts() (int, int) {
 	return f.stopCount, f.contCount
 }
 
+const testVMUUID = "8f1d6a52-2c4b-4e18-9b47-3a0e5c6d7f80"
+
 func (f *fakeQMP) serve(conn net.Conn) {
 	defer conn.Close()
 	reader := bufio.NewReader(conn)
@@ -85,6 +87,8 @@ func (f *fakeQMP) serve(conn net.Conn) {
 		switch command.Execute {
 		case "qmp_capabilities":
 			_, _ = writer.WriteString(`{"return":{}}` + "\n")
+		case "query-uuid":
+			_, _ = fmt.Fprintf(writer, "{\"return\":{\"UUID\":%q}}\n", testVMUUID)
 		case "query-status":
 			f.mu.Lock()
 			status := f.status
@@ -130,7 +134,7 @@ func newSuspendTestProvider(t *testing.T, status string) (*QemuProvider, *fakeQM
 	}
 	metadata := &vmMetadata{
 		Spec: VmSpec{
-			ID: "vm-1", BaseImagePath: "unused", CPUCount: 1, MemoryMB: 512,
+			ID: "vm-1", UUID: testVMUUID, BaseImagePath: "unused", CPUCount: 1, MemoryMB: 512,
 			DiskSizeGB: 1, QMPPort: fake.port(t),
 		},
 		State: VmState{
@@ -302,11 +306,18 @@ func TestSuspendQmpUnavailable(t *testing.T) {
 
 func TestKeyedMutexSerializesSameVMOnly(t *testing.T) {
 	var locks keyedMutex
-	unlockA := locks.Lock("a")
+	unlockA, err := locks.Lock(context.Background(), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	acquiredA := make(chan struct{})
 	go func() {
-		unlock := locks.Lock("a")
+		unlock, lockErr := locks.Lock(context.Background(), "a")
+		if lockErr != nil {
+			close(acquiredA)
+			return
+		}
 		close(acquiredA)
 		unlock()
 	}()
@@ -319,7 +330,10 @@ func TestKeyedMutexSerializesSameVMOnly(t *testing.T) {
 
 	acquiredB := make(chan struct{})
 	go func() {
-		unlock := locks.Lock("b")
+		unlock, lockErr := locks.Lock(context.Background(), "b")
+		if lockErr != nil {
+			return
+		}
 		close(acquiredB)
 		unlock()
 	}()
@@ -334,6 +348,21 @@ func TestKeyedMutexSerializesSameVMOnly(t *testing.T) {
 	case <-acquiredA:
 	case <-time.After(time.Second):
 		t.Fatal("waiting lock was not released")
+	}
+}
+
+func TestKeyedMutexWaitIsCancellable(t *testing.T) {
+	var locks keyedMutex
+	unlock, err := locks.Lock(context.Background(), "vm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := locks.Lock(ctx, "vm"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
 	}
 }
 

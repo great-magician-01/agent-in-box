@@ -2,6 +2,8 @@ import { randomBytes } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import type { ControlPlaneState, ControlPlaneStatus, HealthResponse } from "@agent-in-box/protocol";
 import type { LoggerLike } from "./logger";
+import type { ServiceShutdownHandler } from "./service-shutdown";
+import { terminateChild } from "./process-stop";
 
 export interface ControlPlaneSupervisorOptions {
   entryPath: string;
@@ -18,6 +20,8 @@ export interface ControlPlaneSupervisorOptions {
   restartLimit?: number;
   restartWindowMs?: number;
   stopTimeoutMs?: number;
+  /** How long an adopted instance may take to disappear after accepting shutdown. */
+  shutdownConfirmMs?: number;
   spawnProcess?: typeof spawn;
   fetchHealth?: (url: string, timeoutMs: number) => Promise<HealthResponse | null>;
   now?: () => number;
@@ -27,6 +31,12 @@ export interface ControlPlaneSupervisorOptions {
    * treated as ours and never receives the local access key.
    */
   instanceNonce?: string;
+  /**
+   * Authenticated stop for an instance this shell did not spawn (for example a
+   * previous shell run left it behind). Without it, stop() must fail instead of
+   * pretending an adopted process is gone.
+   */
+  shutdown?: ServiceShutdownHandler;
 }
 
 interface SupervisorInternalState {
@@ -79,6 +89,7 @@ export class ControlPlaneSupervisor {
       | "restartLimit"
       | "restartWindowMs"
       | "stopTimeoutMs"
+      | "shutdownConfirmMs"
     >
   > &
     ControlPlaneSupervisorOptions;
@@ -91,9 +102,11 @@ export class ControlPlaneSupervisor {
   };
   private child: ChildProcess | null = null;
   private childExited = true;
+  private childError: Error | null = null;
   private expectedStop = false;
   private suppressRestart = false;
   private startPromise: Promise<void> | null = null;
+  private stopPromise: Promise<void> | null = null;
   private restartTimer: NodeJS.Timeout | null = null;
   private restartTimestamps: number[] = [];
   private recentErrorLines: string[] = [];
@@ -110,6 +123,7 @@ export class ControlPlaneSupervisor {
       restartLimit: 3,
       restartWindowMs: 60_000,
       stopTimeoutMs: 5000,
+      shutdownConfirmMs: 10_000,
       ...options,
     };
     this.logger = options.logger;
@@ -161,9 +175,23 @@ export class ControlPlaneSupervisor {
   async stop(): Promise<void> {
     this.clearRestartTimer();
     this.expectedStop = true;
+    if (this.stopPromise) {
+      return this.stopPromise;
+    }
+    this.stopPromise = this.doStop().finally(() => {
+      this.stopPromise = null;
+    });
+    return this.stopPromise;
+  }
+
+  private async doStop(): Promise<void> {
     const child = this.child;
 
     if (!child || this.childExited) {
+      if (this.internal.state === "external") {
+        await this.stopAdoptedInstance();
+        return;
+      }
       this.child = null;
       this.setState("stopped", { health: null, message: "本地控制平面已停止" });
       return;
@@ -173,28 +201,57 @@ export class ControlPlaneSupervisor {
       message: "正在停止本地控制平面",
     });
 
-    const exited = new Promise<void>((resolve) => {
-      child.once("exit", () => resolve());
+    const exited = await terminateChild(child, {
+      gracefulMs: this.options.stopTimeoutMs,
+      forceMs: 2000,
+      detachedGroup: !this.options.spawnProcess,
     });
-    try {
-      child.kill("SIGTERM");
-    } catch {
-      // The process may already be gone.
-    }
-    const timer = delay(this.options.stopTimeoutMs).then(() => "timeout" as const);
-    const result = await Promise.race([exited.then(() => "exited" as const), timer]);
-    if (result === "timeout") {
-      try {
-        child.kill("SIGKILL");
-      } catch {
-        // Already gone.
-      }
-      await Promise.race([exited, delay(2000)]);
+    if (!exited) {
+      // Do not clear the child or report "stopped": a later start/update would
+      // race a process that still owns the database and ports.
+      this.fail("本地控制平面未能在停止期限内退出，已保留失败状态；请检查进程后重试");
+      throw new Error("本地控制平面未能在停止期限内退出");
     }
 
     this.child = null;
+    this.childExited = true;
     this.internal.lastExitCode = child.exitCode;
     this.setState("stopped", { health: null, message: "本地控制平面已停止" });
+  }
+
+  /**
+   * Stops an already-running instance of this installation through its
+   * authenticated shutdown endpoint. The health check afterwards is what proves
+   * the process actually exited; without it a failed shutdown would be shown as
+   * "stopped".
+   */
+  private async stopAdoptedInstance(): Promise<void> {
+    const shutdown = this.options.shutdown;
+    if (!shutdown) {
+      this.fail("控制平面由其他进程运行，当前未配置认证停止通道，无法安全停止");
+      throw new Error("控制平面由其他进程运行，无法安全停止");
+    }
+    this.setState("stopping", { health: this.internal.health, message: "正在停止外部控制平面" });
+    try {
+      await shutdown({
+        baseUrl: `http://${this.options.host}:${this.options.port}`,
+        instanceNonce: this.instanceNonce,
+        timeoutMs: this.options.stopTimeoutMs,
+      });
+    } catch (error) {
+      this.fail(`外部控制平面停止失败：${this.errorMessage(error)}`);
+      throw error;
+    }
+    const deadline = this.now() + this.options.stopTimeoutMs + this.options.shutdownConfirmMs;
+    while (this.now() < deadline) {
+      if (!(await this.checkHealth())) {
+        this.setState("stopped", { health: null, message: "本地控制平面已停止" });
+        return;
+      }
+      await delay(200);
+    }
+    this.fail("外部控制平面接受了停止请求，但仍在本机端口上响应");
+    throw new Error("外部控制平面仍在运行");
   }
 
   private async doStart(): Promise<void> {
@@ -244,6 +301,7 @@ export class ControlPlaneSupervisor {
     }
 
     const spawnProcess = this.options.spawnProcess ?? spawn;
+    const detached = !this.options.spawnProcess && process.platform !== "win32";
     try {
       this.child = spawnProcess(
         this.options.nodeCommand,
@@ -253,6 +311,7 @@ export class ControlPlaneSupervisor {
           env,
           stdio: ["ignore", "pipe", "pipe"],
           windowsHide: true,
+          ...(detached ? { detached: true } : {}),
         },
       );
     } catch (error) {
@@ -261,6 +320,7 @@ export class ControlPlaneSupervisor {
     }
 
     this.childExited = false;
+    this.childError = null;
     this.recentErrorLines = [];
     this.attachOutput(this.child);
 
@@ -285,6 +345,12 @@ export class ControlPlaneSupervisor {
     });
 
     this.child.once("error", (error) => {
+      // A spawn failure (for example ENOENT) is asynchronous: the ChildProcess
+      // exists but no pid was ever assigned. Clear the handle so stop() and the
+      // updater cannot treat a never-started process as running.
+      this.childError = error;
+      this.childExited = true;
+      this.child = null;
       this.fail(`本地控制平面进程错误：${error.message}`);
     });
 
@@ -292,8 +358,10 @@ export class ControlPlaneSupervisor {
     if (!healthy) {
       if (!this.expectedStop && this.internal.state === "starting") {
         const detail = this.recentErrorLines.slice(-3).join(" | ");
+        const spawnError = this.lastSpawnError();
+        const spawnDetail = spawnError ? `：${spawnError.message}` : "";
         this.fail(
-          `本地控制平面未在 ${this.options.startupTimeoutMs / 1000} 秒内就绪${
+          `本地控制平面未在 ${this.options.startupTimeoutMs / 1000} 秒内就绪${spawnDetail}${
             detail ? `：${detail}` : ""
           }`,
         );
@@ -359,7 +427,7 @@ export class ControlPlaneSupervisor {
   private async waitForHealth(): Promise<HealthResponse | null> {
     const deadline = this.now() + this.options.startupTimeoutMs;
     while (this.now() < deadline) {
-      if (this.childExited) {
+      if (this.childExited || this.childError) {
         return null;
       }
       const health = await this.checkHealth();
@@ -440,5 +508,9 @@ export class ControlPlaneSupervisor {
 
   private errorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
+  }
+
+  private lastSpawnError(): Error | null {
+    return this.childError;
   }
 }

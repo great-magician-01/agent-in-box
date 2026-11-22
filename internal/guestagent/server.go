@@ -8,17 +8,19 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"image"
 	"image/png"
 	"log/slog"
 	"net"
 	"net/http"
-	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
+
+	"agent-in-box/internal/securefile"
 )
 
 const (
@@ -31,7 +33,12 @@ const (
 
 	defaultMaxUpdateBytes int64 = 128 << 20
 	defaultUpdateTimeout        = 2 * time.Minute
+	maxScreenshotPixels    int64 = 100_000_000
 )
+
+func validScreenshotSize(width, height int) bool {
+	return width > 0 && height > 0 && int64(width)*int64(height) <= maxScreenshotPixels
+}
 
 // Desktop is implemented by the in-guest display driver (X11 first).
 type Desktop interface {
@@ -87,6 +94,7 @@ type Server struct {
 	workspaceRoots           []string
 	maxWorkspaceArchiveBytes int64
 	allowedClientNets        []*net.IPNet
+	configurationError       error
 	startedAt                time.Time
 	now                      func() time.Time
 	actions                  *actionTracker
@@ -129,6 +137,7 @@ func NewServerWithOptions(options ServerOptions) *Server {
 	if maxWorkspaceArchiveBytes <= 0 || maxWorkspaceArchiveBytes > defaultMaxWorkspaceArchiveBytes {
 		maxWorkspaceArchiveBytes = defaultMaxWorkspaceArchiveBytes
 	}
+	allowedNets, allowedNetError := parseClientCIDRs(options.AllowedClientCIDRs)
 	return &Server{
 		token:                    options.Token,
 		tokenFile:                strings.TrimSpace(options.TokenFile),
@@ -143,7 +152,8 @@ func NewServerWithOptions(options ServerOptions) *Server {
 		verifyRoots:              normalizeVerifyRoots(options.VerifyRoots),
 		workspaceRoots:           normalizeVerifyRoots(options.WorkspaceRoots),
 		maxWorkspaceArchiveBytes: maxWorkspaceArchiveBytes,
-		allowedClientNets:        parseClientCIDRs(options.AllowedClientCIDRs),
+		allowedClientNets:        allowedNets,
+		configurationError:       allowedNetError,
 		startedAt:                now(),
 		now:                      now,
 		actions:                  newActionTracker(now),
@@ -167,6 +177,23 @@ func normalizeVerifyRoots(roots []string) []string {
 	return normalized
 }
 
+// Validate rejects invalid security configuration before the listener starts.
+// Handler also checks configurationError so embedders cannot accidentally turn
+// a malformed CIDR into an allow-all server by skipping this startup check.
+func (s *Server) Validate() error {
+	if s.configurationError != nil {
+		return s.configurationError
+	}
+	token, err := s.authenticationToken()
+	if err != nil {
+		return fmt.Errorf("validate guest authentication token: %w", err)
+	}
+	if strings.TrimSpace(token) == "" {
+		return errors.New("guest authentication token is required")
+	}
+	return nil
+}
+
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/capabilities", s.capabilities)
@@ -182,7 +209,7 @@ func (s *Server) Handler() http.Handler {
 	return s.authenticate(mux)
 }
 
-func parseClientCIDRs(values []string) []*net.IPNet {
+func parseClientCIDRs(values []string) ([]*net.IPNet, error) {
 	nets := make([]*net.IPNet, 0, len(values))
 	for _, value := range values {
 		value = strings.TrimSpace(value)
@@ -190,11 +217,12 @@ func parseClientCIDRs(values []string) []*net.IPNet {
 			continue
 		}
 		_, network, err := net.ParseCIDR(value)
-		if err == nil {
-			nets = append(nets, network)
+		if err != nil {
+			return nil, fmt.Errorf("invalid allowed client CIDR %q: %w", value, err)
 		}
+		nets = append(nets, network)
 	}
-	return nets
+	return nets, nil
 }
 
 func (s *Server) clientAllowed(r *http.Request) bool {
@@ -220,6 +248,10 @@ func (s *Server) clientAllowed(r *http.Request) bool {
 func (s *Server) authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		actionID, _ := parseActionIDHeader(r)
+		if s.configurationError != nil {
+			writeActionError(w, http.StatusServiceUnavailable, actionID, "invalid_configuration", "guest server security configuration is invalid")
+			return
+		}
 		if !s.clientAllowed(r) {
 			writeActionError(w, http.StatusForbidden, actionID, "forbidden", "client address is not allowed")
 			return
@@ -243,18 +275,7 @@ func (s *Server) authenticationToken() (string, error) {
 	if s.tokenFile == "" {
 		return s.token, nil
 	}
-	info, err := os.Lstat(s.tokenFile)
-	if err != nil {
-		return "", err
-	}
-	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() > 4096 {
-		return "", errors.New("guest token file must be a small regular file")
-	}
-	data, err := os.ReadFile(s.tokenFile)
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(data)), nil
+	return securefile.ReadToken(s.tokenFile)
 }
 
 func (s *Server) capabilities(w http.ResponseWriter, r *http.Request) {
@@ -350,6 +371,10 @@ func (s *Server) screenshot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var buffer bytes.Buffer
+	if !validScreenshotSize(capture.Bounds().Dx(), capture.Bounds().Dy()) {
+		writeError(w, http.StatusInternalServerError, "screenshot_too_large", "screenshot exceeds the pixel budget")
+		return
+	}
 	if err := png.Encode(&buffer, capture); err != nil {
 		writeError(w, http.StatusInternalServerError, "screenshot_failed", err.Error())
 		return

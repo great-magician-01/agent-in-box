@@ -18,6 +18,7 @@ import {
   type WorkerInput,
   type WorkerSessionHandle,
   type WorkerSessionSpec,
+  type WorkerTurnContext,
 } from "@agent-in-box/agent-runtime";
 import type {
   ActiveTaskCard,
@@ -95,7 +96,8 @@ export interface WorkerGuestConnection {
   prompt(sessionId: string, input: WorkerInput): Promise<void>;
   steer(sessionId: string, input: WorkerInput): Promise<"queued" | "handled">;
   followUp(sessionId: string, input: WorkerInput): Promise<"queued" | "handled">;
-  abort(sessionId: string): Promise<void>;
+  abort(sessionId: string, expectedTurn?: WorkerTurnContext): Promise<void>;
+  close(sessionId: string): Promise<void>;
   archive(sessionId: string): Promise<{ archiveRef: string; summary: string }>;
   session(sessionId: string): Promise<unknown>;
   subscribe(sessionId: string, listener: (event: WorkerEngineEvent) => void): () => void;
@@ -125,6 +127,9 @@ interface ActiveWorker {
   cuaTokenId: string;
   leaseId: string | null;
   taskId: string | null;
+  executionAttempt: number | null;
+  turnId: string | null;
+  eventQueue: Promise<void>;
   textBuffer: string;
   aborting: boolean;
   contextInjection: boolean;
@@ -141,6 +146,15 @@ interface CapturedResumeContext {
   record: WorkerResumeContextRecord;
   imageBase64: string | null;
   injected: boolean;
+}
+
+function currentTurn(active: ActiveWorker): WorkerTurnContext | null {
+  if (!active.turnId || !active.taskId || active.executionAttempt === null) return null;
+  return {
+    turnId: active.turnId,
+    taskId: active.taskId,
+    executionAttempt: active.executionAttempt,
+  };
 }
 
 const DEFAULT_SYSTEM_PROMPT = [
@@ -359,11 +373,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     });
     let issuedTokens: Awaited<ReturnType<WorkerRuntimeService["issueWorkerTokens"]>>;
     try {
-      issuedTokens = await this.issueWorkerTokens(
-        worker,
-        model.provider.id,
-        model.model.id,
-      );
+      issuedTokens = await this.issueWorkerTokens(worker, model.provider.id, model.model.id);
     } catch (error) {
       await this.workers.updateRuntime(worker.id, {
         status: "failed",
@@ -482,6 +492,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
   async prompt(
     workerId: string,
     input: WorkerPromptRequest,
+    idempotencyKey?: string,
   ): Promise<{ taskId: string; worker: WorkerView }> {
     const worker = await this.requireWorker(workerId);
     const active = this.active.get(workerId);
@@ -501,7 +512,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
       vmId: worker.vmId,
       originConversationId: worker.conversationId,
       objective: text,
-      idempotencyKey: `worker:${workerId}:${randomUUID()}`,
+      idempotencyKey: `worker:${workerId}:${idempotencyKey?.trim() || randomUUID()}`,
     });
     await this.appendMessage(worker, task.task.id, "user", "prompt", text);
     await this.workers.touch(workerId);
@@ -519,7 +530,11 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
       throw new PersistenceError("conflict", "Worker 当前任务不处于运行状态");
     }
     const text = validatePromptText(input?.text);
-    const disposition = await active.connection.steer(active.sessionId, { text });
+    const turn = currentTurn(active);
+    const disposition = await active.connection.steer(active.sessionId, {
+      text,
+      ...(turn ? { turn } : {}),
+    });
     await this.recordInput(workerId, "steer", text, disposition);
     await this.appendMessage(worker, active.taskId, "user", "steer", text);
     await this.tasks.recordWorkerEvent(active.taskId, "worker.steer", { disposition });
@@ -531,7 +546,11 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     const active = this.active.get(workerId);
     if (!active) throw new PersistenceError("conflict", "Worker 会话未连接");
     const text = validatePromptText(input?.text);
-    const disposition = await active.connection.followUp(active.sessionId, { text });
+    const turn = currentTurn(active);
+    const disposition = await active.connection.followUp(active.sessionId, {
+      text,
+      ...(turn ? { turn } : {}),
+    });
     await this.recordInput(workerId, "follow_up", text, disposition);
     await this.appendMessage(worker, active.taskId, "user", "follow_up", text);
     if (active.taskId) {
@@ -550,8 +569,9 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
 
   async archive(
     workerId: string,
-    options: { source?: WorkerArchiveSource; reason?: string } = {},
+    options: { source?: WorkerArchiveSource; reason?: string; signal?: AbortSignal } = {},
   ): Promise<WorkerView> {
+    options.signal?.throwIfAborted();
     const worker = await this.requireWorker(workerId);
     const active = this.active.get(workerId);
     if (!active) throw new PersistenceError("conflict", "Worker 会话未连接，无法安全归档");
@@ -587,6 +607,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     let archived: { archiveRef: string; summary: string };
     try {
       archived = await active.connection.archive(active.sessionId);
+      options.signal?.throwIfAborted();
     } catch (error) {
       await this.workers.updateRuntime(workerId, { status: "idle", currentTaskId: null });
       throw new PersistenceError(
@@ -605,6 +626,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     if (active.leaseId) await this.leases.release(worker.vmId, active.leaseId);
     let updated: WorkerRecord | undefined;
     try {
+      options.signal?.throwIfAborted();
       const archive = await this.archives.create({
         workerId,
         projectId: worker.projectId,
@@ -703,7 +725,12 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async resume(workerId: string, request: WorkerResumeRequest = {}): Promise<WorkerResumeResult> {
+  async resume(
+    workerId: string,
+    request: WorkerResumeRequest = {},
+    signal?: AbortSignal,
+  ): Promise<WorkerResumeResult> {
+    signal?.throwIfAborted();
     const worker = await this.requireWorker(workerId);
     if (this.active.has(workerId)) throw new PersistenceError("conflict", "Worker 已经连接");
     if (worker.status !== "archived" && worker.status !== "failed") {
@@ -766,6 +793,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     if (!runtime.workerHostPort) {
       throw new PersistenceError("unavailable", "VM 没有 Worker RPC 端口");
     }
+    signal?.throwIfAborted();
     await this.workers.updateRuntime(workerId, {
       status: worker.status === "failed" ? "starting" : "restoring",
       currentTaskId: null,
@@ -850,6 +878,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
         this.tokens.bindSession(token.context.id, handle.sessionId),
         this.cuaTokens.bindSession(cuaToken.context.id, handle.sessionId),
       ]);
+      signal?.throwIfAborted();
       await this.workers.updateRuntime(workerId, {
         status: "restoring",
         currentTaskId: null,
@@ -873,6 +902,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
         restoreMode,
         notice,
       );
+      signal?.throwIfAborted();
       if (archive) await this.archives.markRestored(archive.id);
       if (!context.injected) {
         notice = `${notice ? `${notice}；` : ""}恢复环境注入失败，请在下一回合先调用 vm_screenshot 重新观察`;
@@ -899,7 +929,11 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
         notice,
       };
     } catch (error) {
+      const active = this.active.get(workerId);
       this.detachActive(workerId);
+      if (active) {
+        await active.connection.close(active.sessionId).catch(() => undefined);
+      }
       await Promise.all([
         this.tokens.revoke(token.context.id, "worker_resume_failed"),
         this.cuaTokens.revoke(cuaToken.context.id, "worker_resume_failed"),
@@ -1565,6 +1599,9 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
       cuaTokenId,
       leaseId: null,
       taskId: null,
+      executionAttempt: null,
+      turnId: null,
+      eventQueue: Promise.resolve(),
       textBuffer: "",
       aborting: false,
       contextInjection: false,
@@ -1577,16 +1614,48 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
       completedTaskAt: null,
     };
     active.unsubscribe = connection.subscribe(handle.sessionId, (event) => {
-      void this.handleEvent(workerId, event).catch((error: unknown) => {
-        this.logger.error(`Worker event handling failed: ${errorMessage(error)}`);
-      });
+      active.eventQueue = active.eventQueue.then(() =>
+        this.handleEvent(workerId, active, event).catch((error: unknown) => {
+          this.logger.error(`Worker event handling failed: ${errorMessage(error)}`);
+        }),
+      );
     });
     this.active.set(workerId, active);
   }
 
-  private async handleEvent(workerId: string, event: WorkerEngineEvent): Promise<void> {
+  private async handleEvent(
+    workerId: string,
+    expectedActive: ActiveWorker,
+    event: WorkerEngineEvent,
+  ): Promise<void> {
     const active = this.active.get(workerId);
-    if (!active) return;
+    if (!active || active !== expectedActive) return;
+    const turnEvent = [
+      "text_delta",
+      "tool_started",
+      "tool_finished",
+      "waiting_approval",
+      "turn_finished",
+    ].includes(event.type);
+    if (
+      turnEvent &&
+      !active.contextInjection &&
+      (!active.turnId ||
+        !event.turn ||
+        event.turn.turnId !== active.turnId ||
+        event.turn.taskId !== active.taskId ||
+        event.turn.executionAttempt !== active.executionAttempt)
+    ) {
+      return;
+    }
+    if (
+      event.turn &&
+      (event.turn.turnId !== active.turnId ||
+        event.turn.taskId !== active.taskId ||
+        event.turn.executionAttempt !== active.executionAttempt)
+    ) {
+      return;
+    }
     await this.workers.touch(workerId);
     active.lastHeartbeatAt = Date.now();
     switch (event.type) {
@@ -1646,13 +1715,10 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     active: ActiveWorker,
     interruptedCode?: string,
   ): Promise<void> {
-    if (active.aborting) {
-      active.aborting = false;
-      return;
-    }
     const worker = await this.workers.getWorker(workerId);
     if (!worker) return;
     const taskId = active.taskId;
+    const executionAttempt = active.executionAttempt;
     const summary = active.textBuffer.trim().slice(0, 4000);
     active.textBuffer = "";
     active.contextInjection = false;
@@ -1670,21 +1736,28 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     }
     if (active.tokenId) {
       await this.bestEffort("unbind model token", () =>
-        this.tokens.bindTask(active.tokenId!, null),
+        taskId && executionAttempt !== null
+          ? this.tokens.clearTask(active.tokenId!, taskId, executionAttempt)
+          : Promise.resolve(),
       );
     }
     if (active.cuaTokenId) {
       await this.bestEffort("unbind cua token", () =>
-        this.cuaTokens.bindTask(active.cuaTokenId!, null),
+        taskId && executionAttempt !== null
+          ? this.cuaTokens.clearTask(active.cuaTokenId!, taskId, executionAttempt)
+          : Promise.resolve(),
       );
     }
     active.taskId = null;
+    active.executionAttempt = null;
+    active.turnId = null;
     active.completedTaskAt = null;
     await this.bestEffort("mark inputs delivered", () => this.markInputs(workerId, "delivered"));
     await this.bestEffort("update worker runtime", () =>
       this.workers.updateRuntime(workerId, {
         status: "idle",
         currentTaskId: null,
+        currentExecutionAttempt: null,
         lastHeartbeatAt: nowIso(),
       }),
     );
@@ -1692,7 +1765,7 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
       const task = await this.tasks.get(taskId).catch(() => null);
       if (task?.status === "completed") {
         await this.bestEffort("finish cua execution", () =>
-          this.cua.finishExecution(taskId, "completed"),
+          this.cua.finishExecution(taskId, "completed", executionAttempt ?? undefined),
         );
         return;
       }
@@ -1710,10 +1783,15 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
               ? "Worker 回合异常结束，需要重新观察 VM 后再重试"
               : "Worker 回合结束但没有通过独立完成校验，任务保持 Blocked",
             summary || undefined,
+            executionAttempt === null ? undefined : { workerId, executionAttempt },
           ),
         );
         await this.bestEffort("finish cua execution", () =>
-          this.cua.finishExecution(taskId, interruptedCode ? "failed" : "blocked"),
+          this.cua.finishExecution(
+            taskId,
+            interruptedCode ? "failed" : "blocked",
+            executionAttempt ?? undefined,
+          ),
         );
       }
     }
@@ -1727,44 +1805,26 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
     alreadyTerminal: boolean,
   ): Promise<void> {
     const taskId = active.taskId;
-    const partial = active.textBuffer.trim().slice(0, 4000);
-    active.textBuffer = "";
+    const executionAttempt = active.executionAttempt;
+    const turn = currentTurn(active);
     active.aborting = true;
     active.contextInjection = false;
-    await this.bestEffort("mark inputs cancelled", () =>
-      this.markInputs(worker.id, "cancelled"),
-    );
+    await this.bestEffort("mark inputs cancelled", () => this.markInputs(worker.id, "cancelled"));
+    let abortError: unknown = null;
     try {
-      await active.connection.abort(active.sessionId);
+      await active.connection.abort(active.sessionId, turn ?? undefined);
     } catch (error) {
+      abortError = error;
       this.logger.warn(`Worker abort RPC failed: ${errorMessage(error)}`);
     }
-    if (partial) {
+    if (active.textBuffer.trim()) {
+      const partial = active.textBuffer.trim().slice(0, 4000);
       await this.bestEffort("append aborted turn", () =>
         this.appendMessage(worker, taskId, "assistant", "event", partial),
       );
     }
-    if (active.leaseId) {
-      const leaseId = active.leaseId;
-      await this.bestEffort("release execution lease", () =>
-        this.leases.release(worker.vmId, leaseId),
-      );
-      active.leaseId = null;
-    }
-    if (active.tokenId) {
-      await this.bestEffort("unbind model token", () =>
-        this.tokens.bindTask(active.tokenId!, null),
-      );
-    }
-    if (active.cuaTokenId) {
-      await this.bestEffort("unbind cua token", () =>
-        this.cuaTokens.bindTask(active.cuaTokenId!, null),
-      );
-    }
-    active.taskId = null;
-    active.completedTaskAt = null;
-    if (taskId) {
-      await this.bestEffort("finish aborted task", async () => {
+    if (taskId && executionAttempt !== null) {
+      await this.bestEffort("finish aborted execution", async () => {
         const task = await this.tasks.get(taskId);
         if (
           !alreadyTerminal &&
@@ -1772,22 +1832,20 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
           (task.status === "running" || task.status === "waiting_approval")
         ) {
           await this.tasks.recordWorkerEvent(taskId, "worker.aborted", { code, message });
-          await this.tasks.block(taskId, code, message, partial || undefined);
-          await this.cua.finishExecution(taskId, "blocked");
-        } else if (task?.status === "cancelled") {
-          await this.cua.finishExecution(taskId, "cancelled");
-        } else if (task?.status === "completed") {
-          await this.cua.finishExecution(taskId, "completed");
         }
       });
     }
-    await this.bestEffort("update worker runtime", () =>
-      this.workers.updateRuntime(worker.id, {
-        status: "idle",
-        currentTaskId: null,
-        lastHeartbeatAt: nowIso(),
-      }),
-    );
+    if (abortError) {
+      // The engine did not confirm that the old turn stopped. Reusing this Pi
+      // session could interleave two turns, so fail the Worker and rebuild it.
+      await this.failWorker(worker.id, active, code, message, "block");
+      return;
+    }
+    // The turn is confirmed stopped: release the lease/tokens and return the
+    // Worker to the idle pool. finishTurn blocks an unfinished task, which is
+    // exactly the conservative outcome for a user-initiated abort.
+    active.textBuffer = "";
+    await this.finishTurn(worker.id, active, code);
     active.aborting = false;
   }
 
@@ -1800,30 +1858,57 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
   ): Promise<void> {
     const worker = await this.workers.getWorker(workerId);
     if (!worker) return;
+    const taskId = active.taskId;
+    const executionAttempt = active.executionAttempt;
     active.unsubscribe();
-    this.active.delete(workerId);
+    if (this.active.get(workerId) === active) this.active.delete(workerId);
+    await this.bestEffort("close failed Worker session", () =>
+      active.connection.close(active.sessionId),
+    );
     await this.markInputs(workerId, "cancelled");
     if (active.leaseId) await this.leases.release(worker.vmId, active.leaseId);
     if (active.tokenId) await this.tokens.revoke(active.tokenId, code);
     await this.cuaTokens.revoke(active.cuaTokenId, code);
-    if (active.taskId) {
-      const task = await this.tasks.get(active.taskId);
+    active.leaseId = null;
+    active.taskId = null;
+    active.executionAttempt = null;
+    active.turnId = null;
+    active.aborting = false;
+    if (taskId) {
+      const task = await this.tasks.get(taskId);
       if (task && (task.status === "running" || task.status === "waiting_approval")) {
-        await this.tasks.recordWorkerEvent(active.taskId, "worker.failed", { code, message });
+        await this.tasks.recordWorkerEvent(taskId, "worker.failed", { code, message });
         if (taskOutcome === "block") {
-          await this.tasks.block(active.taskId, code, message, message);
-          await this.cua.finishExecution(active.taskId, "blocked");
+          await this.tasks.block(taskId, code, message, message, {
+            workerId,
+            executionAttempt: executionAttempt ?? task.attemptCount,
+          });
+          await this.cua.finishExecution(taskId, "blocked", executionAttempt ?? undefined);
         } else {
-          await this.tasks.fail(active.taskId, code, message);
-          await this.cua.finishExecution(active.taskId, "failed");
+          await this.tasks.fail(taskId, code, message, {
+            workerId,
+            executionAttempt: executionAttempt ?? task.attemptCount,
+          });
+          await this.cua.finishExecution(taskId, "failed", executionAttempt ?? undefined);
         }
-      } else {
-        await this.cua.finishExecution(active.taskId, "failed");
+      } else if (task) {
+        const outcome =
+          task.status === "completed"
+            ? "completed"
+            : task.status === "cancelled"
+              ? "cancelled"
+              : task.status === "waiting_human"
+                ? "waiting_human"
+                : task.status === "blocked"
+                  ? "blocked"
+                  : "failed";
+        await this.cua.finishExecution(taskId, outcome, executionAttempt ?? undefined);
       }
     }
     await this.workers.updateRuntime(workerId, {
       status: "failed",
       currentTaskId: null,
+      currentExecutionAttempt: null,
       lastErrorCode: code,
       lastErrorMessage: message.slice(0, 2000),
       lastHeartbeatAt: null,
@@ -1910,13 +1995,19 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
         try {
           await this.reconcileActive(worker, active);
         } catch (error) {
-          this.logger.warn(
-            `Worker ${worker.id} reconcile failed: ${errorMessage(error)}`,
-          );
+          this.logger.warn(`Worker ${worker.id} reconcile failed: ${errorMessage(error)}`);
         }
       }
       for (const worker of workers) {
-        if (worker.status !== "idle" || this.active.get(worker.id)?.taskId) continue;
+        const active = this.active.get(worker.id);
+        if (
+          worker.status !== "idle" ||
+          active?.taskId ||
+          active?.turnId ||
+          active?.contextInjection
+        ) {
+          continue;
+        }
         try {
           await this.claimAndRun(worker);
         } catch (error) {
@@ -2071,56 +2162,55 @@ export class WorkerRuntimeService implements OnModuleInit, OnModuleDestroy {
         owner: "worker",
         taskId: claimed.id,
       });
+      const executionAttempt = claimed.attemptCount;
+      const turnId = randomUUID();
       active.leaseId = lease.id;
       active.taskId = claimed.id;
+      active.executionAttempt = executionAttempt;
+      active.turnId = turnId;
       active.textBuffer = "";
       active.completedTaskAt = null;
       active.lastLeaseRenewAt = Date.now();
       await Promise.all([
-        this.tokens.bindTask(active.tokenId, claimed.id),
-        this.cuaTokens.bindTask(active.cuaTokenId, claimed.id),
+        this.tokens.bindTask(active.tokenId, claimed.id, executionAttempt),
+        this.cuaTokens.bindTask(active.cuaTokenId, claimed.id, executionAttempt),
       ]);
       await this.cua.startExecution({
         taskId: claimed.id,
         workerId: worker.id,
         vmId: worker.vmId,
+        executionAttempt,
       });
       await this.workers.updateRuntime(worker.id, {
         status: "running",
         currentTaskId: claimed.id,
+        currentExecutionAttempt: executionAttempt,
         lastHeartbeatAt: nowIso(),
       });
       await this.ensureUserMessage(worker, claimed.id);
       await this.tasks.recordWorkerEvent(claimed.id, "worker.turn_started", {
         workerId: worker.id,
+        turnId,
+        executionAttempt,
       });
-      await active.connection.prompt(active.sessionId, { text: await this.claimPrompt(claimed) });
+      await active.connection.prompt(active.sessionId, {
+        text: await this.claimPrompt(claimed),
+        turn: { turnId, taskId: claimed.id, executionAttempt },
+      });
     } catch (error) {
-      if (active.leaseId) {
-        await this.leases.release(worker.vmId, active.leaseId);
+      if (error instanceof PersistenceError && error.code === "lease_conflict") {
+        if (active.leaseId) await this.leases.release(worker.vmId, active.leaseId);
         active.leaseId = null;
+        active.taskId = null;
+        active.executionAttempt = null;
+        active.turnId = null;
+        await this.tasks.releaseClaim(claimed.id, worker.id);
+        await this.workers.releaseClaim(worker.id);
+        return;
       }
-      if (active.tokenId) await this.tokens.bindTask(active.tokenId, null);
-      if (active.cuaTokenId) await this.cuaTokens.bindTask(active.cuaTokenId, null);
-      active.taskId = null;
-      const task = await this.tasks.get(claimed.id);
-      if (task && task.status === "running") {
-        if (error instanceof PersistenceError && error.code === "lease_conflict") {
-          await this.tasks.block(
-            claimed.id,
-            "human_control_active",
-            "人工正在控制该 VM，任务等待用户恢复",
-          );
-          await this.cua.finishExecution(claimed.id, "blocked");
-        } else {
-          await this.tasks.fail(claimed.id, "worker_prompt_failed", errorMessage(error));
-          await this.cua.finishExecution(claimed.id, "failed");
-        }
-      }
-      await this.workers.updateRuntime(worker.id, {
-        status: "idle",
-        currentTaskId: null,
-      });
+      // Prompt acceptance is unknown after a transport failure. Never reuse the
+      // Pi session or unbind whatever task a newer turn may have installed.
+      await this.failWorker(worker.id, active, "worker_prompt_failed", errorMessage(error));
     }
   }
 

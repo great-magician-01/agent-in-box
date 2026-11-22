@@ -9,6 +9,7 @@ import { ApiExceptionFilter } from "./http/api-exception.filter";
 import { ConsoleService } from "./vms/console.service";
 import { EventsService } from "./events/events.service";
 import { attachUpgradeFallback } from "./http/upgrade-fallback";
+import { ShutdownController } from "./shutdown.controller";
 
 const ALLOWED_HOSTNAMES = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
@@ -87,6 +88,14 @@ async function bootstrap(): Promise<void> {
   app.enableShutdownHooks();
 
   await app.listen(config.port, config.host);
+  // Authenticated stop for the desktop shell. The callback is installed after
+  // listen() so a shutdown request can never race server creation.
+  app.get(ShutdownController).onShutdown(() => {
+    void app.close().catch((error: unknown) => {
+      console.error("control-plane shutdown failed", error);
+      process.exitCode = 1;
+    });
+  });
   const httpServer = app.getHttpServer();
   const detachConsole = app.get(ConsoleService).attach(httpServer);
   httpServer.once("close", detachConsole);

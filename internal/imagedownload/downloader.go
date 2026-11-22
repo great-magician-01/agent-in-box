@@ -213,7 +213,7 @@ func (d *Downloader) Download(ctx context.Context, manifest Manifest) (Result, e
 		return Result{}, fmt.Errorf("imagedownload: %s: %w", normalized.FileName, err)
 	}
 
-	state, finalSize, err := verifyFile(finalPath, normalized)
+	state, finalSize, err := verifyFile(ctx, finalPath, normalized)
 	if err != nil {
 		return Result{}, err
 	}
@@ -250,12 +250,12 @@ func (d *Downloader) Download(ctx context.Context, manifest Manifest) (Result, e
 	// If a previous process finished writing but crashed before the rename,
 	// verify and activate the complete partial without touching the network.
 	if offset > 0 && normalized.Size > 0 && offset == normalized.Size {
-		state, size, err := verifyFile(partialPath, normalized)
+		state, size, err := verifyFile(ctx, partialPath, normalized)
 		if err != nil {
 			return Result{}, err
 		}
 		if state == fileValid {
-			return d.activate(partialPath, finalPath, size, normalized, offset, false, start)
+			return d.activate(ctx, partialPath, finalPath, size, normalized, offset, false, start)
 		}
 		discardPartial(partialPath)
 		offset = 0
@@ -465,7 +465,7 @@ func (d *Downloader) fetch(
 		return Result{}, fmt.Errorf("%w: got %d bytes, want %d", ErrSizeMismatch, actualSize, manifest.Size)
 	}
 
-	sum, err := hashFile(partialPath)
+	sum, err := hashFile(ctx, partialPath)
 	if err != nil {
 		d.abortPartial(partialPath)
 		return Result{}, fmt.Errorf("imagedownload: hash partial %s: %w", partialPath, err)
@@ -478,11 +478,12 @@ func (d *Downloader) fetch(
 		)
 	}
 
-	return d.activate(partialPath, finalPath, actualSize, manifest, writeOffset, rangeIgnored, start)
+	return d.activate(ctx, partialPath, finalPath, actualSize, manifest, writeOffset, rangeIgnored, start)
 }
 
 // activate atomically renames a verified partial into place.
 func (d *Downloader) activate(
+	ctx context.Context,
 	partialPath string,
 	finalPath string,
 	size int64,
@@ -491,6 +492,10 @@ func (d *Downloader) activate(
 	rangeIgnored bool,
 	start time.Time,
 ) (Result, error) {
+	if err := ctx.Err(); err != nil {
+		d.abortPartial(partialPath)
+		return Result{}, fmt.Errorf("imagedownload: activate %s: %w", manifest.FileName, err)
+	}
 	if err := os.Rename(partialPath, finalPath); err != nil {
 		d.abortPartial(partialPath)
 		return Result{}, fmt.Errorf("imagedownload: activate %s: %w", finalPath, err)
@@ -651,7 +656,7 @@ const (
 )
 
 // verifyFile checks an existing final or complete partial file.
-func verifyFile(path string, manifest Manifest) (fileState, int64, error) {
+func verifyFile(ctx context.Context, path string, manifest Manifest) (fileState, int64, error) {
 	info, err := os.Lstat(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return fileMissing, 0, nil
@@ -666,7 +671,7 @@ func verifyFile(path string, manifest Manifest) (fileState, int64, error) {
 	if manifest.Size > 0 && size != manifest.Size {
 		return fileInvalid, size, nil
 	}
-	sum, err := hashFile(path)
+	sum, err := hashFile(ctx, path)
 	if err != nil {
 		return fileInvalid, size, fmt.Errorf("imagedownload: hash %s: %w", path, err)
 	}
@@ -690,18 +695,38 @@ func inspectPartial(path string) (int64, error) {
 	return info.Size(), nil
 }
 
-func hashFile(path string) (string, error) {
+func hashFile(ctx context.Context, path string) (string, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return "", err
 	}
 	defer file.Close()
+	return hashReader(ctx, file)
+}
 
+func hashReader(ctx context.Context, reader io.Reader) (string, error) {
 	hasher := sha256.New()
-	if _, err := io.Copy(hasher, file); err != nil {
-		return "", err
+	buffer := make([]byte, copyBufferSize)
+	for {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		n, readErr := reader.Read(buffer)
+		if n > 0 {
+			if _, err := hasher.Write(buffer[:n]); err != nil {
+				return "", err
+			}
+		}
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		if readErr != nil {
+			if errors.Is(readErr, io.EOF) {
+				return hex.EncodeToString(hasher.Sum(nil)), nil
+			}
+			return "", readErr
+		}
 	}
-	return hex.EncodeToString(hasher.Sum(nil)), nil
 }
 
 // parseContentRange parses "bytes START-END/TOTAL" and "bytes START-END/*".

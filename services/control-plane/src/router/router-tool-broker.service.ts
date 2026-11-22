@@ -38,6 +38,7 @@ export class RouterToolBrokerService implements OnModuleInit, OnModuleDestroy {
   private readonly maxBodyBytes: number;
   private readonly now: () => Date;
   private listening = false;
+  private readonly toolRequests = new Map<string, Set<AbortController>>();
 
   constructor(
     @Inject(KYSELY) private readonly db: Kysely<DatabaseSchema>,
@@ -73,6 +74,7 @@ export class RouterToolBrokerService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleDestroy(): Promise<void> {
+    for (const conversationId of [...this.toolRequests.keys()]) this.cancel(conversationId);
     for (const socket of this.sockets) socket.destroy();
     if (this.listening) {
       await new Promise<void>((resolve) => this.server.close(() => resolve()));
@@ -85,6 +87,26 @@ export class RouterToolBrokerService implements OnModuleInit, OnModuleDestroy {
     return address && typeof address === "object"
       ? (address as AddressInfo).port
       : this.requestedPort;
+  }
+
+  cancel(conversationId: string): void {
+    const requests = this.toolRequests.get(conversationId);
+    if (!requests) return;
+    this.toolRequests.delete(conversationId);
+    for (const controller of requests) controller.abort();
+  }
+
+  private trackRequest(conversationId: string, controller: AbortController): void {
+    const requests = this.toolRequests.get(conversationId) ?? new Set<AbortController>();
+    requests.add(controller);
+    this.toolRequests.set(conversationId, requests);
+  }
+
+  private untrackRequest(conversationId: string, controller: AbortController): void {
+    const requests = this.toolRequests.get(conversationId);
+    if (!requests) return;
+    requests.delete(controller);
+    if (requests.size === 0) this.toolRequests.delete(conversationId);
   }
 
   private async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -123,12 +145,19 @@ export class RouterToolBrokerService implements OnModuleInit, OnModuleDestroy {
     const started = Date.now();
     const id = randomUUID();
     let args: Record<string, unknown> = {};
+    let requestController: AbortController | null = null;
     try {
       args = await this.body(request);
       const rawToolCallId = request.headers["x-agent-in-box-tool-call-id"];
       const toolCallId = Array.isArray(rawToolCallId) ? rawToolCallId[0] : rawToolCallId;
+      requestController = new AbortController();
+      this.trackRequest(conversationId, requestController);
+      response.once("close", () => {
+        if (!response.writableFinished) requestController?.abort();
+      });
       const result = await this.tools.execute(toolName, args, {
         conversationId,
+        signal: requestController.signal,
         ...(typeof toolCallId === "string" &&
         toolCallId !== "" &&
         /^[A-Za-z0-9._:-]{1,200}$/.test(toolCallId)
@@ -148,6 +177,9 @@ export class RouterToolBrokerService implements OnModuleInit, OnModuleDestroy {
       });
       this.json(response, 200, { ok: true, result });
     } catch (error) {
+      if (requestController?.signal.aborted) {
+        error = new PersistenceError("conflict", "Router 回合已取消，工具调用已终止");
+      }
       const code = error instanceof PersistenceError ? error.code : "internal_error";
       const message = error instanceof Error ? error.message : String(error);
       await this.audit({
@@ -162,6 +194,8 @@ export class RouterToolBrokerService implements OnModuleInit, OnModuleDestroy {
         durationMs: Date.now() - started,
       }).catch(() => undefined);
       this.writeError(response, error);
+    } finally {
+      if (requestController) this.untrackRequest(conversationId, requestController);
     }
   }
 

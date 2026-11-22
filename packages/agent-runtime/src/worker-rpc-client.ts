@@ -6,6 +6,7 @@ import {
   type WorkerInput,
   type WorkerSessionHandle,
   type WorkerSessionSpec,
+  type WorkerTurnContext,
 } from "./index";
 
 const WORKER_RPC_LONG_TIMEOUT_MS = 180_000;
@@ -109,8 +110,14 @@ export class WorkerRpcClient {
     ).then((result) => result.disposition);
   }
 
-  abort(sessionId: string): Promise<void> {
-    return this.request("POST", `/v1/sessions/${encodeURIComponent(sessionId)}/abort`, {});
+  abort(sessionId: string, expectedTurn?: WorkerTurnContext): Promise<void> {
+    return this.request("POST", `/v1/sessions/${encodeURIComponent(sessionId)}/abort`, {
+      ...(expectedTurn ? { turn: expectedTurn } : {}),
+    });
+  }
+
+  close(sessionId: string): Promise<void> {
+    return this.request("DELETE", `/v1/sessions/${encodeURIComponent(sessionId)}`);
   }
 
   archive(sessionId: string): Promise<{ archiveRef: string; summary: string }> {
@@ -216,7 +223,7 @@ export class WorkerRpcClient {
   }
 
   private async request<T>(
-    method: "GET" | "POST",
+    method: "GET" | "POST" | "DELETE",
     route: string,
     body?: unknown,
     acceptStatuses: readonly number[] = [],
@@ -304,12 +311,7 @@ function parseSseBlock(block: string): WorkerEventEnvelope | null {
   try {
     event = JSON.parse(data.join("\n")) as WorkerEventEnvelope;
   } catch {
-    throw new WorkerRpcError(
-      "Worker RPC event stream is malformed",
-      "protocol_error",
-      502,
-      false,
-    );
+    throw new WorkerRpcError("Worker RPC event stream is malformed", "protocol_error", 502, false);
   }
   if (event.id !== id || typeof event.sessionId !== "string") {
     throw new WorkerRpcError(

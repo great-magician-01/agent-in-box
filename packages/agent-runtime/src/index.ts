@@ -3,7 +3,7 @@
  * of the domain, task service or UI.
  */
 
-export const WORKER_RPC_PROTOCOL_VERSION = "0.1.0" as const;
+export const WORKER_RPC_PROTOCOL_VERSION = "0.2.0" as const;
 export const PI_ENGINE_VERSION = "1.5.1" as const;
 export const PI_SESSION_FORMAT_VERSION = "1" as const;
 
@@ -77,15 +77,23 @@ export interface WorkerInlineImage {
   data: string;
 }
 
+export interface WorkerTurnContext {
+  turnId: string;
+  taskId: string;
+  executionAttempt: number;
+}
+
 export interface WorkerInput {
   text: string;
+  /** Present on task execution and expected-turn operations. */
+  turn?: WorkerTurnContext;
   /** Guest-local absolute image paths. */
   attachments?: readonly string[];
   /** Host-captured images sent inline for resume/environment injection. */
   images?: readonly WorkerInlineImage[];
 }
 
-export type WorkerEngineEvent =
+export type WorkerEngineEvent = (
   | { type: "session_started"; sessionId: string }
   | { type: "text_delta"; delta: string }
   | { type: "tool_started"; toolName: string; input: unknown }
@@ -94,7 +102,11 @@ export type WorkerEngineEvent =
   | { type: "turn_finished" }
   | { type: "stream_gap"; oldestEventId: number; latestEventId: number }
   | { type: "session_failed"; message: string }
-  | { type: "session_ended"; reason: "completed" | "cancelled" | "failed" };
+  | { type: "session_ended"; reason: "completed" | "cancelled" | "failed" }
+) & {
+  /** Task events always carry their immutable execution identity. */
+  turn?: WorkerTurnContext;
+};
 
 export interface WorkerSessionHandle {
   sessionId: string;
@@ -110,7 +122,8 @@ export interface WorkerEngine {
   prompt(sessionId: string, input: WorkerInput): Promise<void>;
   steer(sessionId: string, input: WorkerInput): Promise<"queued" | "handled">;
   followUp(sessionId: string, input: WorkerInput): Promise<"queued" | "handled">;
-  abort(sessionId: string): Promise<void>;
+  abort(sessionId: string, expectedTurn?: WorkerTurnContext): Promise<void>;
+  close(sessionId: string): Promise<void>;
   subscribe(sessionId: string, listener: (event: WorkerEngineEvent) => void): () => void;
   archive(sessionId: string): Promise<{ archiveRef: string; summary: string }>;
   resume(

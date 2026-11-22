@@ -46,24 +46,28 @@ const (
 // upper-case field names from vm.json case-insensitively.
 type VmSpec struct {
 	ID string `json:"id"`
+	// UUID is the QEMU machine UUID. It is generated once at creation and
+	// persisted so query-uuid can prove that a loopback QMP endpoint belongs to
+	// this VM even after a supervisor restart or PID reuse.
+	UUID string `json:"uuid,omitempty"`
 	// OsFamily is "linux" or "windows". An empty value means Linux so VM
 	// metadata created before phase 13 remains readable.
-	OsFamily       string `json:"osFamily,omitempty"`
-	Name           string `json:"name"`
-	BaseImagePath  string `json:"baseImagePath"`
-	SeedImagePath  string `json:"seedImagePath"`
+	OsFamily      string `json:"osFamily,omitempty"`
+	Name          string `json:"name"`
+	BaseImagePath string `json:"baseImagePath"`
+	SeedImagePath string `json:"seedImagePath"`
 	// ProvisioningURL enables QEMU's NoCloud-net datasource through SMBIOS for
 	// Linux cloud images that do not ship a prebuilt seed image.
 	ProvisioningURL string `json:"provisioningUrl,omitempty"`
 	CPUCount        int    `json:"cpuCount"`
-	MemoryMB       int    `json:"memoryMb"`
-	DiskSizeGB     int    `json:"diskSizeGb"`
-	Desktop        bool   `json:"desktop"`
-	QMPPort        int    `json:"qmpPort"`
-	SSHHostPort    int    `json:"sshHostPort"`
-	GuestHostPort  int    `json:"guestHostPort"`
-	WorkerHostPort int    `json:"workerHostPort"`
-	VNCDisplay     int    `json:"vncDisplay"`
+	MemoryMB        int    `json:"memoryMb"`
+	DiskSizeGB      int    `json:"diskSizeGb"`
+	Desktop         bool   `json:"desktop"`
+	QMPPort         int    `json:"qmpPort"`
+	SSHHostPort     int    `json:"sshHostPort"`
+	GuestHostPort   int    `json:"guestHostPort"`
+	WorkerHostPort  int    `json:"workerHostPort"`
+	VNCDisplay      int    `json:"vncDisplay"`
 }
 
 // EffectiveOsFamily normalizes the guest family and rejects unknown values.
@@ -82,18 +86,30 @@ func (s VmSpec) EffectiveOsFamily() (string, error) {
 // process. PowerState and GuestHealth are deliberately separate: suspend/resume
 // only changes the power state and never fabricates guest health.
 type VmState struct {
-	ID             string     `json:"id"`
-	PowerState     PowerState `json:"powerState"`
-	PID            int        `json:"pid"`
-	QMPPort        int        `json:"qmpPort"`
-	SSHHostPort    int        `json:"sshHostPort"`
-	GuestHostPort  int        `json:"guestHostPort"`
-	WorkerHostPort int        `json:"workerHostPort"`
-	ConsoleURL     string     `json:"consoleUrl"`
-	DiskPath       string     `json:"diskPath"`
-	GuestHealth    string     `json:"guestHealth"`
-	LastError      string     `json:"lastError"`
-	UpdatedAt      time.Time  `json:"updatedAt"`
+	ID         string     `json:"id"`
+	PowerState PowerState `json:"powerState"`
+	PID        int        `json:"pid"`
+	// LaunchID identifies one QEMU launch of this VM. It changes on every start
+	// and fences cleanup paths that raced a restart.
+	LaunchID string `json:"launchId,omitempty"`
+	// ProcessStartTicks is the OS process creation timestamp of the process that
+	// owns LaunchID. A matching PID with a different start time is a reused PID,
+	// not this VM's QEMU.
+	ProcessStartTicks uint64 `json:"processStartTicks,omitempty"`
+	// Transport records how QMP/VNC are exposed for this VM: "unix" (QMP on a
+	// 0700-directory socket) or "tls" (mutually authenticated TLS). An empty
+	// value is legacy metadata; it is only honoured while that process is still
+	// running, and the next launch migrates to a secure transport.
+	Transport      string    `json:"transport,omitempty"`
+	QMPPort        int       `json:"qmpPort"`
+	SSHHostPort    int       `json:"sshHostPort"`
+	GuestHostPort  int       `json:"guestHostPort"`
+	WorkerHostPort int       `json:"workerHostPort"`
+	ConsoleURL     string    `json:"consoleUrl"`
+	DiskPath       string    `json:"diskPath"`
+	GuestHealth    string    `json:"guestHealth"`
+	LastError      string    `json:"lastError"`
+	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
 // Provider is the Go counterpart of the shared protocol VmProvider contract.

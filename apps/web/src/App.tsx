@@ -10,7 +10,7 @@ import type {
   OnboardingState,
   RuntimeInfo,
 } from "@agent-in-box/protocol";
-import { api, UNAUTHORIZED_EVENT } from "./api";
+import { api, setCsrfToken, UNAUTHORIZED_EVENT } from "./api";
 import type { RestartRequest } from "./Dashboard";
 import { useDesktop } from "./desktop";
 import { CONTROL_PLANE_STATE_LABELS } from "./format";
@@ -69,22 +69,55 @@ interface PendingRestart {
 export function App(): React.JSX.Element {
   const { bridge, status: desktopStatus, error: desktopError } = useDesktop();
   const [auth, setAuth] = useState<AuthState>({ state: "checking" });
+  const authEpoch = useRef(0);
 
-  const checkAuth = useCallback(async (): Promise<void> => {
-    try {
-      const info = await api.authSession();
-      setAuth(
-        info.state === "authenticated"
-          ? { state: "authenticated", info }
-          : { state: "anonymous", info },
-      );
-    } catch (error) {
-      setAuth({
-        state: "unreachable",
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
+  const publishAuth = useCallback((info: LocalAuthSessionView, forceAnonymous = false): void => {
+    // Login/logout complete a new auth flow and invalidate every older query.
+    authEpoch.current += 1;
+    setCsrfToken(info.csrfToken);
+    setAuth(
+      !forceAnonymous && info.state === "authenticated"
+        ? { state: "authenticated", info }
+        : { state: "anonymous", info },
+    );
   }, []);
+
+  const checkAuth = useCallback(
+    async (mode: "full" | "unauthorized" | "desktop-poll" = "full"): Promise<void> => {
+      const epoch = ++authEpoch.current;
+      try {
+        const info = await api.authSession();
+        if (authEpoch.current !== epoch) return;
+        // Authentication state and CSRF are one snapshot. Neither an older
+        // success nor an older failure may partially overwrite a newer flow.
+        if (mode === "desktop-poll" && info.state !== "authenticated") return;
+        setCsrfToken(info.csrfToken);
+        setAuth(
+          info.state === "authenticated"
+            ? { state: "authenticated", info }
+            : { state: "anonymous", info },
+        );
+      } catch (error) {
+        if (authEpoch.current !== epoch || mode === "desktop-poll") return;
+        setAuth(
+          mode === "unauthorized"
+            ? { state: "checking" }
+            : {
+                state: "unreachable",
+                message: error instanceof Error ? error.message : String(error),
+              },
+        );
+      }
+    },
+    [],
+  );
+
+  useEffect(
+    () => () => {
+      authEpoch.current += 1;
+    },
+    [],
+  );
 
   useEffect(() => {
     void checkAuth();
@@ -106,14 +139,11 @@ export function App(): React.JSX.Element {
           // Fall through to the normal unlock screen.
         }
       }
-      void api
-        .authSession()
-        .then((info) => setAuth({ state: "anonymous", info }))
-        .catch(() => setAuth({ state: "checking" }));
+      void checkAuth("unauthorized");
     }
     window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
-  }, [bridge]);
+  }, [bridge, checkAuth]);
 
   useEffect(() => {
     if (auth.state !== "unreachable") return;
@@ -123,7 +153,6 @@ export function App(): React.JSX.Element {
 
   useEffect(() => {
     if (auth.state !== "anonymous" || !bridge) return;
-    let cancelled = false;
     let attempts = 0;
     const timer = window.setInterval(() => {
       attempts += 1;
@@ -131,21 +160,10 @@ export function App(): React.JSX.Element {
         window.clearInterval(timer);
         return;
       }
-      void api
-        .authSession()
-        .then((info) => {
-          if (!cancelled && info.state === "authenticated") {
-            setAuth({ state: "authenticated", info });
-            window.clearInterval(timer);
-          }
-        })
-        .catch(() => undefined);
+      void checkAuth("desktop-poll");
     }, 1500);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [auth.state, bridge]);
+    return () => window.clearInterval(timer);
+  }, [auth.state, bridge, checkAuth]);
 
   if (auth.state === "checking") {
     return (
@@ -194,7 +212,7 @@ export function App(): React.JSX.Element {
         <LoginScreen
           info={auth.info}
           bridge={bridge}
-          onAuthenticated={(info) => setAuth({ state: "authenticated", info })}
+          onAuthenticated={(info) => publishAuth(info)}
         />
       </main>
     );
@@ -206,7 +224,7 @@ export function App(): React.JSX.Element {
       desktopStatus={desktopStatus}
       desktopError={desktopError}
       authInfo={auth.info}
-      onLogout={() => setAuth({ state: "anonymous", info: auth.info })}
+      onLogout={(info) => publishAuth(info, true)}
     />
   );
 }
@@ -216,7 +234,7 @@ interface AuthenticatedAppProps {
   desktopStatus: DesktopAppStatus | null;
   desktopError: string | null;
   authInfo: LocalAuthSessionView;
-  onLogout(): void;
+  onLogout(info: LocalAuthSessionView): void;
 }
 
 function AuthenticatedApp({
@@ -526,8 +544,8 @@ function AuthenticatedApp({
     if (logoutBusy) return;
     setLogoutBusy(true);
     try {
-      await api.logout();
-      onLogout();
+      const info = await api.logout();
+      onLogout(info);
     } finally {
       setLogoutBusy(false);
     }

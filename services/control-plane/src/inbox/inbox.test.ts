@@ -83,4 +83,29 @@ describe("sanitizeFileName", () => {
     expect(sanitizeFileName("%2e%2e%2fsecret.txt")).toBe("secret.txt");
     expect(sanitizeFileName("   ")).toBe("dropped-file");
   });
+
+  it("enforces a total inbox quota across uploads", async () => {
+    const quotaInbox = new InboxService(
+      ctx.app.db,
+      { layout: { inbox: directory } } as unknown as DatabaseService,
+      { maxBytes: 32, totalBytes: 40 },
+    );
+    await quotaInbox.upload({
+      fileName: "a.txt",
+      contentType: "text/plain",
+      projectId: null,
+      stream: Readable.from([Buffer.from("a".repeat(30))]),
+      declaredBytes: 30,
+    });
+    await expect(
+      quotaInbox.upload({
+        fileName: "b.txt",
+        contentType: "text/plain",
+        projectId: null,
+        stream: Readable.from([Buffer.from("b".repeat(30))]),
+        declaredBytes: 30,
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    expect(await quotaInbox.list()).toHaveLength(1);
+  });
 });

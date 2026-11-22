@@ -1,5 +1,5 @@
 /* eslint-disable react-hooks/set-state-in-effect -- VM/worker snapshots refresh from server events */
-import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import type {
   RouterToolCallRecord,
@@ -53,6 +53,7 @@ export function ObserverSidebar({
   const [tools, setTools] = useState<RouterToolDefinition[]>([]);
   const [toolCalls, setToolCalls] = useState<RouterToolCallRecord[]>([]);
   const sidebarRef = useModalFocus<HTMLElement>(open && modal, onClose);
+  const activeSessionRef = useRef<VmConsoleSession | null>(null);
 
   function onTabKeyDown(event: React.KeyboardEvent<HTMLButtonElement>): void {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
@@ -115,19 +116,40 @@ export function ObserverSidebar({
     setTakeoverMode(false);
   }, [open, tab, selectedVmId]);
 
+  const releaseActiveSession = useCallback((): void => {
+    const active = activeSessionRef.current;
+    activeSessionRef.current = null;
+    if (active?.lease) {
+      void api.releaseVmLease(active.vmId, active.lease.id).catch(() => undefined);
+    }
+  }, []);
+
   useEffect(() => {
     if (!open || tab !== "vm" || !selectedVmId) {
+      releaseActiveSession();
       setSession(null);
       return;
     }
     let cancelled = false;
+    // Replacing a console session must release the previous human Lease
+    // immediately; dropping the object alone would leave it until the TTL.
+    releaseActiveSession();
     setConnecting(true);
     setError(null);
     setSession(null);
     void api
       .openVmConsole(selectedVmId, { viewOnly: !takeoverMode })
       .then((next) => {
-        if (!cancelled) setSession(next);
+        if (cancelled) {
+          // The effect was replaced or the sidebar closed while the request was
+          // in flight. The one-time ticket is ours, so its Lease is too.
+          if (next.lease) {
+            void api.releaseVmLease(next.vmId, next.lease.id).catch(() => undefined);
+          }
+          return;
+        }
+        activeSessionRef.current = next;
+        setSession(next);
       })
       .catch((cause: unknown) => {
         if (!cancelled) setError(errorMessage(cause));
@@ -137,8 +159,11 @@ export function ObserverSidebar({
       });
     return () => {
       cancelled = true;
+      // Unmounting while a session is active must not leave its Lease to the
+      // TTL; releasing is idempotent, so the console's own cleanup may repeat it.
+      releaseActiveSession();
     };
-  }, [open, tab, selectedVmId, connectNonce, takeoverMode]);
+  }, [open, tab, selectedVmId, connectNonce, takeoverMode, releaseActiveSession]);
 
   async function takeover(): Promise<void> {
     if (!selectedVmId) return;

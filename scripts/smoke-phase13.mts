@@ -15,6 +15,7 @@ import type {
 } from "@agent-in-box/protocol";
 import { smokeAuthHeaders } from "./smoke-auth.mjs";
 
+import { writeSmokeToken } from "./smoke-token.mjs";
 interface CheckResult {
   name: string;
   passed: boolean;
@@ -193,7 +194,7 @@ async function startGuestAgent(): Promise<{
   await mkdir(root, { recursive: true });
   const token = "phase13-guest-token-0123456789abcdef0123456789abcdef";
   const tokenFile = path.join(temporary, "guest-agent.token");
-  await writeFile(tokenFile, token, { mode: 0o600 });
+  await writeSmokeToken(tokenFile, token);
   const port = await freePort();
   const child = spawn(
     executable,
@@ -202,6 +203,8 @@ async function startGuestAgent(): Promise<{
       `127.0.0.1:${port}`,
       "-token-file",
       tokenFile,
+      "-allowed-client-cidrs",
+      "127.0.0.1/32",
       "-verify-roots",
       root,
       "-workspace-roots",

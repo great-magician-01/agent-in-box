@@ -359,6 +359,8 @@ describe("VmService", () => {
         latest_summary: null,
         error_code: null,
         created_at: nowIso(),
+        updated_at: nowIso(),
+        attempt_count: 0,
         started_at: nowIso(),
         completed_at: null,
       })

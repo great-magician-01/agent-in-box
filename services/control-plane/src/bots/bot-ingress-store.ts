@@ -1,5 +1,5 @@
 import { Inject } from "@nestjs/common";
-import type { Kysely } from "kysely";
+import { sql, type Kysely } from "kysely";
 import type { BotAccountRecord } from "@agent-in-box/protocol";
 import type { DurableIngressStore, InboundBotMessage } from "@agent-in-box/bot-connector";
 import { OutboxRepository } from "../persistence/repositories/outbox-repository";
@@ -9,6 +9,11 @@ import { KYSELY } from "../persistence/tokens";
 
 const MAX_TEXT = 20_000;
 const MAX_RAW_JSON = 512 * 1024;
+/** Admission caps keep a chatty or hostile bot from filling the database. */
+const MAX_PENDING_EVENTS = 500;
+const MAX_PENDING_BYTES = 32 * 1024 * 1024;
+/** Terminal events are diagnostics; they do not need unlimited retention. */
+const TERMINAL_RETENTION_MS = 7 * 24 * 60 * 60_000;
 
 /** Per-account durable admission store wired into the bot connector pipeline. */
 export class BotIngressStore implements DurableIngressStore {
@@ -24,6 +29,33 @@ export class BotIngressStore implements DurableIngressStore {
     const text = message.text.slice(0, MAX_TEXT);
     const rawJson = safeJson(message.raw);
     return this.db.transaction().execute(async (trx) => {
+      // Admission control runs in the same transaction as the insert so a burst
+      // of deliveries cannot all pass a stale count.
+      const pending = await trx
+        .selectFrom("bot_events")
+        .select((expression) => [
+          expression.fn.count<number>("dedup_key").as("events"),
+          expression.fn.sum<number>(sql`length(raw_json)`).as("bytes"),
+        ])
+        .where("account_id", "=", this.account.id)
+        .where("state", "in", ["pending", "processing"])
+        .executeTakeFirst();
+      const pendingEvents = Number(pending?.events ?? 0);
+      const pendingBytes = Number(pending?.bytes ?? 0);
+      if (
+        pendingEvents >= MAX_PENDING_EVENTS ||
+        pendingBytes + rawJson.length > MAX_PENDING_BYTES
+      ) {
+        return false;
+      }
+      // Drop terminal diagnostics older than the retention window. The dedup
+      // key is still preserved for recent events, so replays stay idempotent.
+      await trx
+        .deleteFrom("bot_events")
+        .where("account_id", "=", this.account.id)
+        .where("state", "in", ["processed", "failed"])
+        .where("updated_at", "<", new Date(Date.now() - TERMINAL_RETENTION_MS).toISOString())
+        .execute();
       const inserted = await trx
         .insertInto("bot_events")
         .values({

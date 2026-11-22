@@ -1830,6 +1830,69 @@ const migrations: Record<string, MigrationDefinition> = {
       await db.schema.dropTable("bootstrap_states").ifExists().execute();
     },
   },
+  "016_execution_generation_and_assignment": {
+    async up(db: Kysely<DatabaseSchema>): Promise<void> {
+      await db.schema
+        .alterTable("workers")
+        .addColumn("current_execution_attempt", "integer")
+        .execute();
+      await db.schema
+        .alterTable("tasks")
+        .addColumn("target_worker_id", "text", (column) =>
+          column.references("workers.id").onDelete("set null"),
+        )
+        .execute();
+      await db.schema
+        .createIndex("tasks_target_worker_idx")
+        .on("tasks")
+        .columns(["target_worker_id", "status"])
+        .execute();
+      await db.schema
+        .createIndex("images_file_name_unique")
+        .unique()
+        .on("images")
+        .column("file_name")
+        .execute();
+
+      await db.schema
+        .alterTable("task_execution_state")
+        .addColumn("execution_attempt", "integer", (column) => column.notNull().defaultTo(0))
+        .execute();
+      for (const table of [
+        "model_tokens",
+        "cua_tokens",
+        "cua_actions",
+        "cua_approvals",
+        "cua_screenshots",
+        "human_verifications",
+      ] as const) {
+        await db.schema.alterTable(table).addColumn("execution_attempt", "integer").execute();
+      }
+      await db.schema
+        .alterTable("vm_leases")
+        .addColumn("preemptible", "integer", (column) => column.notNull().defaultTo(1))
+        .execute();
+    },
+
+    async down(db: Kysely<DatabaseSchema>): Promise<void> {
+      await db.schema.alterTable("vm_leases").dropColumn("preemptible").execute();
+      for (const table of [
+        "human_verifications",
+        "cua_screenshots",
+        "cua_approvals",
+        "cua_actions",
+        "cua_tokens",
+        "model_tokens",
+      ] as const) {
+        await db.schema.alterTable(table).dropColumn("execution_attempt").execute();
+      }
+      await db.schema.alterTable("task_execution_state").dropColumn("execution_attempt").execute();
+      await db.schema.dropIndex("tasks_target_worker_idx").ifExists().execute();
+      await db.schema.dropIndex("images_file_name_unique").ifExists().execute();
+      await db.schema.alterTable("tasks").dropColumn("target_worker_id").execute();
+      await db.schema.alterTable("workers").dropColumn("current_execution_attempt").execute();
+    },
+  },
 };
 
 /** Migration ids in the order the runner applies them. */

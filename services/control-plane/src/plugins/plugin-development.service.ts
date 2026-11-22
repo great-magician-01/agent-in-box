@@ -34,6 +34,9 @@ interface TransferFile {
   dataBase64: string;
 }
 
+const REQUESTS_PER_MINUTE = 120;
+const MAX_CONCURRENT_REQUESTS = 4;
+
 @Injectable()
 export class PluginDevelopmentService implements OnModuleInit, OnModuleDestroy {
   private readonly server: Server;
@@ -99,10 +102,19 @@ export class PluginDevelopmentService implements OnModuleInit, OnModuleDestroy {
   async issue(input: {
     workerId: string;
     projectId: string;
-    autoEnable: boolean;
+    /** Retained for API compatibility; Guest tokens can never auto-enable. */
+    autoEnable?: boolean;
   }): Promise<{ token: string; context: PluginDevelopmentContext }> {
     const token = randomBytes(32).toString("base64url");
     const id = randomUUID();
+    // Only one active development token per Worker: a stale token from an
+    // earlier task must not keep registering packages concurrently.
+    await this.db
+      .updateTable("plugin_development_tokens")
+      .set({ revoked_at: nowIso() })
+      .where("worker_id", "=", input.workerId)
+      .where("revoked_at", "is", null)
+      .execute();
     await this.db
       .insertInto("plugin_development_tokens")
       .values({
@@ -110,7 +122,8 @@ export class PluginDevelopmentService implements OnModuleInit, OnModuleDestroy {
         token_hash: hash(token),
         worker_id: input.workerId,
         project_id: input.projectId,
-        auto_enable: input.autoEnable ? 1 : 0,
+        // A Guest token never grants auto-enable, regardless of the request.
+        auto_enable: 0,
         expires_at: new Date(Date.now() + this.tokenTtlMs).toISOString(),
         revoked_at: null,
         created_at: nowIso(),
@@ -123,7 +136,7 @@ export class PluginDevelopmentService implements OnModuleInit, OnModuleDestroy {
         id,
         workerId: input.workerId,
         projectId: input.projectId,
-        autoEnable: input.autoEnable,
+        autoEnable: false,
       },
     };
   }
@@ -162,7 +175,40 @@ export class PluginDevelopmentService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  private readonly requestWindows = new Map<string, number[]>();
+  private inflight = 0;
+
   private async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    const remote = request.socket.remoteAddress ?? "local";
+    if (this.inflight >= MAX_CONCURRENT_REQUESTS) {
+      this.json(response, 503, {
+        ok: false,
+        error: { code: "unavailable", message: "插件开发代理繁忙，请稍后重试" },
+      });
+      return;
+    }
+    const now = Date.now();
+    const recent = (this.requestWindows.get(remote) ?? []).filter(
+      (timestamp) => now - timestamp < 60_000,
+    );
+    if (recent.length >= REQUESTS_PER_MINUTE) {
+      this.json(response, 429, {
+        ok: false,
+        error: { code: "rate_limited", message: "插件开发代理请求过于频繁" },
+      });
+      return;
+    }
+    recent.push(now);
+    this.requestWindows.set(remote, recent);
+    this.inflight += 1;
+    try {
+      await this.dispatch(request, response);
+    } finally {
+      this.inflight -= 1;
+    }
+  }
+
+  private async dispatch(request: IncomingMessage, response: ServerResponse): Promise<void> {
     response.setHeader("X-Content-Type-Options", "nosniff");
     response.setHeader("Cache-Control", "no-store");
     const url = new URL(request.url ?? "", "http://127.0.0.1");
@@ -193,28 +239,19 @@ export class PluginDevelopmentService implements OnModuleInit, OnModuleDestroy {
       this.json(response, 200, {
         ok: true,
         plugin: result,
-        autoEnableAllowed: context.autoEnable,
+        autoEnableAllowed: false,
         projectId: context.projectId,
       });
       return;
     }
     if (url.pathname === "/v1/enable") {
-      if (!context.autoEnable) {
-        throw new PersistenceError(
-          "forbidden",
-          "当前 Development Worker 未获自动启用权限；插件已注册时可由用户在本机启用",
-        );
-      }
-      if (typeof body.pluginId !== "string" || typeof body.version !== "string") {
-        throw new PersistenceError("validation_failed", "插件启用需要 pluginId 和 version");
-      }
-      const result = await this.plugins.enable(body.pluginId, {
-        version: body.version,
-        scopeType: "project",
-        scopeId: context.projectId,
-      });
-      this.json(response, 200, { ok: true, enablement: result });
-      return;
+      // Guest Workers never enable plugins. The broker only registers and
+      // reports diagnostics; a plugin becomes active only when the local user
+      // enables it through the desktop UI.
+      throw new PersistenceError(
+        "forbidden",
+        "Guest Worker 不能启用插件；插件已注册时请由本机用户启用",
+      );
     }
     this.json(response, 404, { ok: false, error: { code: "not_found", message: "Not found" } });
   }

@@ -161,7 +161,8 @@ func screenMetrics() (vx, vy, width, height int, err error) {
 	if width <= 0 || height <= 0 {
 		return 0, 0, 0, 0, fmt.Errorf("%w: display metrics are %dx%d", errWindowsDesktop, width, height)
 	}
-	if width > maxVirtualScreenPixels || height > maxVirtualScreenPixels {
+	if width > maxVirtualScreenPixels || height > maxVirtualScreenPixels ||
+		!validScreenshotSize(width, height) {
 		return 0, 0, 0, 0, fmt.Errorf("%w: virtual screen %dx%d is too large", errWindowsDesktop, width, height)
 	}
 	return vx, vy, width, height, nil
@@ -375,13 +376,21 @@ func (d *windowsDesktop) Input(ctx context.Context, request InputRequest) error 
 		if err := setCursorPosition(x, y); err != nil {
 			return err
 		}
+		needsMouseRelease := false
+		defer func() {
+			if needsMouseRelease {
+				_ = sendMouseInput(0, 0, 0, up)
+			}
+		}()
 		for index := 0; index < count; index++ {
+			needsMouseRelease = true
 			if err := sendMouseInput(0, 0, 0, down); err != nil {
 				return err
 			}
 			if err := sendMouseInput(0, 0, 0, up); err != nil {
 				return err
 			}
+			needsMouseRelease = false
 			if index+1 < count {
 				if err := sleepContext(ctx, 90*time.Millisecond); err != nil {
 					return err
@@ -408,7 +417,19 @@ func (d *windowsDesktop) Input(ctx context.Context, request InputRequest) error 
 		if err != nil {
 			return err
 		}
+		pressed := 0
+		released := false
+		defer func() {
+			if released {
+				return
+			}
+			for index := pressed - 1; index >= 0; index-- {
+				key := plan[index]
+				_ = sendKeyboardInput(key.vk, 0, key.flags|keyUp)
+			}
+		}()
 		for _, key := range plan {
+			pressed++
 			if err := sendKeyboardInput(key.vk, 0, key.flags); err != nil {
 				return err
 			}
@@ -419,6 +440,7 @@ func (d *windowsDesktop) Input(ctx context.Context, request InputRequest) error 
 				return err
 			}
 		}
+		released = true
 		return nil
 	case "type_text":
 		if request.Text == "" || utf8.RuneCountInString(request.Text) > 20000 {
@@ -665,6 +687,18 @@ func windowsKeyFlags(vk uint16) uint32 {
 	return 0
 }
 
+func sendKeyboardKey(vk uint16, scan uint16, flags uint32) error {
+	if err := sendKeyboardInput(vk, scan, flags); err != nil {
+		_ = sendKeyboardInput(vk, scan, flags|keyUp)
+		return err
+	}
+	if err := sendKeyboardInput(vk, scan, flags|keyUp); err != nil {
+		_ = sendKeyboardInput(vk, scan, flags|keyUp)
+		return err
+	}
+	return nil
+}
+
 func windowsTypeText(ctx context.Context, text string) error {
 	text = strings.ReplaceAll(text, "\r\n", "\n")
 	text = strings.ReplaceAll(text, "\r", "\n")
@@ -675,18 +709,12 @@ func windowsTypeText(ctx context.Context, text string) error {
 		}
 		unit := units[index]
 		if unit == '\n' {
-			if err := sendKeyboardInput(0x0D, 0, 0); err != nil {
-				return err
-			}
-			if err := sendKeyboardInput(0x0D, 0, keyUp); err != nil {
+			if err := sendKeyboardKey(0x0D, 0, 0); err != nil {
 				return err
 			}
 			continue
 		}
-		if err := sendKeyboardInput(0, unit, keyUnicode); err != nil {
-			return err
-		}
-		if err := sendKeyboardInput(0, unit, keyUnicode|keyUp); err != nil {
+		if err := sendKeyboardKey(0, unit, keyUnicode); err != nil {
 			return err
 		}
 	}

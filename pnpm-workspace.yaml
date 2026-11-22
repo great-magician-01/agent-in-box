@@ -2,6 +2,8 @@ packages:
   - "apps/*"
   - "packages/*"
   - "services/control-plane"
+overrides:
+  ipaddr.js: 2.5.0
 allowBuilds:
   esbuild: true
   electron: true

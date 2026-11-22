@@ -18,7 +18,7 @@ ProtectSystem=full
 ReadWritePaths=/etc/agent-in-box /var/lib/agent-in-box
 # The agent parses untrusted PNG/JSON over the network; drop everything it
 # does not need instead of running a default-capability root process.
-CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_SYS_PTRACE CAP_KILL
+CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_SYS_PTRACE CAP_KILL CAP_CHOWN
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 MemoryMax=1G
 

@@ -1,4 +1,3 @@
-/* eslint-disable react-hooks/set-state-in-effect -- server snapshots refresh from events and timers */
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   DesktopBridge,
@@ -46,6 +45,7 @@ export function useNotificationCenter(
   const notifiedRef = useRef<Set<string>>(readNotified());
   const onOpenRef = useRef(onOpen);
   const inFlight = useRef(false);
+  const queuedRefresh = useRef(false);
   const initialLoad = useRef(true);
 
   useEffect(() => {
@@ -53,23 +53,33 @@ export function useNotificationCenter(
   }, [onOpen]);
 
   const reload = useCallback(async (): Promise<void> => {
-    if (inFlight.current) return;
+    if (inFlight.current) {
+      // A refresh requested while a request is in flight must run afterwards,
+      // otherwise an event that arrives mid-request is never reflected.
+      queuedRefresh.current = true;
+      return;
+    }
     inFlight.current = true;
     try {
-      const next = await api.notifications({ limit: 80 });
-      setView(next);
-      setError(null);
-      if (initialLoad.current) {
-        // Do not replay historical unread items as native notifications when
-        // the UI starts; only events observed after this first snapshot alert.
-        initialLoad.current = false;
-        for (const item of next.items) notifiedRef.current.add(item.id);
-        writeNotified(notifiedRef.current);
-      } else {
-        maybeNotify(bridge, next.items, notifiedRef.current);
-      }
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      do {
+        queuedRefresh.current = false;
+        try {
+          const next = await api.notifications({ limit: 80 });
+          setView(next);
+          setError(null);
+          if (initialLoad.current) {
+            // Do not replay historical unread items as native notifications
+            // when the UI starts; only events after this first snapshot alert.
+            initialLoad.current = false;
+            for (const item of next.items) notifiedRef.current.add(item.id);
+            writeNotified(notifiedRef.current);
+          } else {
+            maybeNotify(bridge, next.items, notifiedRef.current);
+          }
+        } catch (cause) {
+          setError(cause instanceof Error ? cause.message : String(cause));
+        }
+      } while (queuedRefresh.current);
     } finally {
       inFlight.current = false;
     }

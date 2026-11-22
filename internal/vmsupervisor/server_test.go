@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"agent-in-box/internal/vmprovider"
 )
@@ -587,5 +588,38 @@ func TestListMissingStorageRootIsEmpty(t *testing.T) {
 	decodeJSON(t, recorder, &response)
 	if response.Items == nil || len(response.Items) != 0 {
 		t.Fatalf("expected empty items array, got %#v", response)
+	}
+}
+
+func TestShutdownRequiresAuthenticationAndPost(t *testing.T) {
+	provider := newFakeProvider()
+	requested := make(chan struct{}, 1)
+	server := newTestServer(t, provider, t.TempDir(), func(config *Config) {
+		config.RequestShutdown = func() { requested <- struct{}{} }
+	})
+
+	unauthenticated := request(t, server, http.MethodPost, "/api/v1/shutdown", "", "")
+	if unauthenticated.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated shutdown status: %d", unauthenticated.Code)
+	}
+	select {
+	case <-requested:
+		t.Fatal("unauthenticated request triggered shutdown")
+	default:
+	}
+
+	wrongMethod := request(t, server, http.MethodGet, "/api/v1/shutdown", "", testToken)
+	if wrongMethod.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("GET shutdown status: %d", wrongMethod.Code)
+	}
+
+	accepted := request(t, server, http.MethodPost, "/api/v1/shutdown", "{}", testToken)
+	if accepted.Code != http.StatusAccepted {
+		t.Fatalf("authenticated shutdown status: %d body=%s", accepted.Code, accepted.Body.String())
+	}
+	select {
+	case <-requested:
+	case <-time.After(time.Second):
+		t.Fatal("authenticated shutdown did not invoke the callback")
 	}
 }

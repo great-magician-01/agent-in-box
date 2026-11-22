@@ -18,7 +18,8 @@ async function readArgs(file: string): Promise<string[]> {
 function extensionArgs(args: readonly string[]): string[] {
   const values: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
-    if (args[index] === "--extension" && args[index + 1]) values.push(args[index + 1]);
+    const next = args[index + 1];
+    if (args[index] === "--extension" && next) values.push(next);
   }
   return values;
 }

@@ -3,7 +3,9 @@ import type { SupervisorVmState, VmPowerState } from "@agent-in-box/protocol";
 import { nowIso } from "../persistence/time";
 import { CatalogRepository } from "../persistence/repositories/catalog-repository";
 import { OutboxRepository } from "../persistence/repositories/outbox-repository";
+import { LeaseRepository } from "../persistence/repositories/lease-repository";
 import { TaskRepository } from "../persistence/repositories/task-repository";
+import { LeaseService } from "../persistence/services/lease-service";
 import { TaskService } from "../persistence/services/task-service";
 import { createTestContext, type TestContext } from "../persistence/testing/fixtures";
 import { SettingsService, SETTINGS_KEYS } from "../settings/settings.service";
@@ -79,12 +81,21 @@ describe("ResourceManagerService", () => {
         return runtime(id, "suspended");
       },
     } as unknown as SupervisorClient;
-    service = new ResourceManagerService(ctx.app.db, settings, supervisor, tasks, outbox, {
-      totalMemoryBytes: () => total,
-      freeMemoryBytes: () => free,
-      autoTick: false,
-      now: () => new Date("2026-11-11T12:00:00.000Z"),
-    });
+    const leaseService = new LeaseService(ctx.app.db, new LeaseRepository(ctx.app.db));
+    service = new ResourceManagerService(
+      ctx.app.db,
+      settings,
+      supervisor,
+      tasks,
+      outbox,
+      leaseService,
+      {
+        totalMemoryBytes: () => total,
+        freeMemoryBytes: () => free,
+        autoTick: false,
+        now: () => new Date("2026-11-11T12:00:00.000Z"),
+      },
+    );
     return { ctx, tasks, settings, calls, service };
   }
 
@@ -184,6 +195,51 @@ describe("ResourceManagerService", () => {
     expect((await tasks.get(firstTask))?.status).toBe("queued");
     expect((await tasks.get(secondTaskResult.task.id))?.status).toBe("queued");
     expect(result.report.runningVmCount).toBe(2);
+  });
+
+  it("reserves projected free memory across multiple VM starts", async () => {
+    const catalog = new CatalogRepository(ctx.app.db);
+    const image = await ctx.app.db.selectFrom("images").select("id").executeTakeFirstOrThrow();
+    const secondProject = await catalog.createProject({ name: "Memory constrained project" });
+    const secondVm = await catalog.createVm({
+      name: "Memory constrained VM",
+      imageId: image.id,
+      osFamily: "linux",
+      cpuCount: 1,
+      memoryBytes: 5 * GIB,
+      diskBytes: 10 * GIB,
+      storageRoot: ctx.dir,
+    });
+    const secondConversation = await catalog.createConversation({
+      kind: "project",
+      projectId: secondProject.id,
+      title: "Memory constrained conversation",
+    });
+    await catalog.bindVm({
+      projectId: secondProject.id,
+      vmId: secondVm.id,
+      guestWorkspacePath: "/home/worker/memory",
+      isPrimary: true,
+    });
+    await ctx.app.db
+      .updateTable("vm_instances")
+      .set({ memory_bytes: 5 * GIB })
+      .where("id", "in", [ctx.vmId, secondVm.id])
+      .execute();
+    await policy({ autoStartPolicy: "when_needed", softMemoryBudgetBytes: 14 * GIB });
+    await createTask("first 5 GiB VM");
+    await tasks.create({
+      projectId: secondProject.id,
+      vmId: secondVm.id,
+      originConversationId: secondConversation.id,
+      objective: "second 5 GiB VM",
+      idempotencyKey: "phase9:second-memory-vm",
+    });
+    const result = await service.reconcile();
+    expect(result.startedVmIds).toEqual([ctx.vmId]);
+    expect(result.startedVmIds).not.toContain(secondVm.id);
+    expect(calls).toEqual([`start:${ctx.vmId}`]);
+    expect(result.waitingTaskIds).toHaveLength(1);
   });
 
   it("never suspends a VM that still has an active task", async () => {

@@ -1,5 +1,6 @@
 import {
   existsSync,
+  readFileSync,
   readlinkSync,
   readdirSync,
   renameSync,
@@ -164,6 +165,8 @@ for (const required of [
   "dist/main.js",
   "runtime_modules/better-sqlite3/package.json",
   "runtime_modules/ws/package.json",
+  "runtime_modules/undici/package.json",
+  "runtime_modules/ipaddr.js/package.json",
   "runtime_modules/@agent-in-box/config/dist/index.js",
   "runtime_modules/@agent-in-box/protocol/dist/index.js",
   "runtime_modules/@agent-in-box/agent-runtime/dist/index.js",
@@ -173,6 +176,34 @@ for (const required of [
     console.error(`control-plane bundle is missing ${required}`);
     process.exit(1);
   }
+}
+
+// The WebSocket risk fixed in ws 8.22.2 (unbounded fragments) must not be
+// reintroduced by a lockfile drift; assert the bundled runtime, not the source
+// package.json, satisfies the minimum.
+const bundledWs = JSON.parse(
+  readFileSync(path.join(target, "runtime_modules/ws/package.json"), "utf8"),
+);
+const wsMinimum = [8, 22, 2];
+const wsActual = String(bundledWs.version ?? "0.0.0")
+  .split(".")
+  .map((part) => Number.parseInt(part, 10) || 0);
+for (let index = 0; index < wsMinimum.length; index += 1) {
+  if ((wsActual[index] ?? 0) > wsMinimum[index]) break;
+  if ((wsActual[index] ?? 0) < wsMinimum[index]) {
+    console.error(`bundled ws ${bundledWs.version} is older than 8.22.2`);
+    process.exit(1);
+  }
+}
+
+// The SSRF barrier depends on ipaddr.js 2.x range classification (IPv4-mapped
+// IPv6, special-purpose ranges). A transitive 1.x copy must never shadow it.
+const bundledIpaddr = JSON.parse(
+  readFileSync(path.join(target, "runtime_modules/ipaddr.js/package.json"), "utf8"),
+);
+if (!/^2\./.test(String(bundledIpaddr.version))) {
+  console.error(`bundled ipaddr.js ${bundledIpaddr.version} is older than 2.x`);
+  process.exit(1);
 }
 
 for (const unnecessary of ["src", "tsconfig.json", "nest-cli.json"]) {

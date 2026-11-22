@@ -12,6 +12,7 @@ function toLeaseRecord(row: {
   task_id: string | null;
   acquired_at: string;
   expires_at: string;
+  preemptible: number;
 }): VmLeaseRecord {
   if (row.owner !== "worker" && row.owner !== "human") {
     throw new Error(`Invalid lease owner in database: ${row.owner}`);
@@ -23,6 +24,7 @@ function toLeaseRecord(row: {
     taskId: row.task_id,
     acquiredAt: row.acquired_at,
     expiresAt: row.expires_at,
+    preemptible: row.preemptible === 1,
   };
 }
 
@@ -63,6 +65,7 @@ export class LeaseRepository {
         task_id: lease.taskId,
         acquired_at: lease.acquiredAt,
         expires_at: lease.expiresAt,
+        preemptible: lease.preemptible ? 1 : 0,
       })
       .execute();
   }

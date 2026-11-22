@@ -1,104 +1,248 @@
 import { lookup } from "node:dns/promises";
-import { isIP } from "node:net";
+import type { LookupFunction } from "node:net";
 import { PersistenceError } from "../persistence/errors";
 
-const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "127.0.0.2", "localhost", "::1"]);
+interface IpAddress {
+  kind(): "ipv4" | "ipv6";
+  range(): string;
+  isIPv4MappedAddress?(): boolean;
+  toIPv4Address?(): IpAddress;
+  match(other: IpAddress, prefix: number): boolean;
+}
 
-function isPrivateIpv4(address: string): boolean {
-  const parts = address.split(".").map((part) => Number(part));
-  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
-    return true;
+interface IpAddrModule {
+  parse(value: string): IpAddress;
+  parseCIDR(value: string): [IpAddress, number];
+}
+
+interface UndiciAgent {
+  close(): Promise<void>;
+  destroy(): Promise<void>;
+}
+
+interface UndiciModule {
+  Agent: new (options: {
+    connect: { lookup: LookupFunction; servername?: string; autoSelectFamily: false };
+  }) => UndiciAgent;
+  fetch(input: string, init: RequestInit & { dispatcher: unknown }): Promise<Response>;
+}
+
+// These are direct, exact dependencies of this package. Keeping the small
+// structural types here also prevents an Undici version bump from silently
+// changing the DNS-pinning surface used by the SSRF barrier.
+import ipaddrModule from "ipaddr.js";
+import * as undiciModule from "undici";
+
+const ipaddr = ipaddrModule as unknown as IpAddrModule;
+const undici = undiciModule as unknown as UndiciModule;
+
+/**
+ * Non-global/special-purpose destinations are never valid provider or bot
+ * upstreams. ipaddr.js range classification covers IPv4/IPv6 multicast,
+ * documentation, CGNAT, ULA, link-local, NAT64, Teredo and 6to4 ranges; the
+ * explicit list also covers benchmarking and other IANA special registries
+ * missing from older ipaddr.js data files.
+ */
+const BLOCKED_CIDRS = [
+  "0.0.0.0/8",
+  "10.0.0.0/8",
+  "100.64.0.0/10",
+  "127.0.0.0/8",
+  "169.254.0.0/16",
+  "172.16.0.0/12",
+  "192.0.0.0/24",
+  "192.0.2.0/24",
+  "192.88.99.0/24",
+  "192.168.0.0/16",
+  "198.18.0.0/15",
+  "198.51.100.0/24",
+  "203.0.113.0/24",
+  "224.0.0.0/4",
+  "240.0.0.0/4",
+  "::/96",
+  "64:ff9b::/96",
+  "64:ff9b:1::/48",
+  "100::/64",
+  "2001::/23",
+  "2002::/16",
+  "fc00::/7",
+  "fe80::/10",
+  "ff00::/8",
+] as const;
+
+const BLOCKED_NETWORKS = BLOCKED_CIDRS.map((cidr) => ipaddr.parseCIDR(cidr));
+const LOOPBACK_NETWORKS = [ipaddr.parseCIDR("127.0.0.0/8"), ipaddr.parseCIDR("::1/128")];
+
+export interface OutboundSecurityOptions {
+  /** Loopback is an explicit opt-in for local model servers and test adapters. */
+  allowLoopback?: boolean;
+}
+
+export interface VerifiedOutboundUrl {
+  url: URL;
+  addresses: Array<{ address: string; family: number }>;
+}
+
+function parseAddress(address: string): IpAddress | null {
+  if (address.includes("%")) return null;
+  try {
+    let parsed = ipaddr.parse(address);
+    if (parsed.kind() === "ipv6" && parsed.isIPv4MappedAddress?.()) {
+      parsed = parsed.toIPv4Address!();
+    }
+    return parsed;
+  } catch {
+    return null;
   }
-  const [a, b] = parts as [number, number, number, number];
-  return (
-    a === 0 ||
-    a === 10 ||
-    a === 127 ||
-    (a === 169 && b === 254) ||
-    (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && b === 168) ||
-    (a === 100 && b >= 64 && b <= 127) ||
-    (a === 198 && (b === 18 || b === 19)) ||
-    a >= 224
-  );
 }
 
-function isPrivateIpv6(address: string): boolean {
-  const normalized = address.toLowerCase();
-  return (
-    normalized === "::" ||
-    normalized === "::1" ||
-    normalized.startsWith("fc") ||
-    normalized.startsWith("fd") ||
-    normalized.startsWith("fe8") ||
-    normalized.startsWith("fe9") ||
-    normalized.startsWith("fea") ||
-    normalized.startsWith("feb") ||
-    normalized.startsWith("::ffff:127.") ||
-    normalized.startsWith("::ffff:10.") ||
-    normalized.startsWith("::ffff:192.168.") ||
-    normalized.startsWith("::ffff:169.254.")
-  );
+function matches(address: IpAddress, networks: Array<[IpAddress, number]>): boolean {
+  return networks.some(([network, prefix]) => {
+    try {
+      return address.kind() === network.kind() && address.match(network, prefix);
+    } catch {
+      return true;
+    }
+  });
 }
 
-function isPrivateAddress(address: string): boolean {
-  const version = isIP(address);
-  if (version === 4) return isPrivateIpv4(address);
-  if (version === 6) return isPrivateIpv6(address);
+export function isLoopbackAddress(address: string): boolean {
+  const parsed = parseAddress(address);
+  return parsed !== null && matches(parsed, LOOPBACK_NETWORKS);
+}
+
+/** Only globally routable unicast addresses (plus explicitly allowed loopback) pass. */
+export function isSafeOutboundAddress(address: string, allowLoopback = false): boolean {
+  const parsed = parseAddress(address);
+  if (!parsed) return false;
+  if (matches(parsed, LOOPBACK_NETWORKS)) return allowLoopback;
+  if (parsed.range() !== "unicast" || matches(parsed, BLOCKED_NETWORKS)) return false;
   return true;
 }
 
 /**
- * Rejects outbound provider/bot URLs that resolve to private, link-local or
- * metadata addresses. This is the SSRF barrier for operator-supplied base URLs;
- * loopback remains opt-in for local model servers.
- *
- * DNS rebinding between this check and fetch cannot be fully eliminated without
- * a custom dispatcher, but redirects are disabled by callers and the resolver
- * result is checked on every request.
+ * Parse, resolve and classify every returned address. DNS errors (including
+ * ENOTFOUND) and empty answers fail closed. The returned addresses must be used
+ * by the actual socket; checking alone does not prevent DNS rebinding.
  */
-export async function assertSafeOutboundUrl(
+export async function resolveSafeOutboundUrl(
   raw: string,
-  options: { allowLoopback?: boolean } = {},
-): Promise<void> {
+  options: OutboundSecurityOptions = {},
+): Promise<VerifiedOutboundUrl> {
   let url: URL;
   try {
     url = new URL(raw);
   } catch {
     throw new PersistenceError("validation_failed", "出站地址不是有效 URL");
   }
-  if (url.protocol !== "https:" && url.protocol !== "http:") {
-    throw new PersistenceError("validation_failed", "出站地址只支持 HTTP(S)");
+  const supported = ["https:", "http:", "wss:", "ws:"];
+  if (!supported.includes(url.protocol)) {
+    throw new PersistenceError("validation_failed", "出站地址只支持 HTTP(S) 或 WS(S)");
   }
   if (url.username || url.password) {
     throw new PersistenceError("validation_failed", "出站地址不能包含凭据");
   }
   const hostname = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  if (!hostname) {
+    throw new PersistenceError("validation_failed", "出站地址缺少主机名");
+  }
+
+  const literal = parseAddress(hostname);
+  let addresses: Array<{ address: string; family: number }>;
+  if (literal) {
+    addresses = [
+      {
+        address: literal.kind() === "ipv6" ? hostname : literal.toString(),
+        family: literal.kind() === "ipv6" ? 6 : 4,
+      },
+    ];
+  } else if (/^[0-9.]+$/.test(hostname) || hostname.includes(":")) {
+    // Reject malformed/legacy numeric IP forms rather than asking DNS to
+    // interpret them as a hostname.
+    throw new PersistenceError("validation_failed", "出站地址包含无效 IP 地址");
+  } else {
+    try {
+      addresses = await lookup(hostname, { all: true, verbatim: true });
+    } catch {
+      throw new PersistenceError("unavailable", `无法解析出站地址：${hostname}`);
+    }
+  }
+
   const allowLoopback = options.allowLoopback === true;
-  if (LOOPBACK_HOSTNAMES.has(hostname)) {
-    if (!allowLoopback) {
-      throw new PersistenceError("validation_failed", "出站地址不能使用本机回环地址");
-    }
-    return;
+  if (
+    addresses.length === 0 ||
+    addresses.some((item) => !isSafeOutboundAddress(item.address, allowLoopback))
+  ) {
+    const loopback = addresses.some((item) => isLoopbackAddress(item.address));
+    throw new PersistenceError(
+      "validation_failed",
+      loopback && !allowLoopback
+        ? "出站地址不能使用本机回环地址"
+        : "出站地址不能指向私有、保留或非全局地址",
+    );
   }
-  if (isIP(hostname)) {
-    if (isPrivateAddress(hostname)) {
-      throw new PersistenceError("validation_failed", "出站地址不能指向私有或保留地址");
-    }
-    return;
-  }
-  let addresses: Array<{ address: string }>;
-  try {
-    addresses = await lookup(hostname, { all: true });
-  } catch (error) {
-    // A name that does not resolve now cannot be reached by fetch either. Keep
-    // the fetch error path in charge; tests and offline hosts use fake names.
-    if ((error as NodeJS.ErrnoException).code === "ENOTFOUND") {
+  return { url, addresses };
+}
+
+export async function assertSafeOutboundUrl(
+  raw: string,
+  options: OutboundSecurityOptions = {},
+): Promise<void> {
+  await resolveSafeOutboundUrl(raw, options);
+}
+
+/** A fixed lookup callback; no system DNS query is permitted during connect. */
+export function fixedDnsLookup(
+  addresses: ReadonlyArray<{ address: string; family: number }>,
+): LookupFunction {
+  const pinned = addresses.map(({ address, family }) => ({ address, family }));
+  return (_hostname, options, callback) => {
+    if (pinned.length === 0) {
+      const error = new Error("no verified DNS addresses") as NodeJS.ErrnoException;
+      error.code = "ENOTFOUND";
+      callback(error, []);
       return;
     }
-    throw new PersistenceError("unavailable", `无法解析出站地址：${hostname}`);
-  }
-  if (addresses.length === 0 || addresses.some((item) => isPrivateAddress(item.address))) {
-    throw new PersistenceError("validation_failed", "出站地址解析到了私有或保留地址");
+    if (options.all) {
+      callback(null, pinned);
+      return;
+    }
+    const first = pinned[0]!;
+    callback(null, first.address, first.family);
+  };
+}
+
+/**
+ * Fetch with a one-request Undici Agent pinned to the addresses validated above.
+ * The original URL remains the request origin, so HTTP Host and TLS SNI/certificate
+ * verification still use the configured hostname rather than the pinned IP.
+ */
+export async function fetchSafeOutbound(
+  raw: string,
+  init: RequestInit = {},
+  options: OutboundSecurityOptions = {},
+): Promise<Response> {
+  const verified = await resolveSafeOutboundUrl(raw, options);
+  const hostname = verified.url.hostname.replace(/^\[|\]$/g, "");
+  const agent = new undici.Agent({
+    connect: {
+      lookup: fixedDnsLookup(verified.addresses),
+      autoSelectFamily: false,
+      ...(verified.url.protocol === "https:" ? { servername: hostname } : {}),
+    },
+  });
+  try {
+    const response = await undici.fetch(verified.url.toString(), {
+      ...init,
+      redirect: "error",
+      dispatcher: agent,
+    });
+    // Graceful close stops new connections while allowing the caller to consume
+    // streamed response bodies. The Agent remains referenced by that response.
+    void agent.close().catch(() => undefined);
+    return response;
+  } catch (error) {
+    await agent.destroy().catch(() => undefined);
+    throw error;
   }
 }

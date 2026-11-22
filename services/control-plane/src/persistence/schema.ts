@@ -81,6 +81,7 @@ export interface WorkersTable {
   engine_version: string;
   status: string;
   current_task_id: string | null;
+  current_execution_attempt: number | null;
   capability_set: string;
   created_at: string;
   last_active_at: string;
@@ -105,6 +106,7 @@ export interface TasksTable {
   vm_id: string;
   origin_conversation_id: string;
   assigned_worker_id: string | null;
+  target_worker_id: string | null;
   parent_task_id: string | null;
   objective: string;
   status: string;
@@ -172,6 +174,7 @@ export interface VmLeasesTable {
   task_id: string | null;
   acquired_at: string;
   expires_at: string;
+  preemptible: number;
 }
 
 export interface ProcessedEventsTable {
@@ -202,6 +205,7 @@ export interface ModelTokensTable {
   token_hash: string;
   worker_id: string;
   task_id: string | null;
+  execution_attempt: number | null;
   vm_id: string;
   provider_id: string;
   model: string;
@@ -252,6 +256,7 @@ export interface TaskExecutionStateTable {
   task_id: string;
   worker_id: string;
   vm_id: string;
+  execution_attempt: number;
   started_at: string;
   deadline_at: string;
   step_count: number;
@@ -271,6 +276,7 @@ export interface CuaScreenshotsTable {
   task_id: string;
   worker_id: string;
   vm_id: string;
+  execution_attempt: number | null;
   kind: string;
   width: number;
   height: number;
@@ -287,6 +293,7 @@ export interface CuaActionsTable {
   task_id: string;
   worker_id: string;
   vm_id: string;
+  execution_attempt: number | null;
   lease_id: string;
   action_type: string;
   action_json: string;
@@ -309,6 +316,7 @@ export interface CuaApprovalsTable {
   task_id: string;
   worker_id: string;
   action_id: string;
+  execution_attempt: number | null;
   action_type: string;
   action_json: string;
   context_summary: string;
@@ -325,6 +333,7 @@ export interface HumanVerificationsTable {
   task_id: string;
   worker_id: string;
   vm_id: string;
+  execution_attempt: number | null;
   reason: string;
   screenshot_id: string;
   status: string;
@@ -341,6 +350,7 @@ export interface CuaTokensTable {
   vm_id: string;
   session_id: string;
   task_id: string | null;
+  execution_attempt: number | null;
   expires_at: string;
   revoked_at: string | null;
   revoke_reason: string | null;

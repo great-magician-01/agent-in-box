@@ -35,6 +35,10 @@ import { CredentialBridge } from "./credential-bridge";
 import { CredentialStore } from "./credential-store";
 import { QemuToolchainManager } from "./qemu-toolchain";
 import { VmSupervisor } from "./vm-supervisor";
+import {
+  createControlPlaneShutdownHandler,
+  createVmSupervisorShutdownHandler,
+} from "./service-shutdown";
 import { registerDesktopIpc, type DesktopIpcHandle, type DesktopUpdateActions } from "./ipc";
 import { IPC_CHANNELS } from "./ipc-channels";
 import { JsonLineLogger } from "./logger";
@@ -106,8 +110,13 @@ if (uninstallCleanup) {
 const updatesDirectory = path.join(paths.configDirectory, "updates");
 
 function updatePublicKey(): string | undefined {
-  const inline = process.env.AGENT_IN_BOX_UPDATE_PUBLIC_KEY?.trim();
-  if (inline) return inline;
+  // Packaged builds trust only the key shipped inside the signed application
+  // bundle. The environment override exists for development and explicit test
+  // builds so a release cannot be redirected by a stray environment variable.
+  if (!app.isPackaged) {
+    const inline = process.env.AGENT_IN_BOX_UPDATE_PUBLIC_KEY?.trim();
+    if (inline) return inline;
+  }
   try {
     return fs.readFileSync(path.join(process.resourcesPath, "update-public-key.pem"), "utf8");
   } catch {
@@ -324,12 +333,27 @@ function routerPiRuntimeEnvironment(): NodeJS.ProcessEnv {
   };
 }
 
+function runtimePublicKey(): string | undefined {
+  if (!app.isPackaged) {
+    const inline = process.env.AGENT_IN_BOX_RUNTIME_PUBLIC_KEY?.trim();
+    if (inline) return inline;
+  }
+  try {
+    return fs.readFileSync(path.join(process.resourcesPath, "runtime-public-key.pem"), "utf8");
+  } catch {
+    return undefined;
+  }
+}
+
 const controlPlaneLocation = controlPlaneEntry();
 const desktopDataRoot = resolveDesktopDataRoot({ configPath: paths.configPath });
+const runtimeVerificationKey = runtimePublicKey();
 const qemuManager = new QemuToolchainManager({
   dataRoot: desktopDataRoot,
   configPath: path.join(paths.configDirectory, "qemu-runtime.json"),
   logger: logger.child("qemu"),
+  ...(runtimeVerificationKey ? { publicKey: runtimeVerificationKey } : {}),
+  requireSignature: app.isPackaged,
 });
 
 function vmSupervisorEntry(): { entryPath: string; workingDirectory: string } {
@@ -348,6 +372,10 @@ const vmSupervisor = new VmSupervisor({
   storageRoot: path.join(desktopDataRoot, "vms"),
   qemuBinDirectory: "",
   instanceNonce: vmSupervisorNonce,
+  shutdown: createVmSupervisorShutdownHandler({
+    tokenFile: () =>
+      path.join(resolveDesktopDataRoot({ configPath: paths.configPath }), "supervisor-acl.token"),
+  }),
   env: {
     AGENT_IN_BOX_CONFIG_DIR: paths.configDirectory,
     AGENT_IN_BOX_DATA_ROOT: desktopDataRoot,
@@ -385,6 +413,9 @@ const supervisor = new ControlPlaneSupervisor({
   workingDirectory: controlPlaneLocation.workingDirectory,
   port: PORT,
   instanceNonce: controlPlaneNonce,
+  shutdown: createControlPlaneShutdownHandler({
+    accessKeyPath: path.join(paths.configDirectory, "web-access-key"),
+  }),
   nodeCommand: app.isPackaged ? process.execPath : (process.env.AGENT_IN_BOX_NODE ?? "node"),
   runAsNode: app.isPackaged,
   env: {
@@ -671,7 +702,19 @@ async function installUpdate(): Promise<void> {
   }
   updateManager.setState("installing");
   broadcastStatus();
-  await Promise.all([supervisor.stop(), vmSupervisor.stop()]);
+  try {
+    await Promise.all([supervisor.stop(), vmSupervisor.stop()]);
+  } catch (error) {
+    // Installing while an old service still owns the database or VM disks would
+    // corrupt state, so the update stops here and the services are restored.
+    updateManager.setState("error", `停止本地服务失败，已取消安装：${String(error)}`);
+    broadcastStatus();
+    await Promise.all([
+      supervisor.start().catch(() => undefined),
+      vmSupervisor.start().catch(() => undefined),
+    ]);
+    throw error;
+  }
 
   const dataRoot = resolveDesktopDataRoot({ configPath: paths.configPath });
   const databasePath = path.join(dataRoot, "agent-in-box.sqlite");
@@ -719,9 +762,24 @@ async function installUpdate(): Promise<void> {
 
   try {
     const args = updateManager.getAvailable()?.installArgs ?? [];
+    if (process.platform === "linux") {
+      // AppImage updates are downloaded as regular files; without the execute
+      // bit the spawn below fails with EACCES on most file managers' umask.
+      const stat = await fs.promises.lstat(ready.installerPath);
+      if (!stat.isFile() || stat.isSymbolicLink()) {
+        throw new Error("更新安装包不是普通文件");
+      }
+      await fs.promises.chmod(ready.installerPath, 0o755);
+    }
     const child = spawn(ready.installerPath, args, {
       detached: true,
       stdio: "ignore",
+    });
+    // Wait for a definitive spawn result before quitting. An asynchronous
+    // ENOENT/EACCES must not leave the app half-stopped with no installer.
+    await new Promise<void>((resolve, reject) => {
+      child.once("spawn", () => resolve());
+      child.once("error", (error) => reject(error));
     });
     child.unref();
   } catch (error) {
@@ -746,7 +804,17 @@ async function rollbackUpdate(): Promise<void> {
   }
   updateManager.setState("installing");
   broadcastStatus();
-  await Promise.all([supervisor.stop(), vmSupervisor.stop()]);
+  try {
+    await Promise.all([supervisor.stop(), vmSupervisor.stop()]);
+  } catch (error) {
+    updateManager.setState("error", `停止本地服务失败，已取消回滚：${String(error)}`);
+    broadcastStatus();
+    await Promise.all([
+      supervisor.start().catch(() => undefined),
+      vmSupervisor.start().catch(() => undefined),
+    ]);
+    throw error;
+  }
   try {
     if (rollback.databaseBackupPath) {
       const dataRoot = resolveDesktopDataRoot({ configPath: paths.configPath });
@@ -1009,7 +1077,12 @@ async function bootstrap(): Promise<void> {
     event.preventDefault();
     shutdownStarted = true;
     logger.info("正在停止本地服务并退出");
-    void Promise.all([supervisor.stop(), vmSupervisor.stop()]).finally(() => {
+    void Promise.allSettled([supervisor.stop(), vmSupervisor.stop()]).then((results) => {
+      for (const result of results) {
+        if (result.status === "rejected") {
+          logger.error("退出前停止本地服务失败", { error: String(result.reason) });
+        }
+      }
       credentialBridge.stop();
       ipcHandle?.dispose();
       app.quit();

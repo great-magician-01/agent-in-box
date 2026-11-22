@@ -188,6 +188,7 @@ export function toTaskRecord(row: Selectable<TasksTable>): TaskRecord {
     vmId: row.vm_id,
     originConversationId: row.origin_conversation_id,
     assignedWorkerId: row.assigned_worker_id,
+    targetWorkerId: row.target_worker_id,
     parentTaskId: row.parent_task_id,
     objective: row.objective,
     status: row.status,
@@ -244,6 +245,7 @@ export function toWorkerRecord(row: Selectable<WorkersTable>): WorkerRecord {
     engineVersion: row.engine_version,
     status: row.status,
     currentTaskId: row.current_task_id,
+    currentExecutionAttempt: row.current_execution_attempt,
     capabilitySet: parseCapabilities(row.capability_set),
     createdAt: row.created_at,
     lastActiveAt: row.last_active_at,
@@ -299,6 +301,7 @@ export function toHumanVerificationRecord(
     taskId: row.task_id,
     workerId: row.worker_id,
     vmId: row.vm_id,
+    executionAttempt: row.execution_attempt,
     reason: row.reason,
     screenshotId: row.screenshot_id,
     status:

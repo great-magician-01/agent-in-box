@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WorkerRepository } from "../persistence/repositories/worker-repository";
 import { createTestContext, type TestContext } from "../persistence/testing/fixtures";
+import { safeTestPort } from "../persistence/testing/safe-port";
 import { CuaBrokerService } from "./cua-broker.service";
 import type { CuaExecutionService } from "./cua-execution.service";
 import { CuaTokenService } from "./cua-token.service";
@@ -70,7 +71,7 @@ beforeEach(async () => {
       return { taskId: "broker-task", completed: true, evidence: [] };
     },
   } as unknown as CuaExecutionService;
-  const broker = new CuaBrokerService(tokens, execution, { port: 0 });
+  const broker = new CuaBrokerService(tokens, execution, { port: await safeTestPort() });
   await broker.onModuleInit();
   harness = { ctx, broker, token: issued.token, calls };
 });

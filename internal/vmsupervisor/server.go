@@ -71,6 +71,11 @@ type Config struct {
 	HostTimeout     time.Duration
 	SnapshotTimeout time.Duration
 	DeleteTimeout   time.Duration
+
+	// RequestShutdown is called after an authenticated POST /api/v1/shutdown
+	// has been acknowledged. The desktop shell uses it to stop an adopted
+	// supervisor instead of killing an unrelated PID.
+	RequestShutdown func()
 }
 
 // Server implements the local supervisor API.
@@ -204,6 +209,20 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch path {
+	case "/api/v1/shutdown":
+		if r.Method != http.MethodPost {
+			s.methodNotAllowed(w, http.MethodPost)
+			return
+		}
+		s.logger.Info("supervisor shutdown requested", "operation", "shutdown")
+		s.writeJSON(w, http.StatusAccepted, map[string]any{"ok": true, "stopping": true})
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		if s.config.RequestShutdown != nil {
+			go s.config.RequestShutdown()
+		}
+		return
 	case "/api/v1/host":
 		s.handleHost(w, r)
 		return

@@ -211,8 +211,8 @@ describe("storage migration", () => {
       ["artifacts/result.txt", "artifact"],
       ["archives/worker.json", "archive"],
     ]) {
-      expect(await readFile(path.join(target, relative), "utf8")).toBe(content);
-      expect(await readFile(path.join(fixture.root, relative), "utf8")).toBe(content);
+      expect(await readFile(path.join(target, relative!), "utf8")).toBe(content);
+      expect(await readFile(path.join(fixture.root, relative!), "utf8")).toBe(content);
     }
 
     const config = readAppConfig(fixture.configPath);

@@ -26,6 +26,7 @@ import { KYSELY } from "../persistence/tokens";
 import { assertSafeOutboundUrl } from "../security/outbound";
 import { BotAccountService } from "./bot-account.service";
 import { createBotIngressStore } from "./bot-ingress-store";
+import { safeBotHttpClient, safeBotWsConnector } from "./safe-bot-transport";
 
 export const BOT_CREDENTIAL_PROVIDER = Symbol("AGENT_IN_BOX_BOT_CREDENTIAL_PROVIDER");
 export const BOT_CONNECTOR_OPTIONS = Symbol("AGENT_IN_BOX_BOT_CONNECTOR_OPTIONS");
@@ -438,6 +439,7 @@ function defaultConnectorFactory(input: BotConnectorFactoryInput): BotConnector 
       ...(input.account.config.domain ? { domain: input.account.config.domain } : {}),
       ingressStore: input.ingressStore,
       autoDispatchIngress: false,
+      httpClient: safeBotHttpClient,
       logger: input.logger,
     });
   }
@@ -454,6 +456,8 @@ function defaultConnectorFactory(input: BotConnectorFactoryInput): BotConnector 
       : {}),
     ingressStore: input.ingressStore,
     autoDispatchIngress: false,
+    httpClient: safeBotHttpClient,
+    wsConnector: safeBotWsConnector,
     logger: input.logger,
   });
 }

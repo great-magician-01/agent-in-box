@@ -7,7 +7,7 @@ import { createTestContext, type TestContext } from "../persistence/testing/fixt
 import { SettingsService } from "../settings/settings.service";
 
 const SECRET = "sk-test-secret-value-never-returned";
-const OPENAI_URL = "https://models.example.test/v1";
+const OPENAI_URL = "https://8.8.8.8/v1";
 
 let ctx: TestContext;
 let providers: ModelProviderService;
@@ -27,19 +27,19 @@ beforeEach(async () => {
     ],
   });
   await providers.upsert("anthropic", {
-    baseUrl: "https://anthropic.example.test",
+    baseUrl: "https://1.1.1.1",
     api: "anthropic-messages",
     credentialProviderId: "anthropic-key",
     models: [{ id: "claude-test" }],
   });
   await providers.upsert("missing-key", {
-    baseUrl: "https://missing.example.test/v1",
+    baseUrl: "https://9.9.9.9/v1",
     api: "openai-completions",
     credentialProviderId: "missing-key",
     models: [{ id: "missing-key-model" }],
   });
   await providers.upsert("bridge-key", {
-    baseUrl: "https://bridge.example.test/v1",
+    baseUrl: "https://8.4.4.8/v1",
     api: "openai-completions",
     credentialProviderId: "bridge-key",
     models: [{ id: "bridge-model" }],
@@ -90,7 +90,9 @@ function makeService(
   fetchImpl: typeof fetch,
   options: Omit<ModelValidationOptions, "fetchImpl"> = {},
 ): ModelValidationService {
-  const credentials: ModelCredentialProvider = { getSecret };
+  const credentials: ModelCredentialProvider = {
+    getSecret: getSecret as unknown as (providerId: string) => Promise<string>,
+  };
   return new ModelValidationService(providers, credentials, { fetchImpl, ...options });
 }
 
@@ -136,7 +138,7 @@ describe("ModelValidationService", () => {
       supportsImage: true,
       error: null,
     });
-    expect(calls[0]?.url).toBe("https://anthropic.example.test/messages");
+    expect(calls[0]?.url).toBe("https://1.1.1.1/messages");
     const headers = calls[0]?.init.headers as Record<string, string>;
     expect(headers["x-api-key"]).toBe(SECRET);
     expect(headers["anthropic-version"]).toBe("2023-06-01");
@@ -171,7 +173,7 @@ describe("ModelValidationService", () => {
       providerId: "anthropic",
       model: "claude-test",
     });
-    expect(calls[0]?.url).toBe("https://anthropic.example.test/messages");
+    expect(calls[0]?.url).toBe("https://1.1.1.1/messages");
     expect(calls).toHaveLength(1);
   });
 

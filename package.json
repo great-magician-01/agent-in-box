@@ -18,9 +18,9 @@
     "test:go": "go test ./...",
     "test": "pnpm build:packages && pnpm -r --workspace-concurrency=1 --if-present test && pnpm test:go",
     "lint": "eslint .",
-    "format": "prettier --write \"**/*.{ts,tsx,js,mjs,json,css,html,yaml,yml}\"",
-    "format:check": "prettier --check \"**/*.{ts,tsx,js,mjs,json,css,html,yaml,yml}\"",
-    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,mjs,cjs,mts,cts,json,css,html,yaml,yml}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,mjs,cjs,mts,cts,json,css,html,yaml,yml}\"",
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm typecheck:test && pnpm test && pnpm build",
     "package:control-plane": "node scripts/package-control-plane.mjs",
     "package:guest-agent": "node scripts/package-guest-agent.mjs",
     "package:vm-supervisor": "node scripts/package-vm-supervisor.mjs",
@@ -48,7 +48,10 @@
     "smoke:phase12": "pnpm build:packages && pnpm --filter @agent-in-box/control-plane build && pnpm --filter @agent-in-box/web build && tsx scripts/smoke-phase12.mts",
     "smoke:phase13": "pnpm build:packages && pnpm --filter @agent-in-box/control-plane build && pnpm --filter @agent-in-box/web build && tsx scripts/smoke-phase13.mts",
     "smoke:phase14": "pnpm build:packages && pnpm --filter @agent-in-box/control-plane build && pnpm --filter @agent-in-box/web build && tsx scripts/smoke-phase14.mts",
-    "smoke:desktop": "node scripts/smoke-desktop-package.mjs"
+    "smoke:desktop": "node scripts/smoke-desktop-package.mjs",
+    "typecheck:test": "pnpm -r --if-present typecheck:test",
+    "test:go:race": "go test -race ./...",
+    "smoke:desktop:installer": "node scripts/smoke-desktop-installer.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

@@ -14,6 +14,7 @@ export function VmConsole({ session, vmName, onClose, onReconnect }: VmConsolePr
   const screenRef = useRef<HTMLDivElement>(null);
   const rfbRef = useRef<RFB | null>(null);
   const releasedRef = useRef(false);
+  const generationRef = useRef(0);
   const viewOnly = session.viewOnly;
   const lease = session.lease;
   const [state, setState] = useState<"connecting" | "connected" | "disconnected" | "error">(
@@ -25,8 +26,15 @@ export function VmConsole({ session, vmName, onClose, onReconnect }: VmConsolePr
   const [desktopName, setDesktopName] = useState("");
 
   useEffect(() => {
+    const generation = generationRef.current + 1;
+    generationRef.current = generation;
     let disposed = false;
     let heartbeat: number | undefined;
+    const releaseLease = (): void => {
+      if (viewOnly || !lease || releasedRef.current) return;
+      releasedRef.current = true;
+      void api.releaseVmLease(session.vmId, lease.id).catch(() => undefined);
+    };
     // StrictMode performs a setup/cleanup/setup pass. Deferring construction lets
     // the first pass cancel before consuming the one-time WebSocket ticket.
     const connectTimer = window.setTimeout(() => {
@@ -61,10 +69,7 @@ export function VmConsole({ session, vmName, onClose, onReconnect }: VmConsolePr
       rfb.addEventListener("desktopname", (event) => setDesktopName(event.detail.name));
       rfb.addEventListener("disconnect", (event) => {
         if (heartbeat !== undefined) window.clearInterval(heartbeat);
-        if (!viewOnly && lease && !releasedRef.current) {
-          releasedRef.current = true;
-          void api.releaseVmLease(session.vmId, lease.id).catch(() => undefined);
-        }
+        releaseLease();
         if (disposed) return;
         setState(event.detail.clean ? "disconnected" : "error");
         setMessage(
@@ -86,11 +91,15 @@ export function VmConsole({ session, vmName, onClose, onReconnect }: VmConsolePr
       if (rfbRef.current) {
         rfbRef.current.disconnect();
         rfbRef.current = null;
-        if (!viewOnly && lease && !releasedRef.current) {
-          releasedRef.current = true;
-          void api.releaseVmLease(session.vmId, lease.id).catch(() => undefined);
-        }
+        releaseLease();
+        return;
       }
+      // The RFB object was never created. A real unmount must still release the
+      // Lease, but StrictMode's immediate setup/cleanup/setup pass must not:
+      // defer one task and release only when no new setup claimed the session.
+      window.setTimeout(() => {
+        if (generationRef.current === generation) releaseLease();
+      }, 0);
     };
   }, [session, viewOnly, lease]);
 

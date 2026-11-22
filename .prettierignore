@@ -4,3 +4,4 @@ coverage
 release
 pnpm-lock.yaml
 docs
+tests/*/results

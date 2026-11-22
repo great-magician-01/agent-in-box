@@ -32,15 +32,43 @@ export function FileInboxPanel({
   const [message, setMessage] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const dragDepth = useRef(0);
+  const projectEpoch = useRef(0);
+  const loadRequest = useRef(0);
+  const operationEpoch = useRef(0);
 
   const load = useCallback(async (): Promise<void> => {
+    const targetProjectId = projectId;
+    const epoch = projectEpoch.current;
+    const request = ++loadRequest.current;
     try {
-      const result = await api.inbox(projectId);
+      const result = await api.inbox(targetProjectId);
+      if (projectEpoch.current !== epoch || loadRequest.current !== request) return;
       setFiles(result.items);
       setError(null);
     } catch (cause) {
+      if (projectEpoch.current !== epoch || loadRequest.current !== request) return;
       setError(cause instanceof Error ? cause.message : String(cause));
     }
+  }, [projectId]);
+
+  useEffect(() => {
+    const epoch = ++projectEpoch.current;
+    operationEpoch.current += 1;
+    loadRequest.current += 1;
+    dragDepth.current = 0;
+    // Never render the previous project's files or action state under a new ID.
+    setFiles([]);
+    setError(null);
+    setBusy(false);
+    setDragging(false);
+    setMessage(null);
+    if (inputRef.current) inputRef.current.value = "";
+    return () => {
+      if (projectEpoch.current !== epoch) return;
+      projectEpoch.current += 1;
+      operationEpoch.current += 1;
+      loadRequest.current += 1;
+    };
   }, [projectId]);
 
   useEffect(() => {

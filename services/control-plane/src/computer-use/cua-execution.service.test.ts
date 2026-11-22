@@ -32,6 +32,8 @@ class FakeGuest {
   advanceScreen = true;
   observeError: Error | null = null;
   inputError: Error | null = null;
+  inputGate: Promise<void> | null = null;
+  inputStarted: (() => void) | null = null;
 
   async observe(): Promise<{ desktop: GuestDesktopInfo; screenshot: GuestScreenshot }> {
     if (this.observeError) throw this.observeError;
@@ -55,6 +57,8 @@ class FakeGuest {
   ): Promise<{ actionId: string; ok: boolean; error?: string }> {
     if (this.inputError) throw this.inputError;
     this.inputCalls.push(request);
+    this.inputStarted?.();
+    await this.inputGate;
     if (this.failInput)
       return { actionId: request.actionId ?? "guest", ok: false, error: "fake failure" };
     if (this.advanceScreen) this.screen = Buffer.from(`screen-frame-${this.inputCalls.length + 1}`);
@@ -131,7 +135,11 @@ async function createHarness(): Promise<Harness> {
     taskId: claimed.id,
     ttlMs: 60_000,
   });
-  await workers.updateStatus(worker.id, "running", claimed.id);
+  await workers.updateRuntime(worker.id, {
+    status: "running",
+    currentTaskId: claimed.id,
+    currentExecutionAttempt: claimed.attemptCount,
+  });
 
   const policies = new CuaPolicyService(ctx.app.db, new SettingsService(ctx.app.db));
   const approvals = new ApprovalService(ctx.app.db, tasks, { pollIntervalMs: 25 });
@@ -144,13 +152,19 @@ async function createHarness(): Promise<Harness> {
     policies,
     approvals,
   );
-  await cua.startExecution({ taskId: claimed.id, workerId: worker.id, vmId: ctx.vmId });
+  await cua.startExecution({
+    taskId: claimed.id,
+    workerId: worker.id,
+    vmId: ctx.vmId,
+    executionAttempt: claimed.attemptCount,
+  });
   const tokenService = new CuaTokenService(ctx.app.db, { ttlMs: 60_000 });
   const issued = await tokenService.issue({
     workerId: worker.id,
     vmId: ctx.vmId,
     sessionId: "test-session",
     taskId: claimed.id,
+    executionAttempt: claimed.attemptCount,
   });
   return {
     ctx,
@@ -207,6 +221,46 @@ describe("CuaExecutionService", () => {
     });
     expect(trace.actions[0]?.leaseId).toBeTruthy();
     expect(trace.screenshots.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("replays a completed action ID without another Guest input", async () => {
+    const h = harness!;
+    const observation = await h.cua.observe(h.token);
+    const input = {
+      actionId: "tool-stable-action-1",
+      screenshotId: observation.screenshotId,
+      action: { type: "click" as const, point: { x: 100, y: 50 } },
+    };
+    const first = await h.cua.act(h.token, input);
+    const replayed = await h.cua.act(h.token, input);
+    expect(replayed).toEqual(first);
+    expect(h.guest.inputCalls).toHaveLength(1);
+  });
+
+  it("does not execute a queued action after the task is cancelled", async () => {
+    const h = harness!;
+    const observation = await h.cua.observe(h.token);
+    let releaseInput!: () => void;
+    let markInputStarted!: () => void;
+    const inputStarted = new Promise<void>((resolve) => {
+      markInputStarted = resolve;
+    });
+    h.guest.inputGate = new Promise<void>((resolve) => {
+      releaseInput = resolve;
+    });
+    h.guest.inputStarted = markInputStarted;
+    const first = h.cua.act(h.token, {
+      screenshotId: observation.screenshotId,
+      action: { type: "click", point: { x: 100, y: 50 } },
+    });
+    await inputStarted;
+    const queued = h.cua.act(h.token, { action: { type: "wait", milliseconds: 1 } });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await h.tasks.cancel(h.taskId, "cancel while another action is queued");
+    releaseInput();
+    await expect(queued).rejects.toMatchObject({ code: "conflict" });
+    await first.catch(() => undefined);
+    expect(h.guest.inputCalls).toHaveLength(1);
   });
 
   it("rejects actions without an observation, with a stale screenshot or without the lease", async () => {
@@ -557,6 +611,19 @@ describe("CuaExecutionService", () => {
     });
   });
 
+  it("does not treat a screenshot alone as proof of task completion", async () => {
+    const h = harness!;
+    const observation = await h.cua.observe(h.token);
+    await expect(
+      h.cua.complete(h.token, {
+        summary: "仅提供当前屏幕",
+        evidence: [{ type: "screenshot", screenshotId: observation.screenshotId }],
+      }),
+    ).rejects.toMatchObject({ code: "validation_failed" });
+    expect(h.guest.verifyCalls).toHaveLength(0);
+    expect((await h.tasks.get(h.taskId))?.status).toBe("running");
+  });
+
   it("verifies file evidence on the guest before completing a task", async () => {
     const h = harness!;
     await h.cua.observe(h.token);
@@ -577,6 +644,26 @@ describe("CuaExecutionService", () => {
     expect((await h.cua.execution(h.taskId))?.outcome).toBe("completed");
     const events = (await h.tasks.detail(h.taskId)).events.map((event) => event.type);
     expect(events).toEqual(expect.arrayContaining(["worker.completion_verified"]));
+  });
+
+  it("replays a verified completion request without new evidence checks", async () => {
+    const h = harness!;
+    const input = {
+      requestId: "tool-completion-1",
+      summary: "报告已保存",
+      evidence: [
+        {
+          type: "file" as const,
+          path: "/home/worker/workspace/report.txt",
+          sha256: "a".repeat(64),
+          sizeBytes: 12,
+        },
+      ],
+    };
+    const first = await h.cua.complete(h.token, input);
+    const replayed = await h.cua.complete(h.token, input);
+    expect(replayed).toEqual(first);
+    expect(h.guest.verifyCalls).toHaveLength(1);
   });
 
   it("accepts Windows drive-absolute file evidence", async () => {
@@ -667,7 +754,15 @@ describe("CuaExecutionService", () => {
     await expect(
       h.cua.complete(h.token, {
         summary: "尝试提交完成截图",
-        evidence: [{ type: "screenshot", screenshotId: observation.screenshotId }],
+        evidence: [
+          { type: "screenshot", screenshotId: observation.screenshotId },
+          {
+            type: "file",
+            path: "/home/worker/workspace/report.txt",
+            sha256: "a".repeat(64),
+            sizeBytes: 12,
+          },
+        ],
       }),
     ).rejects.toMatchObject({ code: "conflict" });
     expect(await h.tasks.get(h.taskId)).toMatchObject({

@@ -9,8 +9,10 @@ import {
   type WorkerCapability,
   type WorkerEngine,
   type WorkerEngineEvent,
+  type WorkerInput,
   type WorkerSessionHandle,
   type WorkerSessionSpec,
+  type WorkerTurnContext,
 } from "./index";
 import { tokensEqual, type WorkerSessionView } from "./worker-rpc-client";
 
@@ -24,6 +26,7 @@ interface SessionRecord {
   workerId: string;
   handle: WorkerSessionHandle;
   status: WorkerSessionView["status"];
+  currentTurn: WorkerTurnContext | null;
   nextEventId: number;
   events: EventEnvelope[];
   eventBytes: number;
@@ -43,9 +46,7 @@ const MAX_EVENT_DEPTH = 12;
  */
 function sanitizeEventValue(value: unknown, depth = 0): unknown {
   if (typeof value === "string") {
-    return value.length <= MAX_EVENT_STRING
-      ? value
-      : `[truncated ${value.length} chars]`;
+    return value.length <= MAX_EVENT_STRING ? value : `[truncated ${value.length} chars]`;
   }
   if (depth >= MAX_EVENT_DEPTH) return "[truncated: depth limit]";
   if (Array.isArray(value)) {
@@ -196,6 +197,13 @@ export class WorkerRpcServer {
     const sessionId = decodeURIComponent(match[1] ?? "");
     const record = this.requireSession(sessionId);
     const action = match[2];
+    if (request.method === "DELETE" && !action) {
+      for (const stream of record.streams) stream.end();
+      this.sessions.delete(sessionId);
+      await this.options.engine.close(sessionId);
+      this.json(response, 200, { closed: true });
+      return;
+    }
     if (request.method === "GET" && !action) {
       this.json(response, 200, this.view(record));
       return;
@@ -208,12 +216,19 @@ export class WorkerRpcServer {
       text?: unknown;
       attachments?: unknown;
       images?: unknown;
+      turn?: unknown;
     };
     switch (action) {
-      case "prompt":
-        await this.options.engine.prompt(sessionId, validateInput(input));
-        this.json(response, 200, { accepted: true });
+      case "prompt": {
+        const validated = validateInput(input);
+        record.currentTurn = validated.turn ?? null;
+        await this.options.engine.prompt(sessionId, validated);
+        this.json(response, 200, {
+          accepted: true,
+          ...(validated.turn ? { turnId: validated.turn.turnId } : {}),
+        });
         break;
+      }
       case "steer":
         this.json(response, 200, {
           disposition: await this.options.engine.steer(sessionId, validateInput(input)),
@@ -224,10 +239,21 @@ export class WorkerRpcServer {
           disposition: await this.options.engine.followUp(sessionId, validateInput(input)),
         });
         break;
-      case "abort":
-        await this.options.engine.abort(sessionId);
+      case "abort": {
+        const expectedTurn = validateTurn(input.turn);
+        if (
+          expectedTurn &&
+          (!record.currentTurn ||
+            record.currentTurn.turnId !== expectedTurn.turnId ||
+            record.currentTurn.taskId !== expectedTurn.taskId ||
+            record.currentTurn.executionAttempt !== expectedTurn.executionAttempt)
+        ) {
+          throw new RpcHttpError(409, "stale_turn", "Worker turn identity is stale", false);
+        }
+        await this.options.engine.abort(sessionId, expectedTurn);
         this.json(response, 200, { accepted: true });
         break;
+      }
       case "archive": {
         const archived = await this.options.engine.archive(sessionId);
         record.handle = { ...record.handle, archiveRef: archived.archiveRef };
@@ -248,6 +274,7 @@ export class WorkerRpcServer {
       workerId: spec.workerId,
       handle,
       status: "active",
+      currentTurn: null,
       nextEventId: 1,
       events: [],
       eventBytes: 0,
@@ -256,7 +283,14 @@ export class WorkerRpcServer {
     this.sessions.set(handle.sessionId, record);
     this.options.engine.subscribe(handle.sessionId, (event) => {
       if (event.type === "session_failed") record.status = "failed";
-      const safeEvent = sanitizeEventValue(event) as WorkerEngineEvent;
+      const turn = event.turn ?? record.currentTurn ?? undefined;
+      const safeEvent = sanitizeEventValue({
+        ...event,
+        ...(turn ? { turn } : {}),
+      }) as WorkerEngineEvent;
+      if (["turn_finished", "session_failed", "session_ended"].includes(event.type)) {
+        record.currentTurn = null;
+      }
       const envelope: EventEnvelope = {
         id: record.nextEventId++,
         sessionId: handle.sessionId,
@@ -264,10 +298,7 @@ export class WorkerRpcServer {
       };
       record.events.push(envelope);
       record.eventBytes += Buffer.byteLength(JSON.stringify(envelope));
-      while (
-        record.events.length > MAX_REPLAY_EVENTS ||
-        record.eventBytes > MAX_REPLAY_BYTES
-      ) {
+      while (record.events.length > MAX_REPLAY_EVENTS || record.eventBytes > MAX_REPLAY_BYTES) {
         const removed = record.events.shift();
         if (!removed) break;
         record.eventBytes -= Buffer.byteLength(JSON.stringify(removed));
@@ -522,11 +553,37 @@ function validateSpec(value: unknown): WorkerSessionSpec {
   return spec as unknown as WorkerSessionSpec;
 }
 
-function validateInput(input: { text?: unknown; attachments?: unknown; images?: unknown }): {
-  text: string;
-  attachments?: readonly string[];
-  images?: readonly { mimeType: "image/png" | "image/jpeg" | "image/webp"; data: string }[];
-} {
+function validateTurn(value: unknown): WorkerTurnContext | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new RpcHttpError(400, "bad_request", "turn identity is invalid", false);
+  }
+  const turn = value as Record<string, unknown>;
+  if (
+    typeof turn.turnId !== "string" ||
+    !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(turn.turnId) ||
+    typeof turn.taskId !== "string" ||
+    !turn.taskId ||
+    typeof turn.executionAttempt !== "number" ||
+    !Number.isSafeInteger(turn.executionAttempt) ||
+    turn.executionAttempt < 1
+  ) {
+    throw new RpcHttpError(400, "bad_request", "turn identity is invalid", false);
+  }
+  return {
+    turnId: turn.turnId,
+    taskId: turn.taskId,
+    executionAttempt: turn.executionAttempt,
+  };
+}
+
+function validateInput(input: {
+  text?: unknown;
+  attachments?: unknown;
+  images?: unknown;
+  turn?: unknown;
+}): WorkerInput {
+  const turn = validateTurn(input.turn);
   if (typeof input.text !== "string" || !input.text.trim() || input.text.length > 100_000) {
     throw new RpcHttpError(
       400,
@@ -572,6 +629,7 @@ function validateInput(input: { text?: unknown; attachments?: unknown; images?: 
   }
   return {
     text: input.text,
+    ...(turn ? { turn } : {}),
     ...(input.attachments !== undefined ? { attachments: input.attachments as string[] } : {}),
     ...(input.images !== undefined
       ? {

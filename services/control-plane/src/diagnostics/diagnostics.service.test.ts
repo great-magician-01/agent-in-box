@@ -28,6 +28,7 @@ beforeEach(async () => {
       description: "",
       default_vm_binding_id: null,
       workspace_config_json: "{}",
+      agent_config_json: "{}",
       created_at: "2026-11-12T00:00:00.000Z",
       updated_at: "2026-11-12T00:00:00.000Z",
       archived_at: null,

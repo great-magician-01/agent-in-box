@@ -2,11 +2,14 @@ package vmprovider
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,7 +17,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"agent-in-box/internal/qmp"
@@ -52,10 +54,9 @@ type QemuProvider struct {
 	// is the only writer of vm.json, so this is sufficient to prevent concurrent
 	// start/stop/suspend/resume races.
 	locks keyedMutex
-	// createMu serializes cross-VM resource allocation. freePort/freeVNCDisplay
-	// probe the OS and close the listener immediately, so two concurrent creates
-	// would otherwise be able to choose the same port or VNC display.
-	createMu sync.Mutex
+	// resourceLock serializes the persisted cross-VM port/display table. Both
+	// explicit and automatically allocated resources use the same namespace.
+	resourceLock keyedMutex
 }
 
 func NewQemuProvider(config QemuConfig) (*QemuProvider, error) {
@@ -96,6 +97,13 @@ func NewQemuProvider(config QemuConfig) (*QemuProvider, error) {
 	if config.Logger == nil {
 		config.Logger = slog.Default()
 	}
+	// Persist absolute paths: a relative storage root resolves differently
+	// depending on the supervisor's working directory after a restart.
+	absoluteRoot, err := filepath.Abs(config.StorageRoot)
+	if err != nil {
+		return nil, fmt.Errorf("resolve vm storage root: %w", err)
+	}
+	config.StorageRoot = absoluteRoot
 	if err := os.MkdirAll(config.StorageRoot, 0o700); err != nil {
 		return nil, fmt.Errorf("create vm storage root: %w", err)
 	}
@@ -104,18 +112,103 @@ func NewQemuProvider(config QemuConfig) (*QemuProvider, error) {
 
 var vmIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
 
+// Transport names persisted in VmState.Transport.
+const (
+	transportLegacy = ""
+	transportUnix   = "unix"
+	transportTLS    = "tls"
+)
+
+// defaultTransport selects the strongest transport the platform supports. Unix
+// sockets keep QMP off the TCP stack entirely; Windows uses mutually
+// authenticated TLS because it has no comparable socket ACL.
+func defaultTransport() string {
+	if runtime.GOOS == "windows" {
+		return transportTLS
+	}
+	return transportUnix
+}
+
+func (p *QemuProvider) qmpSocketPath(metadata *vmMetadata) string {
+	return filepath.Join(filepath.Dir(metadata.State.DiskPath), "qmp.sock")
+}
+
+// qmpDial opens the QMP connection through the transport recorded for this VM.
+// Legacy metadata keeps the historical TCP connection only for a process that
+// is already running; new launches always record a secure transport.
+func (p *QemuProvider) qmpDial(ctx context.Context, metadata *vmMetadata) (*qmp.Client, error) {
+	switch metadata.State.Transport {
+	case transportUnix:
+		return qmp.DialUnix(ctx, p.qmpSocketPath(metadata), nil)
+	case transportTLS:
+		credentials, err := loadVMCredentials(filepath.Dir(metadata.State.DiskPath))
+		if err != nil {
+			return nil, fmt.Errorf("%w: load vm tls credentials: %v", ErrQmpUnavailable, err)
+		}
+		config, err := pinnedClientConfig(credentials)
+		if err != nil {
+			return nil, fmt.Errorf("%w: build qmp tls config: %v", ErrQmpUnavailable, err)
+		}
+		return qmp.DialTLS(ctx, p.qmpAddress(metadata), config, nil)
+	case transportLegacy:
+		return qmp.Dial(ctx, p.qmpAddress(metadata), nil)
+	default:
+		return nil, fmt.Errorf("%w: unknown transport %q", ErrQmpUnavailable, metadata.State.Transport)
+	}
+}
+
+// consoleURL builds the console endpoint consumed by the control plane proxy.
+// The fingerprint and client identity are delivered over the ACL-authenticated
+// supervisor API, so the proxy can pin the QEMU certificate without a public
+// PKI.
+func consoleURL(spec VmSpec, credentials vmCredentials) string {
+	query := url.Values{}
+	query.Set("fingerprint", credentials.Fingerprint)
+	query.Set("ca", credentials.CACertPath)
+	query.Set("cert", credentials.ClientCertPath)
+	query.Set("key", credentials.ClientKeyPath)
+	return fmt.Sprintf(
+		"vnc+tls://%s:%d?%s",
+		hostLoopbackAlias, vncPort(spec.VNCDisplay), query.Encode(),
+	)
+}
+
+// newVMUUID returns a random RFC 4122 version 4 UUID. QEMU receives it through
+// -uuid and reports it from query-uuid, which is how the supervisor proves that
+// a loopback QMP endpoint belongs to the VM recorded in vm.json.
+func newVMUUID() (string, error) {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", fmt.Errorf("generate vm uuid: %w", err)
+	}
+	raw[6] = (raw[6] & 0x0f) | 0x40
+	raw[8] = (raw[8] & 0x3f) | 0x80
+	encoded := hex.EncodeToString(raw[:])
+	return encoded[0:8] + "-" + encoded[8:12] + "-" + encoded[12:16] + "-" +
+		encoded[16:20] + "-" + encoded[20:32], nil
+}
+
+func newLaunchID() (string, error) {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", fmt.Errorf("generate launch id: %w", err)
+	}
+	return hex.EncodeToString(raw[:]), nil
+}
+
 func qemuOptionValue(value string) string {
 	// QEMU option lists use commas; a literal comma is escaped by doubling it.
 	return strings.ReplaceAll(value, ",", ",,")
 }
 
 // assertQemuProcess refuses to signal a PID that no longer belongs to QEMU.
-// A crashed supervisor can otherwise kill an unrelated process after PID reuse.
-// If the image cannot be inspected, the caller keeps the existing behavior.
+// A crashed supervisor can otherwise kill an unrelated process after PID
+// reuse. If the image cannot be inspected, killing is refused: an unidentified
+// process must never be treated as ours.
 func assertQemuProcess(pid int) error {
 	image, err := processImage(pid)
 	if err != nil || image == "" {
-		return nil
+		return fmt.Errorf("refusing to kill pid %d: cannot identify the process image: %v", pid, err)
 	}
 	base := strings.ToLower(filepath.Base(image))
 	if !strings.Contains(base, "qemu") {
@@ -233,80 +326,102 @@ func freePort() (int, error) {
 }
 
 type vmResources struct {
-	qmpPorts    map[int]bool
-	sshPorts    map[int]bool
-	guestPorts  map[int]bool
-	workerPorts map[int]bool
+	// ports maps every reserved host TCP port to the role that owns it. QMP,
+	// SSH, Guest, Worker and VNC share one namespace: otherwise an explicit
+	// guest port could silently collide with another VM's QMP port.
+	ports       map[int]string
 	vncDisplays map[int]bool
 }
 
 func newVMResources() vmResources {
-	return vmResources{
-		qmpPorts:    map[int]bool{},
-		sshPorts:    map[int]bool{},
-		guestPorts:  map[int]bool{},
-		workerPorts: map[int]bool{},
-		vncDisplays: map[int]bool{},
+	return vmResources{ports: map[int]string{}, vncDisplays: map[int]bool{}}
+}
+
+func (r vmResources) reserve(port int, role string) error {
+	if previous, ok := r.ports[port]; ok {
+		return fmt.Errorf("%w: %s port %d is already reserved by %s", ErrInvalidSpec, role, port, previous)
 	}
+	r.ports[port] = role
+	return nil
+}
+
+func vncPort(display int) int {
+	return 5900 + display
 }
 
 // usedVmResources reads the persisted metadata of every VM. Ports and VNC
 // displays must be reserved across VMs, not only checked against the OS:
 // freePort closes its probe listener immediately, and a stopped VM's ports are
-// not bound yet.
-func (p *QemuProvider) usedVmResources() vmResources {
+// not bound yet. Unreadable metadata is not skipped silently: a VM whose ports
+// cannot be inspected may still own them, so allocation fails closed.
+func (p *QemuProvider) usedVmResources() (vmResources, error) {
 	used := newVMResources()
 	entries, err := os.ReadDir(p.config.StorageRoot)
 	if err != nil {
-		return used
+		return used, fmt.Errorf("read vm storage root %s: %w", p.config.StorageRoot, err)
 	}
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
 		}
 		metadata, err := p.load(entry.Name())
-		if err != nil {
+		if errors.Is(err, ErrNotFound) {
 			continue
 		}
-		if metadata.Spec.QMPPort > 0 {
-			used.qmpPorts[metadata.Spec.QMPPort] = true
+		if err != nil {
+			return used, fmt.Errorf("inspect reserved resources of %s: %w", entry.Name(), err)
 		}
-		if metadata.Spec.SSHHostPort > 0 {
-			used.sshPorts[metadata.Spec.SSHHostPort] = true
+		roles := []struct {
+			name string
+			port int
+		}{
+			{"qmp", metadata.Spec.QMPPort},
+			{"ssh", metadata.Spec.SSHHostPort},
+			{"guest", metadata.Spec.GuestHostPort},
+			{"worker", metadata.Spec.WorkerHostPort},
 		}
-		if metadata.Spec.GuestHostPort > 0 {
-			used.guestPorts[metadata.Spec.GuestHostPort] = true
-		}
-		if metadata.Spec.WorkerHostPort > 0 {
-			used.workerPorts[metadata.Spec.WorkerHostPort] = true
+		for _, role := range roles {
+			if role.port <= 0 {
+				continue
+			}
+			if err := used.reserve(role.port, metadata.Spec.ID+" "+role.name); err != nil {
+				return used, err
+			}
 		}
 		// Display 0 is the legacy "unset" sentinel. New allocations start at 1.
 		if metadata.Spec.VNCDisplay > 0 {
 			used.vncDisplays[metadata.Spec.VNCDisplay] = true
+			if err := used.reserve(vncPort(metadata.Spec.VNCDisplay), metadata.Spec.ID+" vnc"); err != nil {
+				return used, err
+			}
 		}
 	}
-	return used
+	return used, nil
 }
 
-func allocatePort(used map[int]bool) (int, error) {
+func allocatePort(used vmResources) (int, error) {
 	for attempts := 0; attempts < 100; attempts++ {
 		port, err := freePort()
 		if err != nil {
 			return 0, err
 		}
-		if !used[port] {
+		if _, taken := used.ports[port]; !taken {
 			return port, nil
 		}
 	}
 	return 0, fmt.Errorf("could not allocate an unused loopback port")
 }
 
-func freeVNCDisplay(used map[int]bool) (int, error) {
+func freeVNCDisplay(used vmResources) (int, error) {
 	for display := 1; display <= 30; display++ {
-		if used[display] {
+		if used.vncDisplays[display] {
 			continue
 		}
-		address := net.JoinHostPort(hostLoopbackAlias, strconv.Itoa(5900+display))
+		port := vncPort(display)
+		if _, taken := used.ports[port]; taken {
+			continue
+		}
+		address := net.JoinHostPort(hostLoopbackAlias, strconv.Itoa(port))
 		listener, err := net.Listen("tcp", address)
 		if err == nil {
 			_ = listener.Close()
@@ -320,10 +435,16 @@ func (p *QemuProvider) CreateVm(ctx context.Context, spec VmSpec) (VmState, erro
 	if err := validateSpec(spec); err != nil {
 		return VmState{}, err
 	}
-	unlock := p.locks.Lock(spec.ID)
+	unlock, err := p.locks.Lock(ctx, spec.ID)
+	if err != nil {
+		return VmState{}, err
+	}
 	defer unlock()
-	p.createMu.Lock()
-	defer p.createMu.Unlock()
+	unlockResources, err := p.resourceLock.Lock(ctx, "vm-resources")
+	if err != nil {
+		return VmState{}, err
+	}
+	defer unlockResources()
 	dir, err := p.vmDir(spec.ID)
 	if err != nil {
 		return VmState{}, err
@@ -335,41 +456,56 @@ func (p *QemuProvider) CreateVm(ctx context.Context, spec VmSpec) (VmState, erro
 		return VmState{}, fmt.Errorf("create vm directory: %w", err)
 	}
 
-	used := p.usedVmResources()
-	if spec.QMPPort == 0 {
-		spec.QMPPort, err = allocatePort(used.qmpPorts)
-		if err != nil {
-			return VmState{}, fmt.Errorf("allocate qmp port: %w", err)
-		}
-		used.qmpPorts[spec.QMPPort] = true
+	used, err := p.usedVmResources()
+	if err != nil {
+		return VmState{}, err
 	}
-	if spec.SSHHostPort == 0 {
-		spec.SSHHostPort, err = allocatePort(used.sshPorts)
-		if err != nil {
-			return VmState{}, fmt.Errorf("allocate ssh port: %w", err)
+	allocate := func(name string, value int) error {
+		if value == 0 {
+			port, allocErr := allocatePort(used)
+			if allocErr != nil {
+				return fmt.Errorf("allocate %s port: %w", name, allocErr)
+			}
+			value = port
 		}
-		used.sshPorts[spec.SSHHostPort] = true
+		if err := used.reserve(value, name); err != nil {
+			return err
+		}
+		switch name {
+		case "qmp":
+			spec.QMPPort = value
+		case "ssh":
+			spec.SSHHostPort = value
+		case "guest":
+			spec.GuestHostPort = value
+		case "worker":
+			spec.WorkerHostPort = value
+		}
+		return nil
 	}
-	if spec.GuestHostPort == 0 {
-		spec.GuestHostPort, err = allocatePort(used.guestPorts)
-		if err != nil {
-			return VmState{}, fmt.Errorf("allocate guest agent port: %w", err)
+	for _, role := range []struct {
+		name  string
+		value int
+	}{
+		{"qmp", spec.QMPPort},
+		{"ssh", spec.SSHHostPort},
+		{"guest", spec.GuestHostPort},
+		{"worker", spec.WorkerHostPort},
+	} {
+		if err := allocate(role.name, role.value); err != nil {
+			return VmState{}, err
 		}
-		used.guestPorts[spec.GuestHostPort] = true
-	}
-	if spec.WorkerHostPort == 0 {
-		spec.WorkerHostPort, err = allocatePort(used.workerPorts)
-		if err != nil {
-			return VmState{}, fmt.Errorf("allocate worker rpc port: %w", err)
-		}
-		used.workerPorts[spec.WorkerHostPort] = true
 	}
 	if spec.VNCDisplay == 0 {
-		spec.VNCDisplay, err = freeVNCDisplay(used.vncDisplays)
+		spec.VNCDisplay, err = freeVNCDisplay(used)
 		if err != nil {
 			return VmState{}, err
 		}
 	}
+	if err := used.reserve(vncPort(spec.VNCDisplay), "vnc"); err != nil {
+		return VmState{}, err
+	}
+	used.vncDisplays[spec.VNCDisplay] = true
 
 	diskPath := filepath.Join(dir, "disk.qcow2")
 	// On Windows, QEMU cannot open non-ASCII paths. qemu-img itself handles
@@ -391,17 +527,30 @@ func (p *QemuProvider) CreateVm(ctx context.Context, spec VmSpec) (VmState, erro
 		return VmState{}, fmt.Errorf("create qcow2 overlay: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 
+	if spec.UUID == "" {
+		spec.UUID, err = newVMUUID()
+		if err != nil {
+			return VmState{}, err
+		}
+	}
+
+	credentials, err := loadVMCredentials(dir)
+	if err != nil {
+		return VmState{}, fmt.Errorf("prepare vm tls credentials: %w", err)
+	}
+
 	metadata := &vmMetadata{
 		Spec:      spec,
 		CreatedAt: time.Now().UTC(),
 		State: VmState{
 			ID:             spec.ID,
 			PowerState:     PowerStopped,
+			Transport:      defaultTransport(),
 			QMPPort:        spec.QMPPort,
 			SSHHostPort:    spec.SSHHostPort,
 			GuestHostPort:  spec.GuestHostPort,
 			WorkerHostPort: spec.WorkerHostPort,
-			ConsoleURL:     fmt.Sprintf("vnc://%s:%d", hostLoopbackAlias, 5900+spec.VNCDisplay),
+			ConsoleURL:     consoleURL(spec, credentials),
 			DiskPath:       diskPath,
 			GuestHealth:    "unknown",
 		},
@@ -457,6 +606,10 @@ func buildQemuArgsWithResolver(metadata *vmMetadata, accelerator string, cpuMode
 		"-cpu", guestCPU,
 		"-smp", strconv.Itoa(spec.CPUCount),
 		"-m", strconv.Itoa(spec.MemoryMB),
+	}
+	if spec.UUID != "" {
+		// Pinning the machine UUID makes query-uuid a stable identity check.
+		args = append(args, "-uuid", spec.UUID)
 	}
 	if osFamily == OsLinux && spec.ProvisioningURL != "" {
 		if strings.ContainsAny(spec.ProvisioningURL, ",\r\n") {
@@ -514,11 +667,52 @@ func buildQemuArgsWithResolver(metadata *vmMetadata, accelerator string, cpuMode
 	} else {
 		args = append(args, "-device", "virtio-net-pci,netdev=n0")
 	}
+	args = append(args, "-display", "none")
+	if state.Transport == transportUnix || state.Transport == transportTLS {
+		// VNC is TLS-protected on every platform so no unauthenticated console
+		// listener exists. The control plane terminates VeNCrypt and enforces the
+		// Lease before forwarding input.
+		tlsDir, err := resolve(credentialsDir(vmDir))
+		if err != nil {
+			return nil, fmt.Errorf("tls credentials directory: %w", err)
+		}
+		args = append(args,
+			"-object", "tls-creds-x509,id=vnc-tls0,dir="+qemuOptionValue(tlsDir)+",endpoint=server,verify-peer=on",
+			"-vnc", fmt.Sprintf(
+				"%s:%d,tls-creds=vnc-tls0,share=force-shared",
+				hostLoopbackAlias, spec.VNCDisplay,
+			),
+		)
+	} else {
+		args = append(args,
+			"-vnc", fmt.Sprintf("%s:%d,share=force-shared", hostLoopbackAlias, spec.VNCDisplay),
+		)
+	}
+	switch state.Transport {
+	case transportTLS:
+		tlsDir, err := resolve(credentialsDir(vmDir))
+		if err != nil {
+			return nil, fmt.Errorf("tls credentials directory: %w", err)
+		}
+		args = append(args,
+			"-object", "tls-creds-x509,id=qmp-tls0,dir="+qemuOptionValue(tlsDir)+",endpoint=server,verify-peer=on",
+			"-chardev", fmt.Sprintf(
+				"socket,id=qmp0,host=%s,port=%d,server=on,wait=off,tls-creds=qmp-tls0",
+				hostLoopbackAlias, spec.QMPPort,
+			),
+			"-qmp", "chardev=qmp0",
+		)
+	case transportUnix:
+		qmpSocket, err := resolve(filepath.Join(vmDir, "qmp.sock"))
+		if err != nil {
+			return nil, fmt.Errorf("qmp socket path: %w", err)
+		}
+		args = append(args, "-qmp", "unix:"+qemuOptionValue(qmpSocket)+",server=on,wait=off")
+	default:
+		args = append(args, "-qmp", fmt.Sprintf("tcp:%s:%d,server,nowait", hostLoopbackAlias, spec.QMPPort))
+	}
 	args = append(args,
-		"-display", "none",
-		"-vnc", fmt.Sprintf("%s:%d,share=force-shared", hostLoopbackAlias, spec.VNCDisplay),
 		"-serial", "file:"+qemuOptionValue(consolePath),
-		"-qmp", fmt.Sprintf("tcp:%s:%d,server,nowait", hostLoopbackAlias, spec.QMPPort),
 		"-pidfile", pidPath,
 	)
 	return args, nil
@@ -528,6 +722,87 @@ func (p *QemuProvider) qmpAddress(metadata *vmMetadata) string {
 	return net.JoinHostPort(hostLoopbackAlias, strconv.Itoa(metadata.Spec.QMPPort))
 }
 
+// queryUUID asks QEMU for its machine UUID. Callers compare it with the
+// persisted value before they issue any state-changing command.
+func queryUUID(ctx context.Context, client *qmp.Client) (string, error) {
+	var result struct {
+		UUID string `json:"UUID"`
+	}
+	if err := client.Execute(ctx, "query-uuid", nil, &result); err != nil {
+		return "", err
+	}
+	return strings.ToLower(strings.TrimSpace(result.UUID)), nil
+}
+
+// verifyQMPIdentity fails closed when the QMP peer is not the VM recorded in
+// metadata. Legacy metadata without a UUID adopts the reported one only when
+// the caller explicitly allows it, which is limited to first-start migration.
+func (p *QemuProvider) verifyQMPIdentity(ctx context.Context, client *qmp.Client, metadata *vmMetadata) error {
+	reported, err := queryUUID(ctx, client)
+	if err != nil {
+		return fmt.Errorf("%w: query vm uuid: %v", ErrQmpUnavailable, err)
+	}
+	if metadata.Spec.UUID == "" {
+		if reported == "" {
+			return fmt.Errorf("%w: qemu reported no machine uuid", ErrQmpUnavailable)
+		}
+		metadata.Spec.UUID = reported
+		return nil
+	}
+	if reported != strings.ToLower(metadata.Spec.UUID) {
+		return fmt.Errorf(
+			"%w: qmp peer uuid %q does not match vm %q",
+			ErrQmpUnavailable, reported, metadata.Spec.UUID,
+		)
+	}
+	return nil
+}
+
+// adoptPidfile recovers the crash window between QEMU start and persisting the
+// new PID. It only adopts a PID that is alive, is a QEMU image and answers QMP
+// with this VM's UUID; otherwise metadata is left untouched for the normal
+// reconciliation path.
+func (p *QemuProvider) adoptPidfile(ctx context.Context, metadata *vmMetadata) bool {
+	dir := filepath.Dir(metadata.State.DiskPath)
+	data, err := os.ReadFile(filepath.Join(dir, "qemu.pid"))
+	if err != nil {
+		return false
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil || pid <= 0 || pid == metadata.State.PID {
+		return false
+	}
+	if !processAlive(pid) {
+		return false
+	}
+	if image, imageErr := processImage(pid); imageErr != nil ||
+		!strings.Contains(strings.ToLower(filepath.Base(image)), "qemu") {
+		return false
+	}
+	qmpCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	client, err := p.qmpDial(qmpCtx, metadata)
+	if err != nil {
+		return false
+	}
+	defer client.Close()
+	if err := p.verifyQMPIdentity(qmpCtx, client, metadata); err != nil {
+		return false
+	}
+	metadata.State.PID = pid
+	if ticks, ticksErr := processStartTicks(pid); ticksErr == nil {
+		metadata.State.ProcessStartTicks = ticks
+	}
+	if metadata.State.LaunchID == "" {
+		if launchID, launchErr := newLaunchID(); launchErr == nil {
+			metadata.State.LaunchID = launchID
+		}
+	}
+	metadata.State.PowerState = PowerStarting
+	metadata.State.LastError = ""
+	return true
+}
+
 func (p *QemuProvider) failStart(metadata *vmMetadata, err error) (VmState, error) {
 	metadata.State.PowerState = PowerError
 	metadata.State.LastError = err.Error()
@@ -535,20 +810,85 @@ func (p *QemuProvider) failStart(metadata *vmMetadata, err error) (VmState, erro
 	return metadata.State, err
 }
 
+// killAndWait force-terminates a launch and waits until the exact process is
+// gone. It never reports success for a process that might still own the disk.
+func (p *QemuProvider) killAndWait(pid int, startTicks uint64) error {
+	if err := killProcess(pid); err != nil {
+		return err
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for processIdentityAlive(pid, startTicks) && time.Now().Before(deadline) {
+		time.Sleep(100 * time.Millisecond)
+	}
+	if processIdentityAlive(pid, startTicks) {
+		return fmt.Errorf("qemu process %d did not exit after SIGKILL", pid)
+	}
+	return nil
+}
+
+// failStartCleanup records a startup failure and terminates the half-started
+// process. Leaving it running while reporting error would let a later StartVm
+// believe the VM is stopped and launch a second QEMU on the same overlay.
+func (p *QemuProvider) failStartCleanup(metadata *vmMetadata, err error) (VmState, error) {
+	if metadata.State.PID > 0 {
+		if killErr := p.killAndWait(metadata.State.PID, metadata.State.ProcessStartTicks); killErr != nil {
+			metadata.State.PowerState = PowerError
+			metadata.State.LastError = fmt.Sprintf("%v; cleanup failed: %v", err, killErr)
+			_ = p.save(metadata)
+			return metadata.State, fmt.Errorf("%w: cleanup failed: %v", err, killErr)
+		}
+		metadata.State.PID = 0
+		metadata.State.LaunchID = ""
+		metadata.State.ProcessStartTicks = 0
+	}
+	metadata.State.PowerState = PowerError
+	metadata.State.LastError = err.Error()
+	_ = p.save(metadata)
+	return metadata.State, err
+}
+
 func (p *QemuProvider) StartVm(ctx context.Context, vmID string) (VmState, error) {
-	unlock := p.locks.Lock(vmID)
+	unlock, err := p.locks.Lock(ctx, vmID)
+	if err != nil {
+		return VmState{}, err
+	}
 	defer unlock()
 
 	metadata, err := p.load(vmID)
 	if err != nil {
 		return VmState{}, err
 	}
-	if metadata.State.PID > 0 && processAlive(metadata.State.PID) {
+	if metadata.Spec.UUID == "" {
+		// A VM created before UUID pinning has no identity yet. Generate one now
+		// so the next launch can be verified; the running-process branch below
+		// adopts the UUID that QEMU already reports.
+		if metadata.Spec.UUID, err = newVMUUID(); err != nil {
+			return p.failStart(metadata, err)
+		}
+	}
+	if metadata.State.PID == 0 || !processIdentityAlive(metadata.State.PID, metadata.State.ProcessStartTicks) {
+		// Recover a start that crashed between launching QEMU and persisting the
+		// new PID. Only a verified QMP peer with this VM's UUID is adopted.
+		if p.adoptPidfile(ctx, metadata) {
+			if err := p.save(metadata); err != nil {
+				return VmState{}, fmt.Errorf("save recovered vm metadata: %w", err)
+			}
+		}
+	}
+	if metadata.State.PID > 0 && processIdentityAlive(metadata.State.PID, metadata.State.ProcessStartTicks) {
 		qmpCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		defer cancel()
-		if client, err := qmp.Dial(qmpCtx, p.qmpAddress(metadata), nil); err == nil {
-			status, queryErr := client.QueryStatus(qmpCtx)
+		if client, err := p.qmpDial(qmpCtx, metadata); err == nil {
+			identityErr := p.verifyQMPIdentity(qmpCtx, client, metadata)
+			var status qmp.Status
+			var queryErr error
+			if identityErr == nil {
+				status, queryErr = client.QueryStatus(qmpCtx)
+			}
 			_ = client.Close()
+			if identityErr != nil {
+				return VmState{}, identityErr
+			}
 			if queryErr == nil {
 				switch status.Status {
 				case "running":
@@ -568,19 +908,46 @@ func (p *QemuProvider) StartVm(ctx context.Context, vmID string) (VmState, error
 	if metadata.Spec.VNCDisplay == 0 {
 		// Legacy metadata used 0 as "auto". Assign a persisted display that no
 		// other VM currently reserves before QEMU binds port 5900.
-		p.createMu.Lock()
-		display, displayErr := freeVNCDisplay(p.usedVmResources().vncDisplays)
+		unlockResources, err := p.resourceLock.Lock(ctx, "vm-resources")
+		if err != nil {
+			return VmState{}, err
+		}
+		resources, usedErr := p.usedVmResources()
+		if usedErr != nil {
+			unlockResources()
+			return p.failStart(metadata, usedErr)
+		}
+		display, displayErr := freeVNCDisplay(resources)
 		if displayErr != nil {
-			p.createMu.Unlock()
+			unlockResources()
 			return p.failStart(metadata, displayErr)
 		}
 		metadata.Spec.VNCDisplay = display
-		metadata.State.ConsoleURL = fmt.Sprintf("vnc://%s:%d", hostLoopbackAlias, 5900+display)
 		if err := p.save(metadata); err != nil {
-			p.createMu.Unlock()
+			unlockResources()
 			return p.failStart(metadata, err)
 		}
-		p.createMu.Unlock()
+		unlockResources()
+	}
+
+	// A stopped VM is migrated to the platform's secure transport before its
+	// next launch. Legacy metadata is only tolerated while the old process is
+	// still running (handled above).
+	if metadata.State.Transport == transportLegacy {
+		metadata.State.Transport = defaultTransport()
+	}
+	credentials, err := loadVMCredentials(filepath.Dir(metadata.State.DiskPath))
+	if err != nil {
+		return p.failStart(metadata, fmt.Errorf("prepare vm tls credentials: %w", err))
+	}
+	metadata.State.ConsoleURL = consoleURL(metadata.Spec, credentials)
+	if err := p.save(metadata); err != nil {
+		return p.failStart(metadata, err)
+	}
+	if metadata.State.Transport == transportUnix {
+		// QEMU refuses to bind a socket path that already exists; a crashed
+		// previous launch may have left one behind.
+		_ = os.Remove(p.qmpSocketPath(metadata))
 	}
 
 	arguments, err := buildQemuArgs(metadata, p.config.Accelerator, p.config.CPUModel)
@@ -621,6 +988,16 @@ func (p *QemuProvider) StartVm(ctx context.Context, vmID string) (VmState, error
 	metadata.State.PID = command.Process.Pid
 	metadata.State.PowerState = PowerStarting
 	metadata.State.LastError = ""
+	launchID, err := newLaunchID()
+	if err != nil {
+		_ = command.Process.Kill()
+		_ = command.Wait()
+		return VmState{}, err
+	}
+	metadata.State.LaunchID = launchID
+	if ticks, ticksErr := processStartTicks(command.Process.Pid); ticksErr == nil {
+		metadata.State.ProcessStartTicks = ticks
+	}
 	if err := p.save(metadata); err != nil {
 		// Never leave an unpersisted QEMU child running: a later StartVm would
 		// launch a second process on the same overlay, and DeleteVm would treat
@@ -629,49 +1006,75 @@ func (p *QemuProvider) StartVm(ctx context.Context, vmID string) (VmState, error
 		_ = command.Wait()
 		return VmState{}, fmt.Errorf("save vm metadata after starting qemu: %w", err)
 	}
-	go p.reapQemuProcess(vmID, command.Process.Pid, command)
+	go p.reapQemuProcess(vmID, command.Process.Pid, metadata.State.LaunchID, command)
 
 	deadline := time.Now().Add(45 * time.Second)
 	for time.Now().Before(deadline) {
-		if !processAlive(metadata.State.PID) {
+		if !processIdentityAlive(metadata.State.PID, metadata.State.ProcessStartTicks) {
 			metadata.State.PowerState = PowerError
 			metadata.State.LastError = "qemu exited before QMP became available"
 			_ = p.save(metadata)
 			return metadata.State, fmt.Errorf("qemu exited during startup")
 		}
 		dialCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		client, err := qmp.Dial(dialCtx, p.qmpAddress(metadata), nil)
+		client, err := p.qmpDial(dialCtx, metadata)
 		if err == nil {
-			_, queryErr := client.QueryStatus(dialCtx)
+			identityErr := p.verifyQMPIdentity(dialCtx, client, metadata)
+			var queryErr error
+			if identityErr == nil {
+				_, queryErr = client.QueryStatus(dialCtx)
+			}
 			_ = client.Close()
-			if queryErr == nil {
+			if queryErr == nil && identityErr == nil {
 				cancel()
 				metadata.State.PowerState = PowerRunning
 				return metadata.State, p.save(metadata)
 			}
+			if identityErr != nil {
+				cancel()
+				// The QMP endpoint belongs to a different VM. Never drive it.
+				return p.failStartCleanup(metadata, identityErr)
+			}
 		}
 		cancel()
-		time.Sleep(500 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			return p.failStartCleanup(metadata, ctx.Err())
+		case <-time.After(500 * time.Millisecond):
+		}
 	}
-	metadata.State.PowerState = PowerError
-	metadata.State.LastError = ErrQmpUnavailable.Error()
-	_ = p.save(metadata)
-	return metadata.State, ErrQmpUnavailable
+	return p.failStartCleanup(metadata, ErrQmpUnavailable)
 }
 
 // reapQemuProcess waits for the child so a clean guest power-off cannot leave a
 // zombie process whose PID still passes processAlive(). It also persists the
 // exit so a later GetVmState/StartVm does not need to race QMP.
-func (p *QemuProvider) reapQemuProcess(vmID string, pid int, command *exec.Cmd) {
+func (p *QemuProvider) reapQemuProcess(vmID string, pid int, launchID string, command *exec.Cmd) {
 	waitErr := command.Wait()
 
-	unlock := p.locks.Lock(vmID)
+	// The reaper has no caller context. Bound its wait so a stuck lifecycle
+	// operation cannot block exit recording forever; a later reconciliation
+	// will observe the finished process through the pidfile/identity check.
+	lockCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	unlock, err := p.locks.Lock(lockCtx, vmID)
+	if err != nil {
+		p.config.Logger.Warn("record qemu exit without vm lock", "vm", vmID, "error", err)
+		return
+	}
 	defer unlock()
 	metadata, err := p.load(vmID)
 	if err != nil || metadata.State.PID != pid {
 		return
 	}
+	// A restart may reuse the PID before this reaper runs. Only the launch that
+	// this reaper actually waited for may update the persisted state.
+	if launchID != "" && metadata.State.LaunchID != "" && metadata.State.LaunchID != launchID {
+		return
+	}
 	metadata.State.PID = 0
+	metadata.State.LaunchID = ""
+	metadata.State.ProcessStartTicks = 0
 	metadata.State.GuestHealth = "unknown"
 	if metadata.State.PowerState == PowerStopping || metadata.State.PowerState == PowerStopped {
 		metadata.State.PowerState = PowerStopped
@@ -686,21 +1089,29 @@ func (p *QemuProvider) reapQemuProcess(vmID string, pid int, command *exec.Cmd) 
 	if saveErr := p.save(metadata); saveErr != nil {
 		p.config.Logger.Warn("persist qemu exit", "vm", vmID, "error", saveErr)
 	}
+	_ = os.Remove(p.qmpSocketPath(metadata))
 }
 
 func (p *QemuProvider) StopVm(ctx context.Context, vmID string, mode string) (VmState, error) {
 	if mode != "graceful" && mode != "force" {
 		return VmState{}, fmt.Errorf("%w: stop mode must be graceful or force", ErrInvalidSpec)
 	}
-	unlock := p.locks.Lock(vmID)
+	unlock, err := p.locks.Lock(ctx, vmID)
+	if err != nil {
+		return VmState{}, err
+	}
 	defer unlock()
 
 	metadata, err := p.load(vmID)
 	if err != nil {
 		return VmState{}, err
 	}
-	if metadata.State.PID == 0 || !processAlive(metadata.State.PID) {
+	if metadata.State.PID == 0 || !processIdentityAlive(metadata.State.PID, metadata.State.ProcessStartTicks) {
+		// A recycled PID is not this VM's QEMU. Clear the stale identity rather
+		// than treating an unrelated process as a running VM.
 		metadata.State.PID = 0
+		metadata.State.LaunchID = ""
+		metadata.State.ProcessStartTicks = 0
 		metadata.State.PowerState = PowerStopped
 		metadata.State.GuestHealth = "unknown"
 		return metadata.State, p.save(metadata)
@@ -713,8 +1124,13 @@ func (p *QemuProvider) StopVm(ctx context.Context, vmID string, mode string) (Vm
 	}
 
 	qmpCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	client, qmpErr := qmp.Dial(qmpCtx, p.qmpAddress(metadata), nil)
+	client, qmpErr := p.qmpDial(qmpCtx, metadata)
 	if qmpErr == nil {
+		if identityErr := p.verifyQMPIdentity(qmpCtx, client, metadata); identityErr != nil {
+			_ = client.Close()
+			cancel()
+			return p.failStop(metadata, identityErr)
+		}
 		if mode == "graceful" {
 			qmpErr = client.SystemPowerdown(qmpCtx)
 		} else {
@@ -731,31 +1147,52 @@ func (p *QemuProvider) StopVm(ctx context.Context, vmID string, mode string) (Vm
 	if mode == "force" {
 		deadline = time.Now().Add(10 * time.Second)
 	}
-	for processAlive(pid) && time.Now().Before(deadline) {
+	for processIdentityAlive(pid, metadata.State.ProcessStartTicks) && time.Now().Before(deadline) {
 		time.Sleep(500 * time.Millisecond)
 	}
-	if processAlive(pid) {
-		if err := killProcess(pid); err != nil {
-			return VmState{}, fmt.Errorf("kill qemu process %d: %w", pid, err)
+	if processIdentityAlive(pid, metadata.State.ProcessStartTicks) {
+		// A signal is not an exit. Wait for the process to actually disappear
+		// before reporting stopped; otherwise a later Start/Delete could race a
+		// dying QEMU that still owns the overlay.
+		if err := p.killAndWait(pid, metadata.State.ProcessStartTicks); err != nil {
+			return p.failStop(metadata, fmt.Errorf(
+				"kill qemu process %d: %v; refusing to report stopped", pid, err,
+			))
 		}
 	}
 	metadata.State.PID = 0
+	metadata.State.LaunchID = ""
+	metadata.State.ProcessStartTicks = 0
 	metadata.State.PowerState = PowerStopped
 	metadata.State.GuestHealth = "unknown"
 	metadata.State.LastError = ""
 	return metadata.State, p.save(metadata)
 }
 
+// failStop keeps the VM in stopping/error with the real failure recorded. It
+// never claims the process is gone.
+func (p *QemuProvider) failStop(metadata *vmMetadata, err error) (VmState, error) {
+	metadata.State.PowerState = PowerStopping
+	metadata.State.LastError = err.Error()
+	_ = p.save(metadata)
+	return metadata.State, err
+}
+
 func (p *QemuProvider) GetVmState(ctx context.Context, vmID string) (VmState, error) {
-	unlock := p.locks.Lock(vmID)
+	unlock, err := p.locks.Lock(ctx, vmID)
+	if err != nil {
+		return VmState{}, err
+	}
 	defer unlock()
 
 	metadata, err := p.load(vmID)
 	if err != nil {
 		return VmState{}, err
 	}
-	if metadata.State.PID == 0 || !processAlive(metadata.State.PID) {
+	if metadata.State.PID == 0 || !processIdentityAlive(metadata.State.PID, metadata.State.ProcessStartTicks) {
 		metadata.State.PID = 0
+		metadata.State.LaunchID = ""
+		metadata.State.ProcessStartTicks = 0
 		metadata.State.PowerState = PowerStopped
 		metadata.State.GuestHealth = "unknown"
 		return metadata.State, p.save(metadata)
@@ -763,13 +1200,18 @@ func (p *QemuProvider) GetVmState(ctx context.Context, vmID string) (VmState, er
 
 	qmpCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	client, err := qmp.Dial(qmpCtx, p.qmpAddress(metadata), nil)
+	client, err := p.qmpDial(qmpCtx, metadata)
 	if err != nil {
 		metadata.State.PowerState = PowerError
 		metadata.State.LastError = err.Error()
 		return metadata.State, p.save(metadata)
 	}
 	defer client.Close()
+	if err := p.verifyQMPIdentity(qmpCtx, client, metadata); err != nil {
+		metadata.State.PowerState = PowerError
+		metadata.State.LastError = err.Error()
+		return metadata.State, p.save(metadata)
+	}
 	status, err := client.QueryStatus(qmpCtx)
 	if err != nil {
 		metadata.State.PowerState = PowerError
@@ -799,10 +1241,15 @@ func powerStateFromQMP(status string) PowerState {
 // reachable through this path.
 func (p *QemuProvider) suspendClient(ctx context.Context, metadata *vmMetadata) (*qmp.Client, context.Context, context.CancelFunc, error) {
 	qmpCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	client, err := qmp.Dial(qmpCtx, p.qmpAddress(metadata), nil)
+	client, err := p.qmpDial(qmpCtx, metadata)
 	if err != nil {
 		cancel()
 		return nil, nil, nil, fmt.Errorf("%w: %v", ErrQmpUnavailable, err)
+	}
+	if err := p.verifyQMPIdentity(qmpCtx, client, metadata); err != nil {
+		_ = client.Close()
+		cancel()
+		return nil, nil, nil, err
 	}
 	return client, qmpCtx, cancel, nil
 }
@@ -811,15 +1258,20 @@ func (p *QemuProvider) suspendClient(ctx context.Context, metadata *vmMetadata) 
 // already suspended is returned unchanged (idempotent); the command is only
 // sent when query-status reports a running VM.
 func (p *QemuProvider) SuspendVm(ctx context.Context, vmID string) (VmState, error) {
-	unlock := p.locks.Lock(vmID)
+	unlock, err := p.locks.Lock(ctx, vmID)
+	if err != nil {
+		return VmState{}, err
+	}
 	defer unlock()
 
 	metadata, err := p.load(vmID)
 	if err != nil {
 		return VmState{}, err
 	}
-	if metadata.State.PID == 0 || !processAlive(metadata.State.PID) {
+	if metadata.State.PID == 0 || !processIdentityAlive(metadata.State.PID, metadata.State.ProcessStartTicks) {
 		metadata.State.PID = 0
+		metadata.State.LaunchID = ""
+		metadata.State.ProcessStartTicks = 0
 		metadata.State.PowerState = PowerStopped
 		metadata.State.GuestHealth = "unknown"
 		if err := p.save(metadata); err != nil {
@@ -863,15 +1315,20 @@ func (p *QemuProvider) SuspendVm(ctx context.Context, vmID string) (VmState, err
 // already running is returned unchanged (idempotent); cont is only sent when
 // query-status reports a suspended/paused VM.
 func (p *QemuProvider) ResumeVm(ctx context.Context, vmID string) (VmState, error) {
-	unlock := p.locks.Lock(vmID)
+	unlock, err := p.locks.Lock(ctx, vmID)
+	if err != nil {
+		return VmState{}, err
+	}
 	defer unlock()
 
 	metadata, err := p.load(vmID)
 	if err != nil {
 		return VmState{}, err
 	}
-	if metadata.State.PID == 0 || !processAlive(metadata.State.PID) {
+	if metadata.State.PID == 0 || !processIdentityAlive(metadata.State.PID, metadata.State.ProcessStartTicks) {
 		metadata.State.PID = 0
+		metadata.State.LaunchID = ""
+		metadata.State.ProcessStartTicks = 0
 		metadata.State.PowerState = PowerStopped
 		metadata.State.GuestHealth = "unknown"
 		if err := p.save(metadata); err != nil {
@@ -919,14 +1376,17 @@ func (p *QemuProvider) failSuspendResume(metadata *vmMetadata, err error) (VmSta
 }
 
 func (p *QemuProvider) requireStopped(metadata *vmMetadata) error {
-	if metadata.State.PID > 0 && processAlive(metadata.State.PID) {
+	if metadata.State.PID > 0 && processIdentityAlive(metadata.State.PID, metadata.State.ProcessStartTicks) {
 		return ErrNotStopped
 	}
 	return nil
 }
 
 func (p *QemuProvider) CreateSnapshot(ctx context.Context, vmID string, tag string) (VmState, error) {
-	unlock := p.locks.Lock(vmID)
+	unlock, err := p.locks.Lock(ctx, vmID)
+	if err != nil {
+		return VmState{}, err
+	}
 	defer unlock()
 
 	metadata, err := p.load(vmID)
@@ -947,7 +1407,10 @@ func (p *QemuProvider) CreateSnapshot(ctx context.Context, vmID string, tag stri
 }
 
 func (p *QemuProvider) RestoreSnapshot(ctx context.Context, vmID string, tag string) (VmState, error) {
-	unlock := p.locks.Lock(vmID)
+	unlock, err := p.locks.Lock(ctx, vmID)
+	if err != nil {
+		return VmState{}, err
+	}
 	defer unlock()
 
 	metadata, err := p.load(vmID)
@@ -973,7 +1436,10 @@ func (p *QemuProvider) AttachConsole(ctx context.Context, vmID string) (string, 
 }
 
 func (p *QemuProvider) DeleteVm(ctx context.Context, vmID string) error {
-	unlock := p.locks.Lock(vmID)
+	unlock, err := p.locks.Lock(ctx, vmID)
+	if err != nil {
+		return err
+	}
 	defer unlock()
 
 	metadata, err := p.load(vmID)

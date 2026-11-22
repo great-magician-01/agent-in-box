@@ -16,7 +16,7 @@ import { PersistenceError } from "../persistence/errors";
 import type { DatabaseSchema } from "../persistence/schema";
 import { nowIso } from "../persistence/time";
 import { KYSELY } from "../persistence/tokens";
-import { assertSafeOutboundUrl } from "../security/outbound";
+import { assertSafeOutboundUrl, fetchSafeOutbound } from "../security/outbound";
 import type { ModelCredentialProvider } from "./credential-provider";
 import { MODEL_CREDENTIAL_PROVIDER } from "./tokens";
 import { ModelProviderService } from "./model-provider.service";
@@ -68,7 +68,9 @@ export class ModelBrokerService implements OnModuleInit, OnModuleDestroy {
     @Inject(MODEL_CREDENTIAL_PROVIDER) private readonly credentials: ModelCredentialProvider,
     @Optional() @Inject(MODEL_BROKER_OPTIONS) options: ModelBrokerOptions = {},
   ) {
-    this.fetchImpl = options.fetchImpl ?? fetch;
+    this.fetchImpl =
+      options.fetchImpl ??
+      ((input, init) => fetchSafeOutbound(String(input), init ?? {}, { allowLoopback: true }));
     // QEMU user networking maps guest 10.0.2.2 to the host loopback, so the
     // broker does not need a LAN-facing listener.
     this.host = options.host ?? process.env.AGENT_IN_BOX_MODEL_BROKER_HOST?.trim() ?? "127.0.0.1";
@@ -398,13 +400,14 @@ export class ModelBrokerService implements OnModuleInit, OnModuleDestroy {
   private async assertTaskActive(token: ModelTokenContext): Promise<void> {
     const task = await this.db
       .selectFrom("tasks")
-      .select(["status", "vm_id", "assigned_worker_id"])
+      .select(["status", "vm_id", "assigned_worker_id", "attempt_count"])
       .where("id", "=", token.taskId!)
       .executeTakeFirst();
     if (
       !task ||
       task.vm_id !== token.vmId ||
       task.assigned_worker_id !== token.workerId ||
+      task.attempt_count !== token.executionAttempt ||
       (task.status !== "running" && task.status !== "waiting_approval")
     ) {
       throw new PersistenceError("conflict", "短期令牌绑定的任务已不在该 Worker 上执行");

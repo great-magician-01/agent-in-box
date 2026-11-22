@@ -6,6 +6,7 @@ import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 import type { QemuToolchainStatus } from "@agent-in-box/protocol";
 import type { LoggerLike } from "./logger";
+import { verifySignature } from "./signature";
 
 const DEFAULT_MANIFEST_URL =
   "https://github.com/great-magician-01/agent-in-box/releases/latest/download/runtime-assets.json";
@@ -21,6 +22,8 @@ export interface QemuRuntimeAsset {
 
 export interface RuntimeAssetsManifest {
   qemu?: Record<string, QemuRuntimeAsset>;
+  /** Base64 Ed25519 signature over the manifest without this field. */
+  signature?: string;
 }
 
 interface QemuConfigFile {
@@ -38,6 +41,14 @@ export interface QemuToolchainOptions {
   logger: LoggerLike;
   fetchImpl?: typeof fetch;
   spawn?: typeof spawnSync;
+  /** Ed25519 public key for the runtime asset manifest. */
+  publicKey?: string;
+  /**
+   * When true, an unsigned manifest or a missing key is rejected. Packaged
+   * builds set this so a compromised HTTPS endpoint cannot supply arbitrary
+   * QEMU binaries.
+   */
+  requireSignature?: boolean;
 }
 
 export class QemuToolchainManager {
@@ -49,6 +60,8 @@ export class QemuToolchainManager {
   private readonly logger: LoggerLike;
   private readonly fetchImpl: typeof fetch;
   private readonly spawn: typeof spawnSync;
+  private readonly publicKey: string | undefined;
+  private readonly requireSignature: boolean;
 
   constructor(options: QemuToolchainOptions) {
     this.platform = options.platform ?? process.platform;
@@ -59,6 +72,8 @@ export class QemuToolchainManager {
     this.logger = options.logger;
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.spawn = options.spawn ?? spawnSync;
+    this.publicKey = options.publicKey?.trim() || undefined;
+    this.requireSignature = options.requireSignature === true;
   }
 
   get managedRoot(): string {
@@ -233,7 +248,36 @@ export class QemuToolchainManager {
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
       throw new Error("运行时 Manifest 格式无效");
     }
-    return parsed as RuntimeAssetsManifest;
+    return this.verifyManifest(parsed as Record<string, unknown>);
+  }
+
+  /**
+   * Runtime asset manifests are signed with the same Ed25519 key material as
+   * update manifests but under a distinct purpose domain, so a signature for
+   * one document type can never authorize the other. Packaged builds fail
+   * closed when the key or signature is missing.
+   */
+  private verifyManifest(raw: Record<string, unknown>): RuntimeAssetsManifest {
+    if (!this.publicKey) {
+      if (this.requireSignature) {
+        throw new Error("发布版必须配置运行时 Manifest 公钥，已拒绝安装 QEMU");
+      }
+      return raw as RuntimeAssetsManifest;
+    }
+    const { signature, ...manifest } = raw;
+    if (typeof signature !== "string" || signature.length < 16 || signature.length > 4096) {
+      throw new Error("运行时 Manifest 缺少有效签名");
+    }
+    let valid = false;
+    try {
+      valid = verifySignature("runtime-assets", manifest, this.publicKey, signature);
+    } catch {
+      throw new Error("运行时 Manifest 公钥无效");
+    }
+    if (!valid) {
+      throw new Error("运行时 Manifest 签名校验失败，已拒绝安装 QEMU");
+    }
+    return manifest as RuntimeAssetsManifest;
   }
 
   private async downloadVerified(asset: QemuRuntimeAsset, target: string): Promise<void> {
@@ -306,9 +350,30 @@ export class QemuToolchainManager {
       if (
         path.posix.isAbsolute(entry) ||
         entry.split("/").includes("..") ||
-        /^[A-Za-z]:/.test(entry)
+        /^[A-Za-z]:/.test(entry) ||
+        entry.includes("\\")
       ) {
         throw new Error(`QEMU 工具链归档包含不安全路径：${entry}`);
+      }
+    }
+
+    // Reject links and special files. A symlink inside the archive could point
+    // outside the staging directory after extraction, and device/FIFO entries
+    // are never part of a QEMU distribution.
+    const detailed = this.spawn("tar", ["-tvzf", path.basename(archive)], {
+      cwd: path.dirname(archive),
+      encoding: "utf8",
+      maxBuffer: 16 * 1024 * 1024,
+      windowsHide: true,
+    });
+    if (detailed.status !== 0 || typeof detailed.stdout !== "string") {
+      throw new Error("QEMU 工具链归档无法读取");
+    }
+    for (const line of detailed.stdout.split(/\r?\n/)) {
+      if (!line.trim()) continue;
+      const type = line[0];
+      if (type !== "-" && type !== "d") {
+        throw new Error(`QEMU 工具链归档包含链接或特殊文件（类型 ${type ?? "?"}）：${line.trim()}`);
       }
     }
   }

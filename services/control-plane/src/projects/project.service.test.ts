@@ -188,6 +188,8 @@ describe("ProjectService", () => {
         status: "archived",
         current_task_id: null,
         capability_set: "[]",
+        development_mode: 0,
+        development_auto_enable: 0,
         created_at: now,
         last_active_at: now,
         archived_at: now,

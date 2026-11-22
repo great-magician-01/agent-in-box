@@ -15,6 +15,7 @@ import type {
   WorkerView,
 } from "@agent-in-box/protocol";
 
+import { writeSmokeToken } from "./smoke-token.mjs";
 interface CheckResult {
   name: string;
   passed: boolean;
@@ -245,9 +246,7 @@ try {
   const fakePi = path.join(repository, "packages/agent-runtime/src/testing/fake-pi.mjs");
 
   await mkdir(path.join(temporary, "vms"), { recursive: true });
-  await writeFile(path.join(temporary, "supervisor-acl.token"), "phase7-supervisor-token", {
-    mode: 0o600,
-  });
+  await writeSmokeToken(path.join(temporary, "supervisor-acl.token"), "phase7-supervisor-token");
   await writeFile(commandLog, "");
   await writeFile(envLog, "{}");
 
@@ -300,8 +299,8 @@ try {
     .where("id", "=", vm.id)
     .execute();
   await mkdir(vm.storageRoot, { recursive: true });
-  await writeFile(path.join(vm.storageRoot, "worker-rpc.token"), workerRpcToken, { mode: 0o600 });
-  await writeFile(path.join(vm.storageRoot, "guest-agent.token"), guestToken, { mode: 0o600 });
+  await writeSmokeToken(path.join(vm.storageRoot, "worker-rpc.token"), workerRpcToken);
+  await writeSmokeToken(path.join(vm.storageRoot, "guest-agent.token"), guestToken);
   await seed.close();
   vmId = vm.id;
   projectId = project.id;
@@ -670,16 +669,30 @@ try {
 
   const screenshotTaskId = await newRunningTask();
   const screenshotObservation = await brokerJson<{ screenshotId: string }>("/v1/observe", {});
-  const screenshotComplete = await brokerJson<{ completed: boolean }>("/v1/complete", {
+  const screenshotOnly = await broker("/v1/complete", {
     summary: "屏幕状态即完成证据",
     evidence: [{ type: "screenshot", screenshotId: screenshotObservation.screenshotId }],
+  });
+  assert.equal(screenshotOnly.status, 400);
+  assert.match(await screenshotOnly.text(), /截图只能作为辅助证据/);
+  const screenshotComplete = await brokerJson<{ completed: boolean }>("/v1/complete", {
+    summary: "屏幕状态已确认，文件证据来自 Guest 校验",
+    evidence: [
+      {
+        type: "file",
+        path: "/home/worker/workspace/report.txt",
+        sha256: "c".repeat(64),
+        sizeBytes: 12,
+      },
+      { type: "screenshot", screenshotId: screenshotObservation.screenshotId },
+    ],
   });
   assert.equal(screenshotComplete.completed, true);
   const screenshotTrace = await api<TaskTraceView>(`/api/v1/tasks/${screenshotTaskId}/trace`);
   assert.ok(screenshotTrace.screenshots.some((shot) => shot.kind === "completion"));
   await api(`/api/v1/workers/${workerId}/abort`, { method: "POST", body: "{}" });
   await waitIdle();
-  passed("完成校验会重新捕获屏幕并记录 completion 截图");
+  passed("截图不能单独证明完成；文件证据通过后仍记录 completion 截图");
 
   const traceAudit = await api<TaskTraceView>(`/api/v1/tasks/${traceTaskId}/trace`);
   assert.equal(traceAudit.actions[0]?.workerId, workerId);

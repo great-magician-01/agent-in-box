@@ -25,6 +25,8 @@ import type { DatabaseSchema } from "../persistence/schema";
 import { nowIso } from "../persistence/time";
 import { KYSELY } from "../persistence/tokens";
 
+const MAX_VERSIONS_PER_PLUGIN = 50;
+
 @Injectable()
 export class PluginService {
   constructor(
@@ -108,19 +110,10 @@ export class PluginService {
     if (inspected.manifest.targets.some((target) => target !== "worker")) {
       throw new PersistenceError("validation_failed", "第三方插件首版只允许加载到 Guest Worker");
     }
-    if (source === "ai") {
-      const report = input.testReport;
-      if (
-        !report ||
-        report.status !== "passed" ||
-        report.packageSha256 !== inspected.packageSha256
-      ) {
-        throw new PersistenceError(
-          "validation_failed",
-          "AI 插件注册需要与当前包哈希匹配的通过测试记录",
-        );
-      }
-    }
+    // A Guest-reported test report is diagnostic only. The Guest runs inside
+    // the VM and its claims cannot grant code execution; registration stores
+    // the report for the user to inspect, and enabling stays a local user
+    // action (see enable()).
 
     const pluginId = inspected.manifest.id;
     const version = inspected.manifest.version;
@@ -133,6 +126,20 @@ export class PluginService {
         );
       }
       return this.versionView(existing);
+    }
+
+    // Each version is capped at 4 MiB by the inspector; bounding the version
+    // count bounds on-disk growth per plugin without a second size walk.
+    const versionCount = await this.db
+      .selectFrom("plugin_versions")
+      .select((expression) => expression.fn.count<number>("version").as("count"))
+      .where("plugin_id", "=", pluginId)
+      .executeTakeFirst();
+    if (Number(versionCount?.count ?? 0) >= MAX_VERSIONS_PER_PLUGIN) {
+      throw new PersistenceError(
+        "conflict",
+        `插件 ${pluginId} 已达到 ${MAX_VERSIONS_PER_PLUGIN} 个版本上限；请先清理旧版本`,
+      );
     }
 
     const finalRoot = path.join(this.pluginRoot(), pluginId, version);

@@ -202,11 +202,39 @@ export function BotManager({ bridge }: BotManagerProps): React.JSX.Element {
   }
 
   async function deleteAccount(account: BotAccountView): Promise<void> {
-    if (!window.confirm(`删除机器人 ${account.name}？其事件、会话映射和待发送消息也会删除。`)) {
+    const sharedCredential = (overview?.accounts ?? []).some(
+      (candidate) =>
+        candidate.id !== account.id &&
+        candidate.credentialProviderId === account.credentialProviderId,
+    );
+    const cleanup =
+      !sharedCredential && bridge
+        ? `，并从本机安全存储删除凭据 ${account.credentialProviderId}`
+        : sharedCredential
+          ? "。该凭据仍被其他机器人使用，不会删除"
+          : "";
+    if (
+      !window.confirm(
+        `删除机器人 ${account.name}？其事件、会话映射和待发送消息也会删除${cleanup}。`,
+      )
+    ) {
       return;
     }
     await run(async () => {
       await api.deleteBotAccount(account.id);
+      if (!sharedCredential && bridge) {
+        try {
+          await bridge.credentials.remove("bot", account.credentialProviderId);
+        } catch (error) {
+          // The account is already gone; surface the leftover secret instead of
+          // pretending the credential was removed.
+          setMessage(
+            `机器人已删除，但安全存储中的凭据清理失败：${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+      }
     });
   }
 

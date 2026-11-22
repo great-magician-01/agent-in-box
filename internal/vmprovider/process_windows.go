@@ -60,6 +60,45 @@ func processImage(pid int) (string, error) {
 	return syscall.UTF16ToString(buffer[:size]), nil
 }
 
+// processStartTicks returns the process creation time as a 100ns FILETIME. A
+// later operation compares it with the persisted value so a recycled PID is not
+// mistaken for the VM's QEMU.
+func processStartTicks(pid int) (uint64, error) {
+	kernel32 := syscall.NewLazyDLL("kernel32.dll")
+	openProcess := kernel32.NewProc("OpenProcess")
+	handle, _, openErr := openProcess.Call(processQueryLimitedInformation, 0, uintptr(pid))
+	if handle == 0 {
+		return 0, openErr
+	}
+	defer func() {
+		closeHandle := kernel32.NewProc("CloseHandle")
+		_, _, _ = closeHandle.Call(handle)
+	}()
+	var creation, exit, kernel, user syscall.Filetime
+	if err := syscall.GetProcessTimes(
+		syscall.Handle(handle), &creation, &exit, &kernel, &user,
+	); err != nil {
+		return 0, err
+	}
+	return uint64(creation.HighDateTime)<<32 | uint64(creation.LowDateTime), nil
+}
+
+func processIdentityAlive(pid int, startTicks uint64) bool {
+	if !processAlive(pid) {
+		return false
+	}
+	if startTicks == 0 {
+		return true
+	}
+	current, err := processStartTicks(pid)
+	if err != nil {
+		// Cannot prove the identity changed: keep the conservative answer so a
+		// stop never reports success for a process it could not verify.
+		return true
+	}
+	return current == startTicks
+}
+
 func killProcess(pid int) error {
 	if err := assertQemuProcess(pid); err != nil {
 		return err

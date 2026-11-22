@@ -262,6 +262,7 @@ describe("RouterToolService", () => {
       vmId: harness.vmId,
       originConversationId: harness.routerConversationId,
       assignedWorkerId: worker.id,
+      targetWorkerId: null,
       parentTaskId: null,
       objective: "running task",
       status: "running",

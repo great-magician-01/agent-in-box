@@ -12,8 +12,6 @@ export function buildHealthResponse(
     protocolVersion: PROTOCOL_VERSION,
     startedAt: startedAt.toISOString() as IsoTimestamp,
     now: now.toISOString() as IsoTimestamp,
-    ...(instanceNonce
-      ? { instanceNonce }
-      : {}),
+    ...(instanceNonce ? { instanceNonce } : {}),
   };
 }

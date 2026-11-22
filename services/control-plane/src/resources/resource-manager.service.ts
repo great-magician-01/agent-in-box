@@ -21,6 +21,7 @@ import { KYSELY } from "../persistence/tokens";
 import type { DatabaseSchema } from "../persistence/schema";
 import { OutboxRepository } from "../persistence/repositories/outbox-repository";
 import { TaskService } from "../persistence/services/task-service";
+import { LeaseService } from "../persistence/services/lease-service";
 import { SettingsService } from "../settings/settings.service";
 import { SupervisorClient } from "../vms/supervisor.client";
 import {
@@ -28,6 +29,7 @@ import {
   buildResourceReport,
   effectiveBudgetBytes,
   idleSuspendDecision,
+  SUSPEND_BLOCKING_WORKER_STATUSES,
   isSuspendBlockingWorkerStatus,
   isVmPowerStartable,
   maxIsoTimestamp,
@@ -90,6 +92,7 @@ export class ResourceManagerService implements OnModuleInit, OnModuleDestroy {
     private readonly supervisor: SupervisorClient,
     private readonly tasks: TaskService,
     private readonly outbox: OutboxRepository,
+    private readonly leases: LeaseService,
     @Optional() @Inject(RESOURCE_MANAGER_OPTIONS) options: ResourceManagerOptions = {},
   ) {
     this.totalMemoryBytes = options.totalMemoryBytes ?? (() => totalmem());
@@ -224,12 +227,12 @@ export class ResourceManagerService implements OnModuleInit, OnModuleDestroy {
     const [vms, waitingTasks] = await Promise.all([
       this.db
         .selectFrom("vm_instances")
-        .select(["id", "name", "power_state", "memory_bytes"])
+        .select(["id", "name", "power_state", "memory_bytes", "created_at"])
         .orderBy("created_at", "asc")
         .execute(),
       this.db
         .selectFrom("tasks")
-        .select(["id", "vm_id", "status", "project_id"])
+        .select(["id", "vm_id", "status", "project_id", "priority"])
         .where("status", "in", ["waiting_vm", "waiting_resources"])
         .orderBy("priority", "desc")
         .orderBy("created_at", "asc")
@@ -239,7 +242,7 @@ export class ResourceManagerService implements OnModuleInit, OnModuleDestroy {
 
     const budgetBytes = effectiveBudgetBytes(policy, this.totalMemoryBytes());
     let projectedAllocated = report.allocatedMemoryBytes;
-    const freeMemoryBytes = this.freeMemoryBytes();
+    let projectedFreeMemoryBytes = this.freeMemoryBytes();
     const waitingByVm = new Map<string, typeof waitingTasks>();
     for (const task of waitingTasks) {
       const list = waitingByVm.get(task.vm_id) ?? [];
@@ -247,7 +250,18 @@ export class ResourceManagerService implements OnModuleInit, OnModuleDestroy {
       waitingByVm.set(task.vm_id, list);
     }
 
-    for (const vm of vms) {
+    const scheduledVms = [...vms].sort((left, right) => {
+      const priority = (vmId: string): number =>
+        (waitingByVm.get(vmId) ?? []).reduce(
+          (highest, task) => Math.max(highest, task.priority),
+          -100,
+        );
+      return (
+        priority(right.id) - priority(left.id) || left.created_at.localeCompare(right.created_at)
+      );
+    });
+
+    for (const vm of scheduledVms) {
       const tasks = waitingByVm.get(vm.id) ?? [];
       if (tasks.length === 0 || !isVmPowerStartable(vm.power_state)) continue;
       const projectRows = await this.db
@@ -268,7 +282,7 @@ export class ResourceManagerService implements OnModuleInit, OnModuleDestroy {
         requiredBytes: vm.memory_bytes,
         allocatedBytes: projectedAllocated,
         budgetBytes,
-        freeMemoryBytes,
+        freeMemoryBytes: projectedFreeMemoryBytes,
         hostReserveBytes: policy.hostReserveBytes,
       });
       if (!decision.canStart) {
@@ -301,6 +315,7 @@ export class ResourceManagerService implements OnModuleInit, OnModuleDestroy {
         await this.persistPower(vm.id, state, "resource_auto_start");
         await this.tasks.reconcileVm(vm.id);
         projectedAllocated += vm.memory_bytes;
+        projectedFreeMemoryBytes = Math.max(0, projectedFreeMemoryBytes - vm.memory_bytes);
         if (resumed) result.resumedVmIds.push(vm.id);
         else result.startedVmIds.push(vm.id);
         await this.outbox.append(
@@ -401,8 +416,48 @@ export class ResourceManagerService implements OnModuleInit, OnModuleDestroy {
       );
       const decision = idleSuspendDecision({ now, idleSince, policy, blockers });
       if (!decision.eligible) continue;
+      let maintenanceLeaseId: string | null = null;
       try {
-        const state = await this.supervisor.suspend(vm.id);
+        const maintenance = await this.leases.acquire({
+          vmId: vm.id,
+          owner: "human",
+          taskId: null,
+          ttlMs: 15 * 60_000,
+          preemptible: false,
+        });
+        maintenanceLeaseId = maintenance.id;
+        const [activeTask, attachedWorker, currentVm] = await Promise.all([
+          this.db
+            .selectFrom("tasks")
+            .select("id")
+            .where("vm_id", "=", vm.id)
+            .where("status", "in", [
+              "created",
+              "waiting_resources",
+              "waiting_vm",
+              "queued",
+              "running",
+              "waiting_approval",
+              "waiting_human",
+              "blocked",
+            ])
+            .executeTakeFirst(),
+          this.db
+            .selectFrom("workers")
+            .select("id")
+            .where("vm_id", "=", vm.id)
+            .where("status", "in", [...SUSPEND_BLOCKING_WORKER_STATUSES])
+            .executeTakeFirst(),
+          this.db
+            .selectFrom("vm_instances")
+            .select("power_state")
+            .where("id", "=", vm.id)
+            .executeTakeFirst(),
+        ]);
+        if (activeTask || attachedWorker || currentVm?.power_state !== "running") continue;
+        const state = await this.leases.executeWithLease(vm.id, maintenance.id, "human", () =>
+          this.supervisor.suspend(vm.id),
+        );
         await this.persistPower(vm.id, state, "resource_idle_suspend");
         suspendedVmIds.push(vm.id);
         // A task may have been queued between the snapshot above and the
@@ -427,6 +482,10 @@ export class ResourceManagerService implements OnModuleInit, OnModuleDestroy {
             error instanceof Error ? error.message : String(error)
           }`,
         );
+      } finally {
+        if (maintenanceLeaseId) {
+          await this.leases.release(vm.id, maintenanceLeaseId).catch(() => undefined);
+        }
       }
     }
   }

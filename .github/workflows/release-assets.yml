@@ -21,37 +21,62 @@ concurrency:
   group: release-assets-${{ inputs.tag || github.ref }}
   cancel-in-progress: false
 
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+
 jobs:
   verify:
     name: Verify tagged commit
     if: ${{ inputs.artifacts_run_id == '' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 40
+    permissions:
+      actions: read
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ inputs.tag || github.ref }}
           persist-credentials: false
-      - uses: pnpm/action-setup@v4
+          fetch-depth: 0
+      - uses: pnpm/action-setup@7088e561eb65bb68695d245aa206f005ef30921d # v4.1.0
         with:
           run_install: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
           cache: pnpm
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
           cache: true
       - name: Validate release tag and package versions
-        env:
-          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: node scripts/check-release-version.mjs "$RELEASE_TAG"
+      - name: Require a successful CI run for the tagged commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          source_sha=$(git rev-parse HEAD)
+          tag_sha=$(git rev-list -n 1 "refs/tags/${RELEASE_TAG}")
+          if [ "$source_sha" != "$tag_sha" ]; then
+            echo "checked out ${source_sha} but ${RELEASE_TAG} points at ${tag_sha}" >&2
+            exit 1
+          fi
+          runs=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${source_sha}&status=success&per_page=1" --jq '.workflow_runs | length')
+          if [ "${runs:-0}" -lt 1 ]; then
+            echo "no successful CI run exists for ${source_sha}; release refuses an unverified commit" >&2
+            exit 1
+          fi
+          echo "RELEASE_SOURCE_SHA=${source_sha}" >> "$GITHUB_ENV"
       - run: pnpm install --frozen-lockfile
+      - run: pnpm format:check
       - run: pnpm lint
       - run: pnpm typecheck
+      - run: pnpm typecheck:test
       - run: pnpm test
       - run: go vet ./...
+      - run: go test -race ./...
 
   desktop:
     name: Desktop ${{ matrix.name }}
@@ -67,35 +92,60 @@ jobs:
             os: windows-latest
             artifact: release/agent-in-box-*-windows-x64.exe
             smoke: pnpm smoke:desktop
+            installerSmoke: node scripts/smoke-desktop-installer.mjs
           - name: linux-x64
             os: ubuntu-latest
             artifact: release/agent-in-box-*-linux-x64.AppImage
             smoke: xvfb-run -a pnpm smoke:desktop
+            installerSmoke: xvfb-run -a node scripts/smoke-desktop-installer.mjs
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ inputs.tag || github.ref }}
           persist-credentials: false
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@7088e561eb65bb68695d245aa206f005ef30921d # v4.1.0
         with:
           run_install: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
           cache: pnpm
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
           cache: true
       - run: pnpm install --frozen-lockfile
+      - name: Install release verification keys
+        shell: bash
+        env:
+          UPDATE_KEY: ${{ secrets.AGENT_IN_BOX_UPDATE_PUBLIC_KEY_PEM }}
+          RUNTIME_KEY: ${{ secrets.AGENT_IN_BOX_RUNTIME_PUBLIC_KEY_PEM }}
+        run: |
+          set -euo pipefail
+          if [ -z "${UPDATE_KEY:-}" ]; then
+            echo "AGENT_IN_BOX_UPDATE_PUBLIC_KEY_PEM is not configured; refusing to build an unverifiable release" >&2
+            exit 1
+          fi
+          mkdir -p apps/desktop/build
+          printf '%s\n' "$UPDATE_KEY" > apps/desktop/build/update-public-key.pem
+          if [ -n "${RUNTIME_KEY:-}" ]; then
+            printf '%s\n' "$RUNTIME_KEY" > apps/desktop/build/runtime-public-key.pem
+          else
+            cp apps/desktop/build/update-public-key.pem apps/desktop/build/runtime-public-key.pem
+          fi
       - name: Build self-contained desktop installer
         run: pnpm package:desktop
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          AGENT_IN_BOX_REQUIRE_RELEASE_SIGNING: "1"
       - name: Smoke test packaged desktop
         run: ${{ matrix.smoke }}
+      - name: Smoke test the real installer or AppImage
+        run: ${{ matrix.installerSmoke }}
+        env:
+          SMOKE_CONTROL_PLANE_PORT: "3993"
       - name: Upload desktop installer
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: desktop-${{ matrix.name }}
           path: ${{ matrix.artifact }}
@@ -109,18 +159,18 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ inputs.tag || github.ref }}
           persist-credentials: false
-      - uses: msys2/setup-msys2@v2
+      - uses: msys2/setup-msys2@61f9e5e925871ba6c9e3e8da24ede83ea27fa91f # v2.27.0
         with:
           msystem: UCRT64
           update: true
       - name: Package QEMU
         shell: pwsh
         run: ./scripts/package-qemu-windows.ps1
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: qemu-windows
           path: |
@@ -136,18 +186,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ inputs.tag || github.ref }}
           persist-credentials: false
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@7088e561eb65bb68695d245aa206f005ef30921d # v4.1.0
         with:
           run_install: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
           cache: pnpm
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
           cache: true
@@ -161,7 +211,7 @@ jobs:
             -C release/guest-runtime/linux-amd64 .
           sha256sum release/guest-runtime-linux-amd64.tar.gz \
             > release/guest-runtime-linux-amd64.tar.gz.sha256
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: guest-runtime
           path: |
@@ -191,15 +241,45 @@ jobs:
       actions: read
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+      - name: Verify artifact run provenance
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ inputs.artifacts_run_id || github.run_id }}
+        run: |
+          set -euo pipefail
+          tag_sha=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" --jq .object.sha)
+          run_json=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}")
+          run_sha=$(printf '%s' "$run_json" | jq -r .head_sha)
+          run_conclusion=$(printf '%s' "$run_json" | jq -r .conclusion)
+          if [ "$run_sha" != "$tag_sha" ]; then
+            echo "artifact run ${RUN_ID} was built from ${run_sha}, not ${tag_sha}" >&2
+            exit 1
+          fi
+          if [ "$run_conclusion" != "success" ]; then
+            echo "artifact run ${RUN_ID} did not succeed (${run_conclusion})" >&2
+            exit 1
+          fi
+          ci=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${tag_sha}&status=success&per_page=1" --jq '.workflow_runs | length')
+          if [ "${ci:-0}" -lt 1 ]; then
+            echo "no successful CI run exists for ${tag_sha}" >&2
+            exit 1
+          fi
+          echo "RELEASE_SOURCE_SHA=${tag_sha}" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           run-id: ${{ inputs.artifacts_run_id || github.run_id }}
           merge-multiple: true
-          path: runtime-assets
+          path: release
       - name: Build runtime-assets.json
-        env:
-          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           node - <<'NODE'
           const fs = require("node:fs");
@@ -208,46 +288,66 @@ jobs:
             throw new Error(`Invalid semantic version release tag: ${tag}`);
           }
           const version = tag.slice(1);
-          const qemu = JSON.parse(fs.readFileSync("runtime-assets/qemu-windows-x64.json", "utf8"));
+          const qemu = JSON.parse(fs.readFileSync("release/qemu-windows-x64.json", "utf8"));
           const guest = JSON.parse(
-            fs.readFileSync("runtime-assets/guest-runtime/linux-amd64/manifest.json", "utf8"),
+            fs.readFileSync("release/guest-runtime/linux-amd64/manifest.json", "utf8"),
           );
           if (guest.guestRuntimeVersion !== version) {
             throw new Error(`Guest runtime version ${guest.guestRuntimeVersion} does not match ${tag}`);
+          }
+          if (qemu.version !== "11.1.3") {
+            throw new Error(`QEMU toolchain version ${qemu.version} is not the pinned 11.1.3`);
           }
           for (const file of [
             `agent-in-box-${version}-windows-x64.exe`,
             `agent-in-box-${version}-linux-x64.AppImage`,
           ]) {
-            if (!fs.existsSync(`runtime-assets/${file}`)) {
+            if (!fs.existsSync(`release/${file}`)) {
               throw new Error(`Desktop artifact does not match ${tag}: ${file}`);
             }
           }
           fs.writeFileSync(
-            "runtime-assets/runtime-assets.json",
+            "release/runtime-assets.json",
             `${JSON.stringify({ schemaVersion: 1, qemu: { "windows-x64": qemu }, guestRuntime: guest }, null, 2)}\n`,
           );
           NODE
-      - name: Checksum desktop installers
-        working-directory: runtime-assets
-        run: >-
-          sha256sum
-          agent-in-box-*-windows-x64.exe
-          agent-in-box-*-linux-x64.AppImage
-          > desktop-SHA256SUMS
-      - name: Upload release assets
-        uses: softprops/action-gh-release@v2
+      - name: Sign runtime asset manifest
+        env:
+          RUNTIME_SIGNING_KEY: ${{ secrets.AGENT_IN_BOX_RUNTIME_ASSETS_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RUNTIME_SIGNING_KEY:-}" ]; then
+            echo "AGENT_IN_BOX_RUNTIME_ASSETS_SIGNING_KEY is not configured; refusing to publish an unsigned runtime manifest" >&2
+            exit 1
+          fi
+          key_file=$(mktemp)
+          trap 'rm -f "$key_file"' EXIT
+          printf '%s\n' "$RUNTIME_SIGNING_KEY" > "$key_file"
+          chmod 600 "$key_file"
+          node scripts/sign-runtime-assets.mjs \
+            release/runtime-assets.json "$key_file" release/runtime-assets.signed.json
+          mv release/runtime-assets.signed.json release/runtime-assets.json
+      - name: Record release provenance
+        env:
+          RELEASE_WORKFLOW: release-assets.yml
+        run: node scripts/write-release-provenance.mjs release/release-provenance.json
+      - name: Checksum the exact release plan
+        run: node scripts/release-checksums.mjs --plan
+      - name: Publish checksummed artifacts
+        uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # v2.2.2
         with:
           tag_name: ${{ inputs.tag || github.ref_name }}
           generate_release_notes: ${{ github.event_name == 'push' }}
           files: |
-            runtime-assets/qemu-windows-x64.tar.gz
-            runtime-assets/qemu-windows-x64.tar.gz.sha256
-            runtime-assets/qemu-windows-x64.json
-            runtime-assets/guest-runtime-linux-amd64.tar.gz
-            runtime-assets/guest-runtime-linux-amd64.tar.gz.sha256
-            runtime-assets/runtime-assets.json
-            runtime-assets/agent-in-box-*-windows-x64.exe
-            runtime-assets/agent-in-box-*-linux-x64.AppImage
-            runtime-assets/desktop-SHA256SUMS
+            release/qemu-windows-x64.tar.gz
+            release/qemu-windows-x64.tar.gz.sha256
+            release/qemu-windows-x64.json
+            release/guest-runtime-linux-amd64.tar.gz
+            release/guest-runtime-linux-amd64.tar.gz.sha256
+            release/runtime-assets.json
+            release/release-provenance.json
+            release/build-manifest.json
+            release/agent-in-box-*-windows-x64.exe
+            release/agent-in-box-*-linux-x64.AppImage
+            release/SHA256SUMS
           fail_on_unmatched_files: true

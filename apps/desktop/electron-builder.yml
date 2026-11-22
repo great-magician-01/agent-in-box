@@ -32,6 +32,14 @@ extraResources:
     to: router-runtime
     filter:
       - "**/*"
+  # Release builds place the Ed25519 update verification key here. The filter
+  # keeps local packaging working without a key; the release workflow fails
+  # closed instead of shipping a build whose updates cannot be verified.
+  - from: build
+    to: .
+    filter:
+      - update-public-key.pem
+      - runtime-public-key.pem
 
 asar: true
 compression: normal

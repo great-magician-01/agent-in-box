@@ -97,6 +97,8 @@ interface TaskBinding {
   projectId: string;
   storageRoot: string;
   leaseId: string;
+  tokenId: string;
+  executionAttempt: number;
 }
 
 const WAIT_ACTION = new Set<ComputerActionType>(["wait"]);
@@ -123,7 +125,12 @@ export class CuaExecutionService {
     taskId: string;
     workerId: string;
     vmId: string;
+    executionAttempt: number;
   }): Promise<TaskExecutionStateView> {
+    const task = await this.tasks.get(input.taskId);
+    if (!task || task.attemptCount !== input.executionAttempt) {
+      throw new PersistenceError("conflict", "任务执行代际已变化，拒绝启动旧执行");
+    }
     const policy = await this.policies.effectiveForTask(input.taskId);
     const startedAt = this.now();
     const deadlineAt = new Date(startedAt.getTime() + policy.maxDurationMs);
@@ -133,6 +140,7 @@ export class CuaExecutionService {
         task_id: input.taskId,
         worker_id: input.workerId,
         vm_id: input.vmId,
+        execution_attempt: input.executionAttempt,
         started_at: startedAt.toISOString(),
         deadline_at: deadlineAt.toISOString(),
         step_count: 0,
@@ -150,6 +158,7 @@ export class CuaExecutionService {
         conflict.column("task_id").doUpdateSet({
           worker_id: input.workerId,
           vm_id: input.vmId,
+          execution_attempt: input.executionAttempt,
           started_at: startedAt.toISOString(),
           deadline_at: deadlineAt.toISOString(),
           step_count: 0,
@@ -171,14 +180,20 @@ export class CuaExecutionService {
   async finishExecution(
     taskId: string,
     outcome: "completed" | "waiting_human" | "blocked" | "failed" | "cancelled",
+    executionAttempt?: number,
   ): Promise<void> {
-    await this.db
+    let query = this.db
       .updateTable("task_execution_state")
       .set({ ended_at: nowIso(), outcome })
       .where("task_id", "=", taskId)
-      .where("ended_at", "is", null)
-      .execute();
-    if (outcome !== "completed") await this.approvals.cancelForTask(taskId, `任务已${outcome}`);
+      .where("ended_at", "is", null);
+    if (executionAttempt !== undefined) {
+      query = query.where("execution_attempt", "=", executionAttempt);
+    }
+    await query.execute();
+    if (outcome !== "completed") {
+      await this.approvals.cancelForTask(taskId, `任务已${outcome}`, executionAttempt);
+    }
   }
 
   /** Called from the Worker heartbeat tick so an idle Pi cannot hold the VM forever. */
@@ -256,8 +271,10 @@ export class CuaExecutionService {
     input: CuaActionInput,
     signal?: AbortSignal,
   ): Promise<CuaActionResult> {
-    const binding = await this.requireBinding(token, ["running"]);
-    return this.withTaskLock(binding.task.id, async () => {
+    const initialBinding = await this.requireBinding(token, ["running"]);
+    return this.withTaskLock(initialBinding.task.id, async () => {
+      signal?.throwIfAborted();
+      const binding = await this.requireBinding(token, ["running"]);
       const policy = await this.policies.effective(binding.projectId);
       const validation = validateComputerAction(input.action);
       if (!validation.ok) {
@@ -304,17 +321,11 @@ export class CuaExecutionService {
 
       let source: CuaScreenshotRecord | null = null;
       if (screenshotId) {
-        source = await this.screenshotRecord(binding.task.id, screenshotId);
-        const latest = await this.latestScreenshot(binding.task.id);
-        if (!latest || latest.id !== source.id) {
-          await this.recordRejectedAction(
-            binding,
-            input,
-            "stale_screenshot",
-            "引用的截图不是最新观察；请使用最近一次截图或重新观察",
-          );
-          throw new PersistenceError("conflict", "引用的截图已过期，请重新观察后再执行动作");
-        }
+        source = await this.screenshotRecord(
+          binding.task.id,
+          screenshotId,
+          binding.executionAttempt,
+        );
         const desktop = await this.guest.desktop(binding.vmId);
         if (desktop.width !== source.width || desktop.height !== source.height) {
           await this.db
@@ -336,7 +347,20 @@ export class CuaExecutionService {
       }
 
       const converted = await this.convertAction(action, binding, source);
+      const actionId = validateActionId(input.actionId) ?? randomUUID();
+      const replay = await this.replayAction(actionId, binding, converted);
+      if (replay) return replay;
       if (source) {
+        const latest = await this.latestScreenshot(binding.task.id, binding.executionAttempt);
+        if (latest?.id !== source.id) {
+          await this.recordRejectedAction(
+            binding,
+            input,
+            "stale_screenshot",
+            "引用的截图不是最新观察；请使用最近一次截图或重新观察",
+          );
+          throw new PersistenceError("conflict", "引用的截图已过期，请重新观察后再执行动作");
+        }
         const fits = assertActionFitsDisplay(converted, {
           width: source.width,
           height: source.height,
@@ -355,13 +379,22 @@ export class CuaExecutionService {
         }
       }
       const step = await this.consumeStep(binding.task, policy);
-      const actionId = validateActionId(input.actionId) ?? randomUUID();
       const actionRow = await this.insertAction(binding, actionId, converted, source);
       const needsApproval = policy.approvalActionTypes.includes(action.type);
       if (needsApproval) {
-        return this.runWithApproval(binding, policy, actionRow, converted, signal);
+        return this.runWithApproval(token, binding, policy, actionRow, converted, signal);
       }
-      return this.executeAction(binding, policy, actionRow, converted, step);
+      signal?.throwIfAborted();
+      const current = await this.requireBinding(token, ["running"]);
+      return this.executeAction(
+        current,
+        policy,
+        actionRow,
+        converted,
+        step,
+        false,
+        input.timeoutMs,
+      );
     });
   }
 
@@ -385,8 +418,12 @@ export class CuaExecutionService {
       if (!screenshotId) {
         throw new PersistenceError("validation_failed", "请求人工处理前必须先观察 VM 屏幕");
       }
-      const source = await this.screenshotRecord(binding.task.id, screenshotId);
-      const latest = await this.latestScreenshot(binding.task.id);
+      const source = await this.screenshotRecord(
+        binding.task.id,
+        screenshotId,
+        binding.executionAttempt,
+      );
+      const latest = await this.latestScreenshot(binding.task.id, binding.executionAttempt);
       if (!latest || latest.id !== source.id) {
         throw new PersistenceError(
           "conflict",
@@ -421,6 +458,7 @@ export class CuaExecutionService {
           taskId: binding.task.id,
           workerId: binding.workerId,
           vmId: binding.vmId,
+          executionAttempt: binding.executionAttempt,
           reason,
           screenshotId: source.id,
         });
@@ -439,14 +477,31 @@ export class CuaExecutionService {
         }
         throw error;
       }
-      await this.finishExecution(binding.task.id, "waiting_human");
+      await this.finishExecution(binding.task.id, "waiting_human", binding.executionAttempt);
       return record;
     });
   }
 
   async complete(token: CuaTokenContext, input: CuaCompleteRequest): Promise<CuaCompleteResult> {
-    const binding = await this.requireBinding(token, ["running"]);
-    return this.withTaskLock(binding.task.id, async () => {
+    const requestId = validateActionId(input?.requestId);
+    if (requestId && token.taskId) {
+      const existing = await this.tasks.get(token.taskId);
+      const result = existing?.result as { requestId?: unknown; evidence?: unknown } | null;
+      if (
+        existing?.status === "completed" &&
+        result?.requestId === requestId &&
+        Array.isArray(result.evidence)
+      ) {
+        return {
+          taskId: existing.id,
+          completed: true,
+          evidence: result.evidence as CuaEvidenceResult[],
+        };
+      }
+    }
+    const initialBinding = await this.requireBinding(token, ["running"]);
+    return this.withTaskLock(initialBinding.task.id, async () => {
+      const binding = await this.requireBinding(token, ["running"]);
       const policy = await this.policies.effective(binding.projectId);
       const validationError = validateCompletion(input, policy);
       if (validationError) {
@@ -483,7 +538,11 @@ export class CuaExecutionService {
       let verificationError: string | null = null;
       for (const item of input.evidence) {
         if (item.type === "screenshot") {
-          const record = await this.screenshotRecord(binding.task.id, item.screenshotId);
+          const record = await this.screenshotRecord(
+            binding.task.id,
+            item.screenshotId,
+            binding.executionAttempt,
+          );
           let fresh: Awaited<ReturnType<GuestService["observe"]>>;
           try {
             fresh = await this.guest.observe(binding.vmId);
@@ -595,19 +654,26 @@ export class CuaExecutionService {
         throw new PersistenceError("validation_failed", "完成证据未全部通过独立校验", { evidence });
       }
 
-      await this.tasks.complete(binding.task.id, {
-        summary: input.summary,
-        result: {
-          evidence,
-          workerId: binding.workerId,
-          verifiedAt: nowIso(),
+      const current = await this.requireBinding(token, ["running"]);
+      await this.tasks.complete(
+        current.task.id,
+        {
+          summary: input.summary,
+          result: {
+            evidence,
+            workerId: current.workerId,
+            executionAttempt: current.executionAttempt,
+            ...(requestId ? { requestId } : {}),
+            verifiedAt: nowIso(),
+          },
         },
-      });
+        { workerId: current.workerId, executionAttempt: current.executionAttempt },
+      );
       await this.tasks.recordWorkerEvent(binding.task.id, "worker.completion_verified", {
         workerId: binding.workerId,
         evidence,
       });
-      await this.finishExecution(binding.task.id, "completed");
+      await this.finishExecution(current.task.id, "completed", current.executionAttempt);
       return { taskId: binding.task.id, completed: true, evidence };
     });
   }
@@ -654,6 +720,7 @@ export class CuaExecutionService {
         taskId: row.task_id,
         workerId: row.worker_id,
         actionId: row.action_id,
+        executionAttempt: row.execution_attempt,
         actionType: row.action_type as ComputerActionType,
         contextSummary: row.context_summary,
         status: row.status as CuaApprovalRecord["status"],
@@ -698,6 +765,7 @@ export class CuaExecutionService {
       taskId: row.task_id,
       workerId: row.worker_id,
       vmId: row.vm_id,
+      executionAttempt: row.execution_attempt,
       startedAt: row.started_at,
       deadlineAt: row.deadline_at,
       stepCount: row.step_count,
@@ -712,6 +780,7 @@ export class CuaExecutionService {
   }
 
   private async runWithApproval(
+    token: CuaTokenContext,
     binding: TaskBinding,
     policy: CuaPolicy,
     actionRow: ActionRow,
@@ -728,6 +797,7 @@ export class CuaExecutionService {
         workerId: binding.workerId,
         actionId: actionRow.id,
         actionType: action.type,
+        executionAttempt: binding.executionAttempt,
         action,
         contextSummary: approvalSummary(binding.task, action),
         timeoutMs: policy.approvalTimeoutMs,
@@ -761,7 +831,13 @@ export class CuaExecutionService {
         const task = await this.tasks.get(binding.task.id);
         if (!task || !["running", "waiting_approval"].includes(task.status)) return false;
         const execution = await this.execution(binding.task.id);
-        if (!execution || execution.endedAt) return false;
+        if (
+          !execution ||
+          execution.endedAt ||
+          execution.executionAttempt !== binding.executionAttempt
+        ) {
+          return false;
+        }
         return new Date(execution.deadlineAt).getTime() > this.now().getTime();
       },
     );
@@ -783,6 +859,15 @@ export class CuaExecutionService {
         resolved.status === "timed_out" ? "conflict" : "forbidden",
         `人工审批${resolved.status === "rejected" ? "被拒绝" : resolved.status === "timed_out" ? "超时" : "已取消"}，${action.type} 动作未执行`,
       );
+    }
+    if (
+      resolved.executionAttempt !== binding.executionAttempt ||
+      !resolved.resolvedAt ||
+      resolved.resolvedAt > resolved.expiresAt ||
+      this.now().toISOString() > resolved.expiresAt
+    ) {
+      await this.updateActionFailure(actionRow.id, "approval_timeout", "审批已过期，动作未执行");
+      throw new PersistenceError("conflict", "审批已过期，动作未执行");
     }
     if (!task || task.status !== "waiting_approval") {
       await this.updateActionFailure(
@@ -815,10 +900,9 @@ export class CuaExecutionService {
     await this.tasks.transition(binding.task.id, "running", {
       summary: `人工已批准 ${action.type} 动作`,
     });
-    const current = await this.tasks.get(binding.task.id);
-    if (!current) throw new PersistenceError("not_found", "任务已不存在");
+    const current = await this.requireBinding(token, ["running"]);
     return this.executeAction(
-      binding,
+      current,
       policy,
       { ...actionRow, status: "pending_approval" },
       action,
@@ -834,7 +918,14 @@ export class CuaExecutionService {
     action: ComputerAction,
     step: number,
     approved = false,
+    timeoutMs?: number,
   ): Promise<CuaActionResult> {
+    if (
+      timeoutMs !== undefined &&
+      (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30_000)
+    ) {
+      throw new PersistenceError("validation_failed", "动作超时必须为 1～30000 毫秒");
+    }
     const started = performance.now();
     let guestResult: { actionId: string; ok: boolean; error?: string };
     try {
@@ -842,7 +933,9 @@ export class CuaExecutionService {
         leaseId: binding.leaseId,
         actionId: actionRow.id,
         action: toGuestAction(action),
-        ...(action.type === "wait" || action.type === "screenshot" ? {} : { timeoutMs: 30_000 }),
+        ...(action.type === "wait" || action.type === "screenshot"
+          ? {}
+          : { timeoutMs: timeoutMs ?? 30_000 }),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -985,6 +1078,50 @@ export class CuaExecutionService {
     return row ? { sha256: row.sha256, width: row.width, height: row.height } : null;
   }
 
+  private async replayAction(
+    actionId: string,
+    binding: TaskBinding,
+    action: ComputerAction,
+  ): Promise<CuaActionResult | null> {
+    const existing = await this.db
+      .selectFrom("cua_actions")
+      .selectAll()
+      .where("id", "=", actionId)
+      .executeTakeFirst();
+    if (!existing) return null;
+    if (
+      existing.task_id !== binding.task.id ||
+      existing.execution_attempt !== binding.executionAttempt ||
+      existing.action_json !== JSON.stringify(action)
+    ) {
+      throw new PersistenceError("conflict", "动作 ID 已用于其他任务、代际或参数");
+    }
+    if (existing.status !== "executed" || !existing.after_screenshot_id) {
+      // An in-flight/failed/unknown outcome is never replayed as a new input.
+      throw new PersistenceError("conflict", "原动作结果已保留，但未确认成功，不能重放输入");
+    }
+    const after = await this.screenshotRecord(
+      binding.task.id,
+      existing.after_screenshot_id,
+      binding.executionAttempt,
+    );
+    return {
+      taskId: binding.task.id,
+      actionId,
+      status: "executed",
+      ok: true,
+      screenshotId: after.id,
+      afterScreenshot: {
+        screenshotId: after.id,
+        width: after.width,
+        height: after.height,
+        dpi: after.dpi ?? 96,
+        scaleFactor: after.scaleFactor ?? 1,
+        dataBase64: (await this.readScreenshot(binding.task.id, after.id)).data.toString("base64"),
+      },
+    };
+  }
+
   private async insertAction(
     binding: TaskBinding,
     actionId: string,
@@ -1012,6 +1149,7 @@ export class CuaExecutionService {
         task_id: binding.task.id,
         worker_id: binding.workerId,
         vm_id: binding.vmId,
+        execution_attempt: binding.executionAttempt,
         lease_id: binding.leaseId,
         action_type: action.type,
         action_json: JSON.stringify(action),
@@ -1051,7 +1189,11 @@ export class CuaExecutionService {
     let source: CuaScreenshotRecord | null = null;
     if (screenshotId) {
       try {
-        source = await this.screenshotRecord(binding.task.id, screenshotId);
+        source = await this.screenshotRecord(
+          binding.task.id,
+          screenshotId,
+          binding.executionAttempt,
+        );
       } catch {
         source = null;
       }
@@ -1132,32 +1274,62 @@ export class CuaExecutionService {
 
   private async blockTask(task: TaskRecord, code: string, message: string): Promise<void> {
     const current = await this.tasks.get(task.id);
-    if (!current || !["running", "waiting_approval"].includes(current.status)) return;
-    await this.approvals.cancelForTask(task.id, message);
-    await this.tasks.block(task.id, code, message, message);
-    await this.finishExecution(task.id, "blocked");
+    if (
+      !current ||
+      current.attemptCount !== task.attemptCount ||
+      !["running", "waiting_approval"].includes(current.status)
+    ) {
+      return;
+    }
+    await this.approvals.cancelForTask(task.id, message, task.attemptCount);
+    await this.tasks.block(task.id, code, message, message, {
+      workerId: current.assignedWorkerId ?? task.assignedWorkerId ?? "",
+      executionAttempt: task.attemptCount,
+    });
+    await this.finishExecution(task.id, "blocked", task.attemptCount);
   }
 
   private async requireBinding(
     token: CuaTokenContext,
     statuses: TaskRecord["status"][],
   ): Promise<TaskBinding> {
-    if (!token.taskId) {
-      throw new PersistenceError("conflict", "Computer Use 令牌尚未绑定到运行中的任务");
+    if (!token.taskId || token.executionAttempt === null) {
+      throw new PersistenceError("conflict", "Computer Use 令牌尚未绑定到运行中的任务执行代际");
+    }
+    const storedToken = await this.db
+      .selectFrom("cua_tokens")
+      .select(["task_id", "execution_attempt", "revoked_at", "expires_at"])
+      .where("id", "=", token.id)
+      .executeTakeFirst();
+    if (
+      !storedToken ||
+      storedToken.revoked_at ||
+      storedToken.task_id !== token.taskId ||
+      storedToken.execution_attempt !== token.executionAttempt ||
+      new Date(storedToken.expires_at).getTime() <= this.now().getTime()
+    ) {
+      throw new PersistenceError("unauthorized", "Computer Use 令牌已撤销、过期或代际不匹配");
     }
     const task = await this.tasks.get(token.taskId);
     if (!task) throw new PersistenceError("not_found", "任务不存在");
+    if (task.attemptCount !== token.executionAttempt) {
+      throw new PersistenceError("conflict", "任务执行代际已变化，旧 Computer Use 令牌无效");
+    }
     if (!statuses.includes(task.status)) {
       throw new PersistenceError("conflict", `任务状态 ${task.status} 不允许 Computer Use 动作`);
     }
     const worker = await this.db
       .selectFrom("workers")
-      .select(["id", "vm_id", "status", "current_task_id"])
+      .select(["id", "vm_id", "status", "current_task_id", "current_execution_attempt"])
       .where("id", "=", token.workerId)
       .executeTakeFirst();
     if (!worker) throw new PersistenceError("not_found", "Worker 不存在");
-    if (worker.status !== "running" || worker.current_task_id !== task.id) {
-      throw new PersistenceError("conflict", "Worker 不在执行该任务");
+    if (
+      worker.status !== "running" ||
+      worker.current_task_id !== task.id ||
+      worker.current_execution_attempt !== token.executionAttempt
+    ) {
+      throw new PersistenceError("conflict", "Worker 不在执行该任务代际");
     }
     if (task.vmId !== token.vmId || worker.vm_id !== token.vmId) {
       throw new PersistenceError("conflict", "Worker/任务/令牌的 VM 不一致");
@@ -1171,6 +1343,10 @@ export class CuaExecutionService {
     if (vm.power_state !== "running") {
       throw new PersistenceError("conflict", "目标 VM 未运行；不会重放旧桌面动作");
     }
+    const execution = await this.execution(task.id);
+    if (!execution || execution.endedAt || execution.executionAttempt !== token.executionAttempt) {
+      throw new PersistenceError("conflict", "任务执行状态不存在、已结束或属于旧代际");
+    }
     const lease = await this.activeLease(token.vmId);
     if (!lease || lease.owner !== "worker" || lease.taskId !== task.id) {
       throw new PersistenceError("lease_conflict", "任务没有有效的 Worker Execution Lease");
@@ -1182,6 +1358,8 @@ export class CuaExecutionService {
       projectId: task.projectId,
       storageRoot: vm.storage_root,
       leaseId: lease.id,
+      tokenId: token.id,
+      executionAttempt: token.executionAttempt,
     };
   }
 
@@ -1215,25 +1393,33 @@ export class CuaExecutionService {
   private async screenshotRecord(
     taskId: string,
     screenshotId: string,
+    executionAttempt?: number,
   ): Promise<CuaScreenshotRecord> {
     if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(screenshotId)) {
       throw new PersistenceError("validation_failed", "截图引用格式无效");
     }
-    const row = await this.db
+    let query = this.db
       .selectFrom("cua_screenshots")
       .selectAll()
       .where("id", "=", screenshotId)
-      .where("task_id", "=", taskId)
-      .executeTakeFirst();
+      .where("task_id", "=", taskId);
+    if (executionAttempt !== undefined) {
+      query = query.where("execution_attempt", "=", executionAttempt);
+    }
+    const row = await query.executeTakeFirst();
     if (!row) throw new PersistenceError("not_found", "截图不存在或不属于该任务");
     return toScreenshotRecord(row);
   }
 
-  private async latestScreenshot(taskId: string): Promise<CuaScreenshotRecord | undefined> {
+  private async latestScreenshot(
+    taskId: string,
+    executionAttempt: number,
+  ): Promise<CuaScreenshotRecord | undefined> {
     const row = await this.db
       .selectFrom("cua_screenshots")
       .selectAll()
       .where("task_id", "=", taskId)
+      .where("execution_attempt", "=", executionAttempt)
       .orderBy(sql`rowid`, "desc")
       .limit(1)
       .executeTakeFirst();
@@ -1285,6 +1471,7 @@ export class CuaExecutionService {
         task_id: binding.task.id,
         worker_id: binding.workerId,
         vm_id: binding.vmId,
+        execution_attempt: binding.executionAttempt,
         kind,
         width,
         height,
@@ -1301,6 +1488,7 @@ export class CuaExecutionService {
       taskId: binding.task.id,
       workerId: binding.workerId,
       vmId: binding.vmId,
+      executionAttempt: binding.executionAttempt,
       kind,
       width,
       height,
@@ -1377,6 +1565,9 @@ function validateCompletion(input: CuaCompleteRequest, policy: CuaPolicy): strin
   if (!Array.isArray(input.evidence) || input.evidence.length === 0 || input.evidence.length > 8) {
     return "完成必须包含 1～8 项独立证据";
   }
+  if (!input.evidence.some((item) => item.type !== "screenshot")) {
+    return "截图只能作为辅助证据；请提供文件/进程校验，或请求人工验证目标状态";
+  }
   if (!policy.credentials.allowInGuest && /api[_-]?key|secret|password/i.test(summary)) {
     return "完成摘要不得包含凭据信息";
   }
@@ -1434,6 +1625,7 @@ function toScreenshotRecord(row: {
   task_id: string;
   worker_id: string;
   vm_id: string;
+  execution_attempt: number | null;
   kind: string;
   width: number;
   height: number;
@@ -1448,6 +1640,7 @@ function toScreenshotRecord(row: {
     taskId: row.task_id,
     workerId: row.worker_id,
     vmId: row.vm_id,
+    executionAttempt: row.execution_attempt,
     kind: row.kind as CuaScreenshotKind,
     width: row.width,
     height: row.height,
@@ -1465,6 +1658,7 @@ function toActionRecord(row: {
   worker_id: string;
   vm_id: string;
   lease_id: string;
+  execution_attempt: number | null;
   action_type: string;
   action_json: string;
   source_screenshot_id: string | null;
@@ -1486,6 +1680,7 @@ function toActionRecord(row: {
     workerId: row.worker_id,
     vmId: row.vm_id,
     leaseId: row.lease_id,
+    executionAttempt: row.execution_attempt,
     type: row.action_type as ComputerActionType,
     action: safeJson(row.action_json),
     sourceScreenshotId: row.source_screenshot_id,

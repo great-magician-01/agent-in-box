@@ -195,13 +195,16 @@ describe("LeaseService", () => {
     expect(events).toEqual(["first:start", "first:end", "second"]);
   });
 
-  it("does not release a lease through the wrong VM", async () => {
-    const lease = await service.acquire({
+  it("does not allow an interactive human console to preempt maintenance", async () => {
+    const maintenance = await service.acquire({
       vmId: ctx.vmId,
-      owner: "worker",
-      taskId: "task-a",
+      owner: "human",
+      taskId: null,
+      preemptible: false,
     });
-
-    expect(await service.release("other-vm", lease.id)).toBe(false);
+    await expect(
+      service.acquire({ vmId: ctx.vmId, owner: "human", taskId: null }),
+    ).rejects.toMatchObject({ code: "lease_conflict" });
+    expect((await service.getActive(ctx.vmId))?.id).toBe(maintenance.id);
   });
 });

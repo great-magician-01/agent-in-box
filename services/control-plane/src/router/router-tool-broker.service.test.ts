@@ -6,6 +6,7 @@ import { WorkerArchiveRepository } from "../persistence/repositories/worker-arch
 import { WorkerRepository } from "../persistence/repositories/worker-repository";
 import { TaskService } from "../persistence/services/task-service";
 import { createTestContext, type TestContext } from "../persistence/testing/fixtures";
+import { safeTestPort } from "../persistence/testing/safe-port";
 import { WorkerRegistryService } from "../workers/worker-registry.service";
 import type { WorkerRuntimeService } from "../workers/worker-runtime.service";
 import { RouterToolBrokerService } from "./router-tool-broker.service";
@@ -27,19 +28,16 @@ afterEach(async () => {
   }
 });
 
-async function createHarness(): Promise<Harness> {
+async function createHarness(toolOverride?: RouterToolService): Promise<Harness> {
   const ctx = await createTestContext();
   const outbox = new OutboxRepository(ctx.app.db);
   const tasks = new TaskService(ctx.app.db, new TaskRepository(ctx.app.db), outbox);
   const workers = new WorkerRepository(ctx.app.db);
   const archives = new WorkerArchiveRepository(ctx.app.db);
   const registry = new WorkerRegistryService(ctx.app.db, workers, archives, tasks, outbox);
-  const tools = new RouterToolService(
-    ctx.app.db,
-    tasks,
-    registry,
-    {} as unknown as WorkerRuntimeService,
-  );
+  const tools =
+    toolOverride ??
+    new RouterToolService(ctx.app.db, tasks, registry, {} as unknown as WorkerRuntimeService);
   const conversationId = randomUUID();
   const token = randomBytes(32).toString("base64url");
   const now = new Date().toISOString();
@@ -73,7 +71,9 @@ async function createHarness(): Promise<Harness> {
       updated_at: now,
     })
     .execute();
-  const broker = new RouterToolBrokerService(ctx.app.db, tools, outbox, { port: 0 });
+  const broker = new RouterToolBrokerService(ctx.app.db, tools, outbox, {
+    port: await safeTestPort(),
+  });
   await broker.onModuleInit();
   return { ctx, broker, token, conversationId };
 }
@@ -165,5 +165,44 @@ describe("RouterToolBrokerService", () => {
     });
     expect(expired.status).toBe(401);
     await expired.arrayBuffer();
+  });
+
+  it("aborts an authenticated in-flight tool when the Router turn is cancelled", async () => {
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const tools = {
+      definitions: () => [],
+      execute: async (
+        _name: string,
+        _args: unknown,
+        context: { signal?: AbortSignal },
+      ): Promise<never> => {
+        markStarted();
+        await new Promise<never>((_resolve, reject) => {
+          context.signal?.addEventListener("abort", () => reject(new Error("turn aborted")), {
+            once: true,
+          });
+        });
+        throw new Error("unreachable");
+      },
+    } as unknown as RouterToolService;
+    const harness = await createHarness(tools);
+    harnesses.push(harness);
+    const pending = fetch(`http://127.0.0.1:${harness.broker.port}/v1/tools/list_projects`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${harness.token}`,
+        "content-type": "application/json",
+      },
+      body: "{}",
+    });
+    await started;
+    harness.broker.cancel(harness.conversationId);
+    const response = await pending;
+    expect(response.status).toBe(409);
+    const payload = (await response.json()) as { ok: boolean; error?: { code?: string } };
+    expect(payload).toMatchObject({ ok: false, error: { code: "conflict" } });
   });
 });

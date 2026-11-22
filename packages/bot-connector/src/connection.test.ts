@@ -111,7 +111,9 @@ async function withServer<T>(
   run: (server: MockServer) => Promise<T>,
   onWsConnection?: (socket: import("ws").WebSocket) => void,
 ): Promise<T> {
-  const server = await startMockServer({ onWsConnection });
+  const server = await startMockServer({
+    ...(onWsConnection ? { onWsConnection } : {}),
+  });
   try {
     return await run(server);
   } finally {

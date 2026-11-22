@@ -54,6 +54,7 @@ export interface CreateTaskInput {
   originConversationId?: string;
   objective: string;
   priority?: number;
+  targetWorkerId?: string | null;
   parentTaskId?: string | null;
   dependsOn?: string[];
   idempotencyKey: string;
@@ -68,6 +69,13 @@ export interface TransitionOptions {
   summary?: string;
   errorCode?: string;
   errorMessage?: string;
+  expectedWorkerId?: string;
+  executionAttempt?: number;
+}
+
+export interface ExecutionIdentity {
+  workerId: string;
+  executionAttempt: number;
 }
 
 /** Stable task error code used by UI, bots and the Worker resume hint. */
@@ -78,6 +86,7 @@ export interface BeginHumanVerificationInput {
   taskId: string;
   workerId: string;
   vmId: string;
+  executionAttempt: number;
   reason: string;
   screenshotId: string;
 }
@@ -115,6 +124,7 @@ export class TaskService {
       originConversationId: input.originConversationId ?? null,
       objective,
       priority: normalizeQueuePriority(input.priority ?? 0),
+      targetWorkerId: input.targetWorkerId ?? null,
       parentTaskId: input.parentTaskId ?? null,
       dependsOn,
     };
@@ -158,6 +168,22 @@ export class TaskService {
         .where("id", "=", normalized.vmId)
         .executeTakeFirst();
       if (!vm) throw new NotFoundError(`目标 VM 不存在：${normalized.vmId}`);
+      if (normalized.targetWorkerId) {
+        const target = await trx
+          .selectFrom("workers")
+          .select(["id", "project_id", "vm_id", "status", "archived_at"])
+          .where("id", "=", normalized.targetWorkerId)
+          .executeTakeFirst();
+        if (
+          !target ||
+          target.project_id !== normalized.projectId ||
+          target.vm_id !== normalized.vmId ||
+          target.archived_at ||
+          ["failed", "archiving", "archived"].includes(target.status)
+        ) {
+          throw new PersistenceError("validation_failed", "目标 Worker 不可用或与项目、VM 不匹配");
+        }
+      }
 
       let originConversationId = normalized.originConversationId;
       if (originConversationId) {
@@ -236,6 +262,7 @@ export class TaskService {
         vmId: normalized.vmId,
         originConversationId,
         assignedWorkerId: null,
+        targetWorkerId: normalized.targetWorkerId,
         parentTaskId: normalized.parentTaskId,
         objective,
         status: initialStatus,
@@ -356,6 +383,7 @@ export class TaskService {
         },
         {
           assignedWorkerId: null,
+          targetWorkerId: null,
           startedAt: null,
           completedAt: null,
           result: null,
@@ -421,6 +449,7 @@ export class TaskService {
         },
         {
           assignedWorkerId: null,
+          targetWorkerId: null,
           startedAt: null,
           completedAt: null,
           result: null,
@@ -455,8 +484,8 @@ export class TaskService {
       if (current.status !== "running") {
         throw new InvalidTransitionError("只有运行中的任务可以请求人工处理");
       }
-      if (current.vmId !== input.vmId) {
-        throw new PersistenceError("conflict", "人工处理请求与任务 VM 不一致");
+      if (current.vmId !== input.vmId || current.attemptCount !== input.executionAttempt) {
+        throw new PersistenceError("conflict", "人工处理请求与当前任务执行代际不一致");
       }
       const previous = await trx
         .selectFrom("human_verifications")
@@ -479,6 +508,7 @@ export class TaskService {
           task_id: input.taskId,
           worker_id: input.workerId,
           vm_id: input.vmId,
+          execution_attempt: input.executionAttempt,
           reason,
           screenshot_id: screenshotId,
           status: "pending",
@@ -504,6 +534,7 @@ export class TaskService {
         verificationId: id,
         workerId: input.workerId,
         vmId: input.vmId,
+        executionAttempt: input.executionAttempt,
         reason,
         screenshotId,
       };
@@ -527,6 +558,7 @@ export class TaskService {
         taskId: input.taskId,
         workerId: input.workerId,
         vmId: input.vmId,
+        executionAttempt: input.executionAttempt,
         reason,
         screenshotId,
         status: "pending" as const,
@@ -633,6 +665,7 @@ export class TaskService {
         { summary },
         {
           assignedWorkerId: null,
+          targetWorkerId: null,
           startedAt: null,
           completedAt: null,
           result: null,
@@ -788,6 +821,42 @@ export class TaskService {
     return updated;
   }
 
+  /** Rolls back a claim that never acquired execution ownership. */
+  async releaseClaim(taskId: string, workerId: string): Promise<TaskRecord> {
+    return this.db.transaction().execute(async (trx) => {
+      const current = await this.tasks.getTask(taskId, trx);
+      if (!current) throw new NotFoundError(`任务不存在：${taskId}`);
+      if (current.status !== "running" || current.assignedWorkerId !== workerId) return current;
+      const updated = await this.tasks.updateTask(
+        taskId,
+        {
+          status: "queued",
+          assignedWorkerId: null,
+          targetWorkerId: null,
+          startedAt: null,
+          latestSummary: "执行位被占用，任务已保留在队列中",
+          updatedAt: nowIso(),
+        },
+        trx,
+      );
+      if (!updated) throw new NotFoundError(`任务不存在：${taskId}`);
+      await this.tasks.appendEvent(
+        taskId,
+        "task.claim_released",
+        { workerId, executionAttempt: current.attemptCount },
+        nowIso(),
+        trx,
+      );
+      await this.outbox.append(
+        "task.status_changed",
+        { taskId, from: "running", to: "queued" },
+        nowIso(),
+        trx,
+      );
+      return updated;
+    });
+  }
+
   /** Atomically claims the highest-priority runnable task. Null means the VM is busy or not ready. */
   async claimNext(vmId: string, workerId?: string): Promise<TaskRecord | null> {
     await this.reconcileVm(vmId);
@@ -807,6 +876,13 @@ export class TaskService {
           .limit(1)
           .executeTakeFirst();
         if (active) return null;
+        const lease = await trx
+          .selectFrom("vm_leases")
+          .select("id")
+          .where("vm_id", "=", vmId)
+          .where("expires_at", ">", nowIso())
+          .executeTakeFirst();
+        if (lease) return null;
 
         const worker = workerId
           ? await trx
@@ -833,6 +909,7 @@ export class TaskService {
           compareQueueTasks,
         );
         for (const candidate of candidates) {
+          if (candidate.targetWorkerId && candidate.targetWorkerId !== workerId) continue;
           if (!(await this.dependenciesCompleted(candidate.id, trx))) continue;
           const [project, binding] = await Promise.all([
             trx
@@ -879,7 +956,12 @@ export class TaskService {
     }
   }
 
-  async fail(taskId: string, code: string, message: string): Promise<TaskRecord> {
+  async fail(
+    taskId: string,
+    code: string,
+    message: string,
+    expected?: ExecutionIdentity,
+  ): Promise<TaskRecord> {
     if (!code.trim() || !message.trim()) {
       throw new PersistenceError("validation_failed", "失败任务必须包含错误代码和错误信息");
     }
@@ -887,6 +969,12 @@ export class TaskService {
       errorCode: code.trim(),
       errorMessage: message.trim(),
       summary: message.trim(),
+      ...(expected
+        ? {
+            expectedWorkerId: expected.workerId,
+            executionAttempt: expected.executionAttempt,
+          }
+        : {}),
     });
   }
 
@@ -899,6 +987,7 @@ export class TaskService {
     code: string,
     message: string,
     summary?: string,
+    expected?: ExecutionIdentity,
   ): Promise<TaskRecord> {
     if (!code.trim() || !message.trim()) {
       throw new PersistenceError("validation_failed", "阻塞任务必须包含错误代码和说明");
@@ -907,6 +996,12 @@ export class TaskService {
       errorCode: code.trim(),
       errorMessage: message.trim(),
       summary: summary?.trim() || message.trim(),
+      ...(expected
+        ? {
+            expectedWorkerId: expected.workerId,
+            executionAttempt: expected.executionAttempt,
+          }
+        : {}),
     });
   }
 
@@ -936,7 +1031,11 @@ export class TaskService {
   }
 
   /** Server-side Worker completion API. There is intentionally no browser route for this method. */
-  async complete(taskId: string, input: TaskCompletionInput): Promise<TaskRecord> {
+  async complete(
+    taskId: string,
+    input: TaskCompletionInput,
+    expected?: ExecutionIdentity,
+  ): Promise<TaskRecord> {
     const summary = typeof input.summary === "string" ? input.summary.trim() : "";
     if (!summary || summary.length > 4000) {
       throw new PersistenceError("validation_failed", "完成结果摘要必须为 1～4000 个字符");
@@ -961,7 +1060,15 @@ export class TaskService {
       const updated = await this.transitionInTransaction(
         taskId,
         "completed",
-        { summary },
+        {
+          summary,
+          ...(expected
+            ? {
+                expectedWorkerId: expected.workerId,
+                executionAttempt: expected.executionAttempt,
+              }
+            : {}),
+        },
         { result: input.result ?? null, errorCode: null, errorMessage: null },
         trx,
       );
@@ -1163,6 +1270,16 @@ export class TaskService {
   ): Promise<TaskRecord> {
     const current = await this.tasks.getTask(taskId, trx);
     if (!current) throw new NotFoundError(`任务不存在：${taskId}`);
+    if (
+      (options.expectedWorkerId !== undefined &&
+        current.assignedWorkerId !== options.expectedWorkerId) ||
+      (options.executionAttempt !== undefined && current.attemptCount !== options.executionAttempt)
+    ) {
+      throw new PersistenceError("conflict", "任务 Worker 或执行代际已变化，拒绝旧状态迁移");
+    }
+    if (current.status === to && ["blocked", "failed", "cancelled", "completed"].includes(to)) {
+      return current;
+    }
     try {
       assertTaskTransition(current.status, to);
     } catch (error) {

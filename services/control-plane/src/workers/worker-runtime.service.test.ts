@@ -37,12 +37,15 @@ class FakeConnection implements WorkerGuestConnection {
   readonly specs: WorkerSessionSpec[] = [];
   subscribedSessionId: string | null = null;
   abortCalls = 0;
+  closeCalls = 0;
   archiveCalls = 0;
   startSessionCalls = 0;
   resumeCalls: string[] = [];
   resumeError: Error | null = null;
+  promptError: Error | null = null;
   private listener: ((event: WorkerEngineEvent) => void) | null = null;
   private hold = false;
+  private turn: WorkerInput["turn"];
 
   constructor(
     readonly sessionId = "fake-session",
@@ -87,9 +90,14 @@ class FakeConnection implements WorkerGuestConnection {
   async prompt(_sessionId: string, input: WorkerInput) {
     this.prompts.push(input.text);
     this.promptImages.push(input.images);
+    this.turn = input.turn;
     this.hold = input.text.startsWith("[hold]");
     this.emit({ type: "text_delta", delta: "working" });
     this.emit({ type: "tool_started", toolName: "vm_screenshot", input: {} });
+    if (this.promptError) {
+      this.hold = true;
+      throw this.promptError;
+    }
     if (!this.hold) {
       this.emit({ type: "tool_finished", toolName: "vm_screenshot", output: {}, isError: false });
       setTimeout(() => this.emit({ type: "turn_finished" }), 10);
@@ -104,10 +112,20 @@ class FakeConnection implements WorkerGuestConnection {
     return "queued";
   }
 
+  abortError: Error | null = null;
+
   async abort(): Promise<void> {
     this.abortCalls += 1;
+    if (this.abortError) throw this.abortError;
     this.emit({ type: "tool_finished", toolName: "vm_screenshot", output: {}, isError: true });
     this.emit({ type: "turn_finished" });
+    this.turn = undefined;
+  }
+
+  async close(): Promise<void> {
+    this.closeCalls += 1;
+    this.listener = null;
+    this.turn = undefined;
   }
 
   async archive() {
@@ -128,7 +146,7 @@ class FakeConnection implements WorkerGuestConnection {
   }
 
   emit(event: WorkerEngineEvent): void {
-    this.listener?.(event);
+    this.listener?.({ ...event, ...(this.turn ? { turn: this.turn } : {}) });
   }
 }
 
@@ -402,6 +420,31 @@ describe("WorkerRuntimeService", () => {
     await harness.service.abort(created.worker.id, "test cleanup");
   });
 
+  it("closes a Worker session when prompt acceptance is unknown", async () => {
+    const connection = new FakeConnection();
+    connection.promptError = new Error("response lost after prompt acceptance");
+    const harness = await createHarness({ connection });
+    active = harness;
+    const created = await harness.service.create({
+      projectId: harness.ctx.projectId,
+      vmId: harness.ctx.vmId,
+    });
+    const prompted = await harness.service.prompt(created.worker.id, {
+      text: "Task whose prompt response is lost",
+    });
+    await waitFor(
+      async () => (await harness.tasks.get(prompted.taskId))?.status === "failed",
+      "failed task after unknown prompt result",
+    );
+    expect(connection.closeCalls).toBe(1);
+    expect((await harness.workers.getWorker(created.worker.id))?.status).toBe("failed");
+    const promptCount = connection.prompts.length;
+    await expect(
+      harness.service.prompt(created.worker.id, { text: "must not reuse the old session" }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    expect(connection.prompts).toHaveLength(promptCount);
+  });
+
   it("steers a running turn, maps Abort to a stopped task and releases the lease", async () => {
     const harness = await createHarness();
     active = harness;
@@ -428,11 +471,35 @@ describe("WorkerRuntimeService", () => {
     const aborted = await harness.service.abort(created.worker.id, "用户中止");
     expect(aborted.worker.status).toBe("idle");
     expect(harness.connection.abortCalls).toBe(1);
+    expect(harness.connection.closeCalls).toBe(0);
     const task = await harness.tasks.get(prompted.taskId);
     expect(task).toMatchObject({ status: "blocked", errorCode: "worker_aborted" });
     await expect(harness.leases.getActive(harness.ctx.vmId)).resolves.toBeUndefined();
     const messages = await harness.service.messages(created.worker.id);
     expect(messages.at(-1)?.content).toBe("working");
+  });
+
+  it("fails and closes the Worker session when the abort RPC cannot be confirmed", async () => {
+    const connection = new FakeConnection();
+    const harness = await createHarness({ connection });
+    active = harness;
+    const created = await harness.service.create({
+      projectId: harness.ctx.projectId,
+      vmId: harness.ctx.vmId,
+    });
+    const prompted = await harness.service.prompt(created.worker.id, {
+      text: "[hold] Unconfirmed abort",
+    });
+    await waitFor(
+      async () => (await harness.tasks.get(prompted.taskId))?.status === "running",
+      "running task",
+    );
+    connection.abortError = new Error("abort timed out");
+    const aborted = await harness.service.abort(created.worker.id, "用户中止");
+    expect(aborted.worker.status).toBe("failed");
+    expect(connection.closeCalls).toBe(1);
+    const task = await harness.tasks.get(prompted.taskId);
+    expect(task).toMatchObject({ status: "blocked", errorCode: "worker_aborted" });
   });
 
   it("maps an externally cancelled task to an RPC Abort without overwriting the cancelled state", async () => {
@@ -476,6 +543,7 @@ describe("WorkerRuntimeService", () => {
       taskId: prompted.taskId,
       workerId: created.worker.id,
       vmId: harness.ctx.vmId,
+      executionAttempt: (await harness.tasks.get(prompted.taskId))!.attemptCount,
       reason: "屏幕出现登录二维码，需要用户手机扫码",
       screenshotId: "observation-test",
     });

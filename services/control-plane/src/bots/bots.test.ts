@@ -127,7 +127,7 @@ async function createHarness(options: { bindUser?: string } = {}): Promise<Harne
   const connectors = {
     getConnected: () => null,
   } as unknown as BotConnectorService;
-  const outbound = new BotOutboundService(ctx.app.db, connectors, outbox, {
+  const outbound = new BotOutboundService(ctx.app.db, connectors, accounts, outbox, {
     autoTick: false,
   });
   const routerSent: string[] = [];
@@ -138,6 +138,10 @@ async function createHarness(options: { bindUser?: string } = {}): Promise<Harne
       status: routerStatus.value,
       providerId: "mock",
       modelId: "mock",
+      selectedProviderId: "mock",
+      selectedModelId: "mock",
+      selectionSource: "default",
+      selectionLockedByEnv: false,
       engineVersion: "test",
       sessionVersion: "1",
       lastError: null,
@@ -157,6 +161,10 @@ async function createHarness(options: { bindUser?: string } = {}): Promise<Harne
         status: "idle",
         providerId: null,
         modelId: null,
+        selectedProviderId: null,
+        selectedModelId: null,
+        selectionSource: "default",
+        selectionLockedByEnv: false,
         engineVersion: null,
         sessionVersion: null,
         lastError: null,
@@ -431,6 +439,8 @@ describe("bot commands and notifications", () => {
         status: "running",
         current_task_id: created.task.id,
         capability_set: "[]",
+        development_mode: 0,
+        development_auto_enable: 0,
         created_at: now,
         last_active_at: now,
         archived_at: null,
@@ -594,6 +604,7 @@ describe("bot commands and notifications", () => {
       taskId: created.task.id,
       workerId: worker.id,
       vmId: ctx.vmId,
+      executionAttempt: created.task.attemptCount,
       reason: "屏幕显示登录二维码，需要手机扫码",
       screenshotId: "observation-bot",
     });
@@ -702,7 +713,9 @@ describe("bot connector supervision", () => {
       ),
     ).toBe(true);
 
-    const outbound = new BotOutboundService(ctx.app.db, service, outbox, { autoTick: false });
+    const outbound = new BotOutboundService(ctx.app.db, service, accounts, outbox, {
+      autoTick: false,
+    });
     await outbound.enqueue({
       accountId: account.id,
       platform: "qq",

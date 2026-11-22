@@ -71,7 +71,7 @@ async function startQqFixture(
       }
       if (
         request.method === "POST" &&
-        (path.startsWith("/v2/groups/") || path.startsWith("/v2/users/"))
+        (path?.startsWith("/v2/groups/") || path?.startsWith("/v2/users/"))
       ) {
         outboundRequests.push(request);
         response.setHeader("content-type", "application/json");

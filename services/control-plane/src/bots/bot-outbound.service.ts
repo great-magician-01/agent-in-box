@@ -16,6 +16,7 @@ import { OutboxRepository } from "../persistence/repositories/outbox-repository"
 import type { DatabaseSchema } from "../persistence/schema";
 import { nowIso } from "../persistence/time";
 import { KYSELY } from "../persistence/tokens";
+import { BotAccountService } from "./bot-account.service";
 import { BotConnectorService } from "./bot-connector.service";
 import { splitBotText } from "./bot-support";
 
@@ -54,6 +55,7 @@ export class BotOutboundService implements OnModuleInit, OnModuleDestroy {
   constructor(
     @Inject(KYSELY) private readonly db: Kysely<DatabaseSchema>,
     private readonly connectors: BotConnectorService,
+    private readonly accounts: BotAccountService,
     private readonly outbox: OutboxRepository,
     @Optional() @Inject(BOT_OUTBOUND_OPTIONS) options: BotOutboundOptions = {},
   ) {
@@ -189,6 +191,29 @@ export class BotOutboundService implements OnModuleInit, OnModuleDestroy {
     attempts: number;
     reply_to_message_id: string | null;
   }): Promise<boolean> {
+    // Re-authorize at delivery time: a queued message must not be sent after
+    // the account is disabled, unbound from this device, or this device is no
+    // longer the active executor.
+    const account = await this.accounts.get(row.account_id).catch(() => null);
+    const deviceId = await this.accounts.ensureDeviceId();
+    const activeDeviceId = await this.accounts.activeDeviceId();
+    if (
+      !account ||
+      !account.enabled ||
+      activeDeviceId !== deviceId ||
+      (account.deviceId && account.deviceId !== deviceId)
+    ) {
+      await this.db
+        .updateTable("bot_outbound")
+        .set({
+          state: "failed",
+          last_error: "机器人账号已停用或本机不再是活跃执行设备",
+          next_attempt_at: nowIso(),
+        })
+        .where("id", "=", row.id)
+        .execute();
+      return false;
+    }
     const connector = this.connectors.getConnected(row.account_id);
     if (!connector) {
       await this.reschedule(row, "机器人连接尚未就绪", false);

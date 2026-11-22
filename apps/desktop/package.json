@@ -12,7 +12,8 @@
     "dist": "electron-builder --config electron-builder.yml",
     "dist:win": "electron-builder --win nsis --config electron-builder.yml",
     "dist:win:portable": "electron-builder --win portable --config electron-builder.yml",
-    "dist:linux": "electron-builder --linux --config electron-builder.yml"
+    "dist:linux": "electron-builder --linux --config electron-builder.yml",
+    "typecheck:test": "tsc -p tsconfig.test.json --noEmit"
   },
   "devDependencies": {
     "@agent-in-box/protocol": "workspace:*",

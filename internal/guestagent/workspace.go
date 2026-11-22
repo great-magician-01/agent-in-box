@@ -3,6 +3,7 @@ package guestagent
 import (
 	"archive/tar"
 	"compress/gzip"
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -49,31 +50,12 @@ func (s *Server) archiveWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	hash := sha256.New()
 	multi := io.MultiWriter(temp, hash)
-	gzipWriter := gzip.NewWriter(multi)
-	tarWriter := tar.NewWriter(gzipWriter)
 	var fileCount int
 	var totalBytes int64
-	walkErr := filepath.WalkDir(workspace, func(current string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if current == workspace {
-			return nil
-		}
-		entryInfo, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		if entryInfo.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("workspace contains a symbolic link: %s", current)
-		}
-		if !entryInfo.Mode().IsRegular() && !entryInfo.IsDir() {
-			return fmt.Errorf("workspace contains an unsupported file type: %s", current)
-		}
-		relative, err := filepath.Rel(workspace, current)
-		if err != nil {
-			return err
-		}
+	bounded := &boundedWriter{writer: multi, remaining: s.maxWorkspaceArchiveBytes}
+	gzipWriter := gzip.NewWriter(bounded)
+	tarWriter := tar.NewWriter(gzipWriter)
+	walkErr := walkWorkspace(r.Context(), workspace, func(relative string, entryInfo os.FileInfo, file *os.File) error {
 		header, err := tar.FileInfoHeader(entryInfo, "")
 		if err != nil {
 			return err
@@ -86,10 +68,9 @@ func (s *Server) archiveWorkspace(w http.ResponseWriter, r *http.Request) {
 		if entryInfo.IsDir() && !strings.HasSuffix(header.Name, "/") {
 			header.Name += "/"
 		}
-		if entryInfo.Mode().IsRegular() {
-			if entryInfo.Size() < 0 || totalBytes+entryInfo.Size() > s.maxWorkspaceArchiveBytes {
-				return errors.New("workspace exceeds the archive size limit")
-			}
+		if entryInfo.Mode().IsRegular() &&
+			(entryInfo.Size() < 0 || entryInfo.Size() > s.maxWorkspaceArchiveBytes-totalBytes) {
+			return errors.New("workspace exceeds the archive size limit")
 		}
 		if err := tarWriter.WriteHeader(header); err != nil {
 			return err
@@ -97,20 +78,12 @@ func (s *Server) archiveWorkspace(w http.ResponseWriter, r *http.Request) {
 		if !entryInfo.Mode().IsRegular() {
 			return nil
 		}
-		file, err := os.Open(current)
-		if err != nil {
-			return err
-		}
-		written, copyErr := io.CopyN(tarWriter, file, entryInfo.Size())
-		closeErr := file.Close()
+		written, copyErr := copyNContext(r.Context(), tarWriter, file, entryInfo.Size())
 		if copyErr != nil {
 			return copyErr
 		}
-		if closeErr != nil {
-			return closeErr
-		}
 		if written != entryInfo.Size() {
-			return fmt.Errorf("workspace file changed while archiving: %s", current)
+			return fmt.Errorf("workspace file changed while archiving: %s", relative)
 		}
 		fileCount++
 		totalBytes += written
@@ -155,6 +128,142 @@ func (s *Server) archiveWorkspace(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, "workspace.tar.gz", stat.ModTime(), temp)
 }
 
+type boundedWriter struct {
+	writer    io.Writer
+	remaining int64
+}
+
+func (w *boundedWriter) Write(data []byte) (int, error) {
+	if int64(len(data)) > w.remaining {
+		return 0, errors.New("workspace archive exceeds the output size limit")
+	}
+	w.remaining -= int64(len(data))
+	return w.writer.Write(data)
+}
+
+// walkWorkspace opens every object relative to one os.Root. Even if a path is
+// replaced while walking, the opened object cannot escape the workspace root.
+func walkWorkspace(
+	ctx context.Context,
+	workspace string,
+	visit func(relative string, info os.FileInfo, file *os.File) error,
+) error {
+	root, err := os.OpenRoot(workspace)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	var walk func(string) error
+	walk = func(directory string) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		dir, err := root.Open(directory)
+		if err != nil {
+			return err
+		}
+		info, err := dir.Stat()
+		if err == nil && !info.IsDir() {
+			err = fmt.Errorf("workspace entry is no longer a directory: %s", directory)
+		}
+		if err != nil {
+			_ = dir.Close()
+			return err
+		}
+		entries, readErr := dir.ReadDir(-1)
+		closeErr := dir.Close()
+		if readErr != nil {
+			return readErr
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+		for _, entry := range entries {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			relative := path.Join(filepath.ToSlash(directory), entry.Name())
+			if entry.Type()&os.ModeSymlink != 0 {
+				return fmt.Errorf("workspace contains a symbolic link: %s", relative)
+			}
+			child, err := root.Open(relative)
+			if err != nil {
+				return err
+			}
+			childInfo, err := child.Stat()
+			if err != nil {
+				_ = child.Close()
+				return err
+			}
+			if !childInfo.IsDir() && !childInfo.Mode().IsRegular() {
+				_ = child.Close()
+				return fmt.Errorf("workspace contains an unsupported file type: %s", relative)
+			}
+			if childInfo.IsDir() {
+				_ = child.Close()
+				if err := visit(relative, childInfo, nil); err != nil {
+					return err
+				}
+				if err := walk(relative); err != nil {
+					return err
+				}
+				continue
+			}
+			visitErr := visit(relative, childInfo, child)
+			closeErr := child.Close()
+			if visitErr != nil {
+				return visitErr
+			}
+			if closeErr != nil {
+				return closeErr
+			}
+		}
+		return nil
+	}
+	return walk(".")
+}
+
+func copyNContext(
+	ctx context.Context,
+	destination io.Writer,
+	source io.Reader,
+	size int64,
+) (int64, error) {
+	if size < 0 {
+		return 0, errors.New("negative copy size")
+	}
+	buffer := make([]byte, 128*1024)
+	var written int64
+	for written < size {
+		if err := ctx.Err(); err != nil {
+			return written, err
+		}
+		remaining := size - written
+		chunk := int64(len(buffer))
+		if remaining < chunk {
+			chunk = remaining
+		}
+		count, readErr := source.Read(buffer[:chunk])
+		if count > 0 {
+			output, writeErr := destination.Write(buffer[:count])
+			written += int64(output)
+			if writeErr != nil {
+				return written, writeErr
+			}
+			if output != count {
+				return written, io.ErrShortWrite
+			}
+		}
+		if errors.Is(readErr, io.EOF) {
+			break
+		}
+		if readErr != nil {
+			return written, readErr
+		}
+	}
+	return written, nil
+}
+
 // restoreWorkspace verifies and atomically replaces a workspace directory.
 // Extraction happens in a sibling directory; symlinks and path escapes are rejected.
 func (s *Server) restoreWorkspace(w http.ResponseWriter, r *http.Request) {
@@ -182,8 +291,16 @@ func (s *Server) restoreWorkspace(w http.ResponseWriter, r *http.Request) {
 	defer os.Remove(uploadPath)
 	hash := sha256.New()
 	limited := http.MaxBytesReader(w, r.Body, s.maxWorkspaceArchiveBytes)
-	_, err = io.Copy(io.MultiWriter(upload, hash), limited)
+	uploaded, err := copyNContext(
+		r.Context(),
+		io.MultiWriter(upload, hash),
+		limited,
+		s.maxWorkspaceArchiveBytes+1,
+	)
 	closeErr := upload.Close()
+	if uploaded > s.maxWorkspaceArchiveBytes {
+		err = errors.New("workspace archive exceeds the size limit")
+	}
 	if err != nil {
 		writeActionError(w, http.StatusRequestEntityTooLarge, "", "archive_too_large", "workspace archive exceeds the size limit")
 		return
@@ -199,6 +316,11 @@ func (s *Server) restoreWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	parent := filepath.Dir(workspace)
+	owner, err := workspaceOwnerAt(workspace)
+	if err != nil {
+		writeActionError(w, http.StatusBadRequest, "", "invalid_workspace", "could not determine workspace owner")
+		return
+	}
 	if _, err := os.Stat(parent); err != nil {
 		writeActionError(w, http.StatusBadRequest, "", "invalid_workspace", "workspace parent directory does not exist")
 		return
@@ -214,9 +336,13 @@ func (s *Server) restoreWorkspace(w http.ResponseWriter, r *http.Request) {
 			_ = os.RemoveAll(staging)
 		}
 	}()
-	fileCount, extractedBytes, err := extractWorkspaceArchive(uploadPath, staging, s.maxWorkspaceArchiveBytes)
+	fileCount, extractedBytes, err := extractWorkspaceArchive(r.Context(), uploadPath, staging, s.maxWorkspaceArchiveBytes)
 	if err != nil {
 		writeActionError(w, http.StatusBadRequest, "", "workspace_restore_failed", err.Error())
+		return
+	}
+	if err := applyWorkspaceOwner(staging, owner); err != nil {
+		writeActionError(w, http.StatusInternalServerError, "", "workspace_restore_failed", "could not restore workspace ownership")
 		return
 	}
 
@@ -298,7 +424,7 @@ func (s *Server) resolveWorkspacePath(raw string) (string, error) {
 	return "", errors.New("workspace path is outside the configured workspace roots")
 }
 
-func extractWorkspaceArchive(archivePath, staging string, maxBytes int64) (int, int64, error) {
+func extractWorkspaceArchive(ctx context.Context, archivePath, staging string, maxBytes int64) (int, int64, error) {
 	file, err := os.Open(archivePath)
 	if err != nil {
 		return 0, 0, err
@@ -314,6 +440,9 @@ func extractWorkspaceArchive(archivePath, staging string, maxBytes int64) (int, 
 	var entryCount int
 	var totalBytes int64
 	for {
+		if err := ctx.Err(); err != nil {
+			return 0, 0, err
+		}
 		header, err := reader.Next()
 		if errors.Is(err, io.EOF) {
 			break
@@ -340,7 +469,7 @@ func extractWorkspaceArchive(archivePath, staging string, maxBytes int64) (int, 
 				return 0, 0, err
 			}
 		case tar.TypeReg, tar.TypeRegA:
-			if header.Size < 0 || totalBytes+header.Size > maxBytes {
+			if header.Size < 0 || header.Size > maxBytes-totalBytes {
 				return 0, 0, errors.New("restored workspace exceeds the size limit")
 			}
 			if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
@@ -350,7 +479,7 @@ func extractWorkspaceArchive(archivePath, staging string, maxBytes int64) (int, 
 			if err != nil {
 				return 0, 0, err
 			}
-			copied, copyErr := io.CopyN(out, reader, header.Size)
+			copied, copyErr := copyNContext(ctx, out, reader, header.Size)
 			closeErr := out.Close()
 			if copyErr != nil {
 				return 0, 0, copyErr

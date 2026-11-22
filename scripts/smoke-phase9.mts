@@ -23,6 +23,7 @@ import type {
   VmSnapshotRecord,
 } from "@agent-in-box/protocol";
 
+import { writeSmokeToken } from "./smoke-token.mjs";
 interface CheckResult {
   name: string;
   passed: boolean;
@@ -431,7 +432,7 @@ try {
   );
 
   await mkdir(path.join(temporary, "vms"), { recursive: true });
-  await writeFile(path.join(temporary, "supervisor-acl.token"), supervisorToken, { mode: 0o600 });
+  await writeSmokeToken(path.join(temporary, "supervisor-acl.token"), supervisorToken);
   const seed = AppDatabase.open({ filename: path.join(temporary, "agent-in-box.sqlite") });
   await seed.migrate();
   const catalog = new CatalogRepository(seed.db);
@@ -525,7 +526,7 @@ try {
     .execute();
   for (const vm of [sharedVm, autoVm, idleVm]) {
     await mkdir(vm.storageRoot, { recursive: true });
-    await writeFile(path.join(vm.storageRoot, "guest-agent.token"), guestToken, { mode: 0o600 });
+    await writeSmokeToken(path.join(vm.storageRoot, "guest-agent.token"), guestToken);
   }
   await seed.close();
 

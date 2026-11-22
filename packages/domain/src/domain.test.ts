@@ -82,6 +82,7 @@ describe("lease and priority helpers", () => {
       taskId: "task-1",
       acquiredAt: "2026-11-10T00:00:00.000Z",
       expiresAt: "2026-11-10T00:00:30.000Z",
+      preemptible: true,
     };
 
     expect(isLeaseActive(lease, new Date("2026-11-10T00:00:10.000Z"))).toBe(true);

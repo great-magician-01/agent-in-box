@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { Type } from "typebox";
 
 // Guest-side Pi extension for phase 7. Every call goes to the host Computer Use
@@ -79,17 +80,21 @@ function actionResultContent(result) {
 }
 
 function actionTool(name, label, description, parameters, buildAction) {
+  const stableActionId = (id) =>
+    `tool-${createHash("sha256")
+      .update(String(id ?? ""))
+      .digest("hex")}`;
   return {
     name,
     label,
     description,
     parameters,
-    async execute(_id, params, signal) {
+    async execute(id, params, signal) {
       const screenshotId = params.screenshotId;
       if (!screenshotId) throw new Error("screenshotId is required; call vm_screenshot first");
       const result = await broker(
         "/v1/actions",
-        { action: buildAction(params), screenshotId },
+        { action: buildAction(params), screenshotId, actionId: stableActionId(id) },
         signal,
       );
       return actionResultContent(result);
@@ -287,7 +292,7 @@ export default function registerComputerUse(pi) {
     name: "vm_task_complete",
     label: "Complete Task",
     description:
-      "Declare the task complete. The host independently verifies the evidence; a model statement alone never completes a task. Provide at least one evidence item: a file path (optionally SHA-256/size), a live process name, or a screenshotId.",
+      "Declare completion with independent evidence. Provide at least one file/process assertion; a screenshotId is auxiliary evidence and is not sufficient by itself.",
     parameters: Type.Object({
       summary: Type.String({ description: "What was accomplished" }),
       evidence: Type.Array(
@@ -302,10 +307,16 @@ export default function registerComputerUse(pi) {
         { minItems: 1, maxItems: 8 },
       ),
     }),
-    async execute(_id, params, signal) {
+    async execute(id, params, signal) {
       const result = await broker(
         "/v1/complete",
-        { summary: params.summary, evidence: params.evidence },
+        {
+          summary: params.summary,
+          evidence: params.evidence,
+          requestId: `tool-${createHash("sha256")
+            .update(String(id ?? ""))
+            .digest("hex")}`,
+        },
         signal,
       );
       return {

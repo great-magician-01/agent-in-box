@@ -6,6 +6,7 @@
  */
 
 import { Buffer } from "node:buffer";
+import type { LookupFunction } from "node:net";
 import WebSocket, { type RawData } from "ws";
 
 export type WsData = string | Uint8Array;
@@ -26,6 +27,13 @@ export interface WsSocket {
 export interface WsConnectOptions {
   headers?: Readonly<Record<string, string>>;
   signal?: AbortSignal;
+  /**
+   * DNS lookup used for the TCP connect. The control plane supplies a pinned
+   * lookup so the address it validated is the address actually dialled.
+   */
+  lookup?: LookupFunction;
+  /** TLS SNI name; keep the configured hostname when pinning an address. */
+  servername?: string;
 }
 
 export interface WsConnector {
@@ -63,7 +71,11 @@ export class DefaultWsConnector implements WsConnector {
   connect(url: string, options: WsConnectOptions = {}): Promise<WsSocket> {
     return new Promise<WsSocket>((resolve, reject) => {
       const headers = options.headers ? { ...options.headers } : undefined;
-      const socket = new WebSocket(url, headers ? { headers } : undefined);
+      const socket = new WebSocket(url, {
+        ...(headers ? { headers } : {}),
+        ...(options.lookup ? { lookup: options.lookup } : {}),
+        ...(options.servername ? { servername: options.servername } : {}),
+      });
       let settled = false;
 
       const cleanupOpening = () => {

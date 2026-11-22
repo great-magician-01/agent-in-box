@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { AppDatabase } from "../persistence/database";
+import { safeTestPort } from "../persistence/testing/safe-port";
 import type { DatabaseService } from "../persistence/database.service";
 import { PluginDevelopmentService } from "./plugin-development.service";
 import { PluginService } from "./plugin.service";
@@ -46,27 +47,50 @@ describe("PluginDevelopmentService", () => {
       version: "1.0.0",
     });
     expect(denied.status).toBe(403);
-    expect(denied.body.error.code).toBe("forbidden");
+    expect(denied.body.error?.code).toBe("forbidden");
   });
 
-  it("limits automatic enablement to the token's current project", async () => {
+  it("never lets a Guest token enable a plugin, even when asked to", async () => {
     const fixture = await fixtureWithBroker(true);
     const inspected = await post(fixture, "/v1/inspect", { files: packageFiles() });
     const packageSha256 = inspected.body.packageSha256 as string;
-    await post(fixture, "/v1/register", {
+    const registered = await post(fixture, "/v1/register", {
       files: packageFiles(),
       testReport: { status: "passed", packageSha256 },
     });
+    expect(registered.status).toBe(200);
+    expect(registered.body.autoEnableAllowed).toBe(false);
     const enabled = await post(fixture, "/v1/enable", {
       pluginId: "local.broker",
       version: "1.0.0",
     });
-    expect(enabled.status).toBe(200);
-    expect(enabled.body.enablement).toMatchObject({
-      scopeType: "project",
-      scopeId: "project-1",
-      enabled: true,
+    expect(enabled.status).toBe(403);
+    expect(enabled.body.error?.code).toBe("forbidden");
+    const rows = await fixture.app.db.selectFrom("plugin_enablements").selectAll().execute();
+    expect(rows).toHaveLength(0);
+  });
+
+  it("keeps only one active development token per worker", async () => {
+    const fixture = await fixtureWithBroker(false);
+    const first = await fixture.development.issue({
+      workerId: "worker-1",
+      projectId: "project-1",
+      autoEnable: false,
     });
+    const second = await fixture.development.issue({
+      workerId: "worker-1",
+      projectId: "project-1",
+      autoEnable: false,
+    });
+    const rows = await fixture.app.db
+      .selectFrom("plugin_development_tokens")
+      .selectAll()
+      .where("worker_id", "=", "worker-1")
+      .execute();
+    const active = rows.filter((row) => !row.revoked_at);
+    expect(active).toHaveLength(1);
+    expect(active[0]?.id).toBe(second.context.id);
+    expect(first.context.autoEnable).toBe(false);
   });
 
   it("rejects invalid and revoked bearer tokens", async () => {
@@ -99,7 +123,9 @@ async function fixtureWithBroker(autoEnable: boolean) {
     })
     .execute();
   const plugins = new PluginService(app.db, { layout: { root } } as unknown as DatabaseService);
-  const development = new PluginDevelopmentService(app.db, plugins, { port: 0 });
+  const development = new PluginDevelopmentService(app.db, plugins, {
+    port: await safeTestPort(),
+  });
   await development.onModuleInit();
   const issued = await development.issue({
     workerId: "worker-1",

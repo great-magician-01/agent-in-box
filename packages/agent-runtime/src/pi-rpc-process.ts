@@ -202,8 +202,7 @@ export class PiRpcProcess {
       }
       child.once("exit", () => resolve());
     });
-    const stillRunning = (): boolean =>
-      child.exitCode === null && child.signalCode === null;
+    const stillRunning = (): boolean => child.exitCode === null && child.signalCode === null;
     child.stdin?.end();
     await Promise.race([exited, delay(3000)]);
     if (stillRunning()) {
@@ -213,6 +212,9 @@ export class PiRpcProcess {
     if (stillRunning()) {
       this.signalTree("SIGKILL");
       await Promise.race([exited, delay(2000)]);
+    }
+    if (stillRunning()) {
+      throw new Error("Pi RPC process did not exit after SIGKILL");
     }
     this.child = null;
   }

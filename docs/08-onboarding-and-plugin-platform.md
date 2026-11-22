@@ -4,6 +4,9 @@
 > 更新日期：2026-11-14  
 > 适用范围：Electron、本地 Web、Control Plane、VM Supervisor、Guest Runtime、Router、Worker 与 Pi 扩展  
 > 相关文档：[产品方案](01-product-solution.md)、[技术设计](02-technical-design.md)、[开发计划](03-development-plan.md)、[用户指南](04-user-guide.md)、[存储指南](06-storage-guide.md)、[隐私说明](07-privacy.md)
+> **本轮变更**：Guest 自报的插件测试结果只作诊断，不能授权注册或启用；
+> Development Broker 的 `/v1/enable` 永远拒绝，插件只能由本机用户在桌面启用；
+> 每个 Worker 同时只保留一个活跃开发 Token。
 
 ## 1. 背景
 

@@ -2,18 +2,27 @@ import { randomBytes } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import type { Server as HttpServer } from "node:http";
 import net from "node:net";
-import { Injectable, type OnModuleDestroy } from "@nestjs/common";
+import path from "node:path";
 import type { Duplex } from "node:stream";
+import type { TLSSocket } from "node:tls";
+import { Injectable, type OnModuleDestroy } from "@nestjs/common";
 import { WebSocket, WebSocketServer } from "ws";
 import type { VmConsoleSession } from "@agent-in-box/protocol";
 import { LeaseService } from "../persistence/services/lease-service";
 import { PersistenceError } from "../persistence/errors";
 import { VmService } from "./vm.service";
-import { VncClientFramer, VncClientNegotiation, VncServerHandshake } from "./vnc-protocol";
+import {
+  negotiateVncUpstream,
+  VncClientFramer,
+  VncDownstreamHandshake,
+  type VncTlsOptions,
+} from "./vnc-protocol";
 
 const CONSOLE_TICKET_TTL_MS = 60_000;
 const CONSOLE_LEASE_TTL_MS = 15_000;
+const CONSOLE_UPSTREAM_TIMEOUT_MS = 15_000;
 const LOOPBACK_ADDRESSES = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
+const RFB_VERSION = "RFB 003.008\n";
 
 interface ConsoleTicket {
   vmId: string;
@@ -21,6 +30,13 @@ interface ConsoleTicket {
   consoleUrl: string;
   viewOnly: boolean;
   expiresAt: number;
+}
+
+interface ConsoleTarget {
+  host: string;
+  port: number;
+  requireTls: boolean;
+  tls?: VncTlsOptions;
 }
 
 @Injectable()
@@ -149,28 +165,53 @@ export class ConsoleService implements OnModuleDestroy {
 
   private connect(websocket: WebSocket, ticket: ConsoleTicket): void {
     this.sockets.add(websocket);
-    const target = new URL(ticket.consoleUrl);
+    let target: ConsoleTarget;
+    try {
+      target = parseConsoleTarget(ticket.consoleUrl);
+    } catch {
+      websocket.close(1011, "Unsupported console endpoint");
+      this.sockets.delete(websocket);
+      return;
+    }
+
     const upstream = net.connect({
-      host: target.hostname,
-      port: Number(target.port),
+      host: target.host,
+      port: target.port,
       noDelay: true,
     });
-    const handshake = new VncServerHandshake();
-    const negotiation = new VncClientNegotiation();
+    let active: net.Socket | TLSSocket = upstream;
+    const handshake = new VncDownstreamHandshake();
     const framer = new VncClientFramer();
-    let pendingClient: Buffer = Buffer.alloc(0);
     let queue = Promise.resolve();
     let queuedMessages = 0;
     let closed = false;
+    let clientReady = false;
+    let upstreamReady = false;
+    let pendingUpstream = Buffer.alloc(0);
 
+    const destroyAll = (): void => {
+      try {
+        active.destroy();
+      } catch {
+        // already closed
+      }
+      if (active !== upstream) {
+        try {
+          upstream.destroy();
+        } catch {
+          // already closed
+        }
+      }
+    };
     const close = (code = 1011, reason = "Console disconnected"): void => {
       if (closed) return;
       closed = true;
-      upstream.destroy();
+      destroyAll();
       websocket.close(code, reason.slice(0, 100));
       const forceClose = setTimeout(() => websocket.terminate(), 250);
       forceClose.unref();
     };
+
     const forwardFrames = async (chunk: Buffer): Promise<void> => {
       for (const frame of framer.feed(chunk)) {
         if (frame.requiresLease) {
@@ -183,54 +224,75 @@ export class ConsoleService implements OnModuleDestroy {
             return;
           }
           await this.leases.executeWithLease(ticket.vmId, ticket.leaseId, "human", async () => {
-            upstream.write(frame.data);
+            active.write(frame.data);
           });
         } else {
-          upstream.write(frame.data);
+          active.write(frame.data);
         }
       }
-    };
-    const flushPending = async (): Promise<void> => {
-      if (!handshake.done || pendingClient.length === 0) return;
-      const pending = pendingClient;
-      pendingClient = Buffer.alloc(0);
-      await forwardFrames(pending);
-    };
-    const processClient = async (chunk: Buffer): Promise<void> => {
-      if (!handshake.done) {
-        const result = negotiation.feed(Buffer.concat([pendingClient, chunk]));
-        for (const message of result.negotiation) upstream.write(message);
-        pendingClient = result.pending;
-        if (!handshake.done) return;
-        await flushPending();
-        return;
-      }
-      await forwardFrames(chunk);
     };
 
-    upstream.setTimeout(15_000, () => close(1011, "VNC connection timed out"));
-    upstream.on("connect", () => upstream.setTimeout(0));
-    upstream.on("data", (data) => {
-      const chunk = Buffer.isBuffer(data) ? data : Buffer.from(data);
-      try {
-        const wasDone = handshake.done;
-        handshake.feed(chunk);
+    const flushUpstream = (): void => {
+      if (pendingUpstream.length > 0) {
+        const chunk = pendingUpstream;
+        pendingUpstream = Buffer.alloc(0);
         websocket.send(chunk, { binary: true });
-        if (!wasDone && handshake.done) {
-          queue = queue.then(async () => {
-            try {
-              await flushPending();
-            } catch {
-              close(1008, "Execution Lease lost or invalid RFB input");
-            }
-          });
-        }
-      } catch (error) {
-        close(1002, error instanceof Error ? error.message : "Invalid RFB response");
       }
+    };
+
+    // The browser always sees a plain RFB 3.8 no-auth server. The real
+    // (TLS/VeNCrypt) negotiation happens between this process and QEMU, so
+    // security bytes never reach the renderer.
+    websocket.send(RFB_VERSION, { binary: true });
+
+    const connectTimer = setTimeout(() => {
+      close(1011, "VNC connection timed out");
+    }, CONSOLE_UPSTREAM_TIMEOUT_MS);
+    connectTimer.unref();
+
+    upstream.once("error", () => {
+      clearTimeout(connectTimer);
+      close(1011, "VNC server unavailable");
     });
-    upstream.on("error", () => close(1011, "VNC server unavailable"));
-    upstream.on("close", () => close(1000, "VNC server closed"));
+    upstream.once("connect", () => {
+      clearTimeout(connectTimer);
+      void (async () => {
+        try {
+          const negotiated = await negotiateVncUpstream(
+            upstream,
+            { requireTls: target.requireTls, ...(target.tls ? { tls: target.tls } : {}) },
+            CONSOLE_UPSTREAM_TIMEOUT_MS,
+          );
+          active = negotiated.socket;
+        } catch {
+          close(1011, "VNC authentication failed");
+          return;
+        }
+        if (closed) {
+          destroyAll();
+          return;
+        }
+        upstreamReady = true;
+        active.setTimeout(CONSOLE_UPSTREAM_TIMEOUT_MS, () =>
+          close(1011, "VNC connection timed out"),
+        );
+        active.on("data", (data) => {
+          const chunk = Buffer.isBuffer(data) ? data : Buffer.from(data);
+          if (!clientReady) {
+            pendingUpstream = Buffer.concat([pendingUpstream, chunk]);
+            return;
+          }
+          try {
+            websocket.send(chunk, { binary: true });
+          } catch {
+            close();
+          }
+        });
+        active.on("error", () => close(1011, "VNC server unavailable"));
+        active.on("close", () => close(1000, "VNC server closed"));
+        flushUpstream();
+      })();
+    });
 
     websocket.on("message", (raw, isBinary) => {
       if (!isBinary || closed) {
@@ -247,15 +309,30 @@ export class ConsoleService implements OnModuleDestroy {
         if (closed) return;
         const chunk = raw instanceof Buffer ? raw : Buffer.from(raw as ArrayBuffer);
         try {
-          await processClient(chunk);
+          if (!clientReady) {
+            const result = handshake.feed(chunk);
+            if (result.reply) websocket.send(result.reply, { binary: true });
+            if (!result.done) return;
+            clientReady = true;
+            // ServerInit may already be waiting; send it before client frames.
+            flushUpstream();
+            if (result.pending.length > 0) await forwardFrames(result.pending);
+            return;
+          }
+          if (!upstreamReady) {
+            close(1011, "VNC server is not ready");
+            return;
+          }
+          await forwardFrames(chunk);
         } catch {
           close(1008, "Execution Lease lost or invalid RFB input");
         }
       });
     });
     websocket.on("close", () => {
+      if (closed) return;
       closed = true;
-      upstream.destroy();
+      destroyAll();
       this.sockets.delete(websocket);
       if (ticket.leaseId) {
         // Do not make the AI wait for the 15s TTL after the human closes the
@@ -274,14 +351,48 @@ export class ConsoleService implements OnModuleDestroy {
   }
 }
 
+function parseConsoleTarget(value: string): ConsoleTarget {
+  const url = new URL(value);
+  const loopback = url.hostname === "127.0.0.1" || url.hostname === "127.0.0.2";
+  if (!loopback || !validPort(url.port)) {
+    throw new Error("console endpoint must be loopback");
+  }
+  const port = Number(url.port);
+  if (url.protocol === "vnc:") {
+    // Legacy metadata created before secure transports existed. It is still
+    // restricted to loopback but carries no TLS negotiation.
+    return { host: url.hostname, port, requireTls: false };
+  }
+  if (url.protocol !== "vnc+tls:") {
+    throw new Error(`unsupported console protocol ${url.protocol}`);
+  }
+  const fingerprint = (url.searchParams.get("fingerprint") ?? "").toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(fingerprint)) {
+    throw new Error("console fingerprint is malformed");
+  }
+  const ca = url.searchParams.get("ca") ?? "";
+  const cert = url.searchParams.get("cert") ?? "";
+  const key = url.searchParams.get("key") ?? "";
+  for (const candidate of [ca, cert, key]) {
+    if (!candidate || candidate.includes("\0") || !path.isAbsolute(candidate)) {
+      throw new Error("console credentials must be absolute paths");
+    }
+  }
+  if (path.dirname(ca) !== path.dirname(cert) || path.dirname(ca) !== path.dirname(key)) {
+    throw new Error("console credentials must share one directory");
+  }
+  return {
+    host: url.hostname,
+    port,
+    requireTls: true,
+    tls: { ca, cert, key, fingerprint },
+  };
+}
+
 function validConsoleUrl(value: string): boolean {
   try {
-    const url = new URL(value);
-    return (
-      url.protocol === "vnc:" &&
-      (url.hostname === "127.0.0.1" || url.hostname === "127.0.0.2") &&
-      validPort(url.port)
-    );
+    parseConsoleTarget(value);
+    return true;
   } catch {
     return false;
   }

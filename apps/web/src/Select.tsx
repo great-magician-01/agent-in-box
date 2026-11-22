@@ -256,11 +256,17 @@ export function Select({
     }
     if (event.key === "Escape") {
       event.preventDefault();
+      // The menu is portaled outside a modal dialog. Stop propagation so
+      // Escape closes only the listbox, not the surrounding modal.
+      event.stopPropagation();
       closeMenu(true);
       return;
     }
     if (event.key === "Tab") {
-      closeMenu();
+      // Focus must return to the trigger before the modal focus trap runs;
+      // otherwise the portaled menu leaves focus outside the dialog.
+      event.preventDefault();
+      closeMenu(true);
       return;
     }
     if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {

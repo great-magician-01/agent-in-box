@@ -60,6 +60,7 @@ export interface VmLeaseRecord {
   taskId: string | null;
   acquiredAt: string;
   expiresAt: string;
+  preemptible: boolean;
 }
 
 export function isLeaseActive(lease: VmLeaseRecord, now: Date): boolean {
@@ -147,19 +148,18 @@ export function normalizeGuestWorkspacePath(value: string): string {
     return normalized.replace(/\/+$/, "") || "/";
   }
   const drive = normalized.slice(0, 2).toUpperCase();
-  const relative = normalized
-    .slice(2)
-    .replace(/\\/g, "/")
-    .replace(/^\/+/, "")
-    .replace(/\/+$/, "");
-  const segments = relative.split("/").filter(Boolean).map((segment) => {
-    // Win32 treats "work." and "work " as "work"; reject/normalize aliases.
-    const trimmed = segment.replace(/[ .]+$/g, "");
-    if (!trimmed) {
-      throw new Error("Guest workspace path contains an invalid segment");
-    }
-    return trimmed;
-  });
+  const relative = normalized.slice(2).replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/+$/, "");
+  const segments = relative
+    .split("/")
+    .filter(Boolean)
+    .map((segment) => {
+      // Win32 treats "work." and "work " as "work"; reject/normalize aliases.
+      const trimmed = segment.replace(/[ .]+$/g, "");
+      if (!trimmed) {
+        throw new Error("Guest workspace path contains an invalid segment");
+      }
+      return trimmed;
+    });
   return `${drive}\\${segments.join("\\")}`;
 }
 

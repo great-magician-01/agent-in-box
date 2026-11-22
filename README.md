@@ -26,6 +26,19 @@
 
 ---
 
+## 🧭 安全加固后的升级须知
+
+本轮将 Worker RPC 协议提升到 `0.2.0`，并收紧了完成证据、插件启用、VM 管理传输和发布签名：
+
+- 升级 Desktop 后需要重新打包并部署 Guest Runtime；旧 Guest 会在握手时被明确拒绝。
+- 旧 VM 在下次启动时自动迁移到安全传输（Unix Socket / QMP TLS、VNC TLS + VeNCrypt）；
+  正在运行的旧 VM 需停止并重新启动一次。
+- 单张截图不再能单独证明任务完成；AI 插件测试报告只作诊断，插件必须由本机用户启用。
+- 发布必须提供受保护的 Ed25519 公钥与签名 Secret；缺失时打包/发布失败关闭。
+
+完整的协议、迁移、行为变更与外部验收矩阵见
+[发行、升级与验收说明](docs/09-release-acceptance-and-upgrade.md)。
+
 ## 🤔 为什么是「Agent-in-Box」？
 
 聊天机器人可以告诉你「怎么做」，但很多事得有人真的坐到电脑前。Agent-in-Box 想把这个「电脑前」变成一台可停止、可恢复、可被看见的虚拟机。
@@ -33,7 +46,7 @@
 - 🖥️ **Agent 要真的动手**：Worker 通过 Computer Use 观察屏幕、点击、输入、滚动和拖拽；任务不是一段回答，而是一串可回放的桌面动作和证据。
 - 📦 **盒子是隔离边界**：Worker 和文件工具天然活在 Guest 里；Router 与控制平面没有宿主 Shell，也不向模型开放任意 Hypervisor 指令。
 - 🔐 **长期秘密留在盒子外**：Provider Key 只经 Electron `safeStorage` 解密；Guest 只拿绑定 Worker / VM / 任务的短期 Broker 令牌；机器人 Secret 不进入 VM。
-- 🧾 **完成要有证据**：模型说「做完了」不算完成；Guest 文件 / 进程证据或重新截图通过独立校验，任务才会置为完成。
+- 🧾 **完成要有证据**：模型说「做完了」不算完成；需要 Guest 文件 / 进程校验或人工验证，单张截图只作辅助证据，不能单独证明完成。
 - 🕹️ **人始终能接管**：AI 与人工共用 Per-VM Execution Lease；只读观察不抢锁，人工接管显式抢占，旧 AI 动作会被拒绝。
 - 🏠 **本地优先**：数据库、镜像、VM、产物和备份全在数据根目录；没有产品方服务器，远程 Relay 不是本地核心依赖。
 
@@ -46,7 +59,7 @@
 | 📦 **虚拟机**       | Ubuntu 24.04 一键创建、Windows Golden Image、QEMU / WHPX 生命周期、快照、项目目录备份、共享 VM 影响确认、资源预算与空闲休眠                                            |
 | 🤖 **Agent**        | 宿主 Router + Guest Worker、Pi 运行时、原生 / 摘要恢复、自动归档、Active Roster、可搜索 Archive Registry、按项目开启 MCP / 默认 Subagent                               |
 | 🖱️ **Computer Use** | 截图、点击 / 双击、移动、输入、按键、滚动、拖拽、等待、完成；每一步动作与前后截图入库，受步数 / 时长 / 无进展保护；遇到扫码 / CAPTCHA / 手机验证码会暂停并通知人工处理 |
-| 🔐 **安全**         | 只监听回环、本机访问密钥、HttpOnly 会话、CSRF / Origin 校验、Per-VM Lease、人工审批、Guest 证据校验、日志与诊断脱敏                                                    |
+| 🔐 **安全**         | 只监听回环、本机访问密钥、HttpOnly 会话、CSRF / Origin 校验、Per-VM Lease、人工审批、Guest 证据校验、受保护的管理停止、日志与诊断脱敏                                 |
 | 🧠 **模型**         | 多 Provider 配置、Worker 默认模型与 Router 模型、OpenAI-compatible / Anthropic Messages 流式转发、用量记录、短期令牌                                                   |
 | 💬 **机器人**       | 飞书官方 SDK 长连接、QQ Bot API v2、身份 / 群白名单、绑定码、任务 / 审批通知、敏感操作二次确认                                                                         |
 | 🚀 **运维**         | 首次启动向导、自定义数据根、存储迁移与备份、诊断报告、托盘 / 开机启动、更新检查 / 校验 / 回滚、Windows NSIS 与 Linux AppImage 打包                                     |

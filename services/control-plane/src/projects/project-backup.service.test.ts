@@ -102,6 +102,8 @@ describe("ProjectBackupService", () => {
         latest_summary: "done",
         error_code: null,
         created_at: now,
+        updated_at: now,
+        attempt_count: 0,
         started_at: now,
         completed_at: now,
       })
@@ -221,6 +223,8 @@ describe("ProjectBackupService", () => {
         status: "running",
         current_task_id: null,
         capability_set: "[]",
+        development_mode: 0,
+        development_auto_enable: 0,
         created_at: nowIso(),
         last_active_at: nowIso(),
         archived_at: null,

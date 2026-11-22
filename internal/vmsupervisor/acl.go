@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"agent-in-box/internal/securefile"
 )
 
 const (
@@ -76,13 +78,9 @@ func ResolveACLToken(options TokenOptions) (TokenResult, error) {
 		if !info.Mode().IsRegular() {
 			return TokenResult{}, fmt.Errorf("acl token file %q is not a regular file", path)
 		}
-		data, err := os.ReadFile(path)
+		token, err := securefile.ReadToken(path)
 		if err != nil {
 			return TokenResult{}, fmt.Errorf("read acl token file %q: %w", path, err)
-		}
-		token := strings.TrimSpace(string(data))
-		if token == "" {
-			return TokenResult{}, fmt.Errorf("acl token file %q is empty", path)
 		}
 		return TokenResult{Token: token, Path: path}, nil
 	case errors.Is(err, os.ErrNotExist):
@@ -110,34 +108,8 @@ func generateACLToken(path string) (string, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("create acl token directory %q: %w", dir, err)
 	}
-	temporary, err := os.CreateTemp(dir, ".supervisor-acl-*.tmp")
-	if err != nil {
-		return "", fmt.Errorf("create acl token temporary file: %w", err)
-	}
-	temporaryPath := temporary.Name()
-	cleanup := func() {
-		_ = temporary.Close()
-		_ = os.Remove(temporaryPath)
-	}
-	if err := temporary.Chmod(0o600); err != nil {
-		cleanup()
-		return "", fmt.Errorf("set acl token permissions: %w", err)
-	}
-	if _, err := temporary.WriteString(token + "\n"); err != nil {
-		cleanup()
-		return "", fmt.Errorf("write acl token: %w", err)
-	}
-	if err := temporary.Sync(); err != nil {
-		cleanup()
-		return "", fmt.Errorf("sync acl token: %w", err)
-	}
-	if err := temporary.Close(); err != nil {
-		_ = os.Remove(temporaryPath)
-		return "", fmt.Errorf("close acl token: %w", err)
-	}
-	if err := os.Rename(temporaryPath, path); err != nil {
-		_ = os.Remove(temporaryPath)
-		return "", fmt.Errorf("install acl token file %q: %w", path, err)
+	if err := securefile.InstallTokenAtomically(path, token); err != nil {
+		return "", fmt.Errorf("install acl token: %w", err)
 	}
 	return token, nil
 }

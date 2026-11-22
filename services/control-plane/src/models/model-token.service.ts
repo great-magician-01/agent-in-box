@@ -23,6 +23,7 @@ export interface ModelTokenContext {
   id: string;
   workerId: string;
   taskId: string | null;
+  executionAttempt: number | null;
   vmId: string;
   providerId: string;
   model: string;
@@ -84,6 +85,7 @@ export class ModelTokenService implements OnModuleInit {
     providerId: string;
     model: string;
     taskId?: string | null;
+    executionAttempt?: number | null;
   }): Promise<{ token: string; context: ModelTokenContext }> {
     const token = randomBytes(32).toString("base64url");
     const id = randomUUID();
@@ -96,6 +98,7 @@ export class ModelTokenService implements OnModuleInit {
         token_hash: hash(token),
         worker_id: input.workerId,
         task_id: input.taskId ?? null,
+        execution_attempt: input.executionAttempt ?? null,
         vm_id: input.vmId,
         provider_id: input.providerId,
         model: input.model,
@@ -114,6 +117,7 @@ export class ModelTokenService implements OnModuleInit {
         id,
         workerId: input.workerId,
         taskId: input.taskId ?? null,
+        executionAttempt: input.executionAttempt ?? null,
         vmId: input.vmId,
         providerId: input.providerId,
         model: input.model,
@@ -158,11 +162,29 @@ export class ModelTokenService implements OnModuleInit {
     return context({ ...row, expires_at: expiresAt });
   }
 
-  async bindTask(id: string, taskId: string | null): Promise<void> {
+  async bindTask(
+    id: string,
+    taskId: string | null,
+    executionAttempt: number | null = null,
+  ): Promise<void> {
     await this.db
       .updateTable("model_tokens")
-      .set({ task_id: taskId })
+      .set({
+        task_id: taskId,
+        execution_attempt: taskId === null ? null : executionAttempt,
+      })
       .where("id", "=", id)
+      .where("revoked_at", "is", null)
+      .execute();
+  }
+
+  async clearTask(id: string, taskId: string, executionAttempt: number): Promise<void> {
+    await this.db
+      .updateTable("model_tokens")
+      .set({ task_id: null, execution_attempt: null })
+      .where("id", "=", id)
+      .where("task_id", "=", taskId)
+      .where("execution_attempt", "=", executionAttempt)
       .where("revoked_at", "is", null)
       .execute();
   }
@@ -378,6 +400,7 @@ function context(row: Selectable<ModelTokensTable>): ModelTokenContext {
     id: row.id,
     workerId: row.worker_id,
     taskId: row.task_id,
+    executionAttempt: row.execution_attempt,
     vmId: row.vm_id,
     providerId: row.provider_id,
     model: row.model,

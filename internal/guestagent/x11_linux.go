@@ -99,6 +99,9 @@ func (d *x11Desktop) Screenshot(ctx context.Context) (image.Image, error) {
 	}
 	width := int(d.screen.WidthInPixels)
 	height := int(d.screen.HeightInPixels)
+	if !validScreenshotSize(width, height) {
+		return nil, fmt.Errorf("X11 screenshot %dx%d exceeds the pixel budget", width, height)
+	}
 	reply, err := xproto.GetImage(
 		d.conn,
 		xproto.ImageFormatZPixmap,
@@ -151,6 +154,9 @@ func (d *x11Desktop) Screenshot(ctx context.Context) (image.Image, error) {
 func (d *x11Desktop) Input(ctx context.Context, request InputRequest) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := d.refreshGeometry(); err != nil {
 		return err
 	}
@@ -184,7 +190,9 @@ func (d *x11Desktop) Input(ctx context.Context, request InputRequest) error {
 			d.button(button, false)
 			d.flush()
 			if index+1 < count {
-				time.Sleep(90 * time.Millisecond)
+				if err := sleepContext(ctx, 90*time.Millisecond); err != nil {
+					return err
+				}
 			}
 		}
 	case "scroll":
@@ -207,7 +215,7 @@ func (d *x11Desktop) Input(ctx context.Context, request InputRequest) error {
 		if request.Text == "" || len(request.Text) > 20000 {
 			return fmt.Errorf("type_text requires 1..20000 characters")
 		}
-		if err := d.keyboard.typeText(request.Text); err != nil {
+		if err := d.keyboard.typeText(ctx, request.Text); err != nil {
 			return err
 		}
 	case "drag":
@@ -233,6 +241,9 @@ func (d *x11Desktop) Input(ctx context.Context, request InputRequest) error {
 		}
 	default:
 		return fmt.Errorf("unsupported input action %q", request.Type)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	d.flush()
 	return nil
@@ -454,7 +465,7 @@ func (k *x11Keyboard) release(binding x11Binding) {
 	}
 }
 
-func (k *x11Keyboard) typeText(text string) error {
+func (k *x11Keyboard) typeText(ctx context.Context, text string) error {
 	temporaryUsed := false
 	defer func() {
 		if temporaryUsed {
@@ -463,11 +474,14 @@ func (k *x11Keyboard) typeText(text string) error {
 			// non-ASCII characters appear as '?'. Keep the temporary mapping until
 			// the whole text has been delivered and the server has caught up.
 			k.conn.Sync()
-			time.Sleep(100 * time.Millisecond)
+			_ = sleepContext(ctx, 100*time.Millisecond)
 			k.restoreSpare()
 		}
 	}()
 	for _, r := range text {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if r == '\n' {
 			if err := k.chord([]string{"enter"}); err != nil {
 				return err
@@ -490,10 +504,23 @@ func (k *x11Keyboard) typeText(text string) error {
 			// The spare keycode is reused for the next unmapped rune. Give X
 			// clients a processing window before changing its keysym again,
 			// otherwise consecutive CJK characters collapse to the last one.
-			time.Sleep(75 * time.Millisecond)
+			if err := sleepContext(ctx, 75*time.Millisecond); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
+}
+
+func sleepContext(ctx context.Context, duration time.Duration) error {
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func (k *x11Keyboard) chord(keys []string) error {

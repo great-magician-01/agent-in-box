@@ -1,43 +1,56 @@
 package vmprovider
 
-import "sync"
+import (
+	"context"
+	"sync"
+)
 
 // keyedMutex serializes operations for the same VM while allowing different
-// VMs to proceed concurrently. Entries are released once no waiter remains, so
-// a long-lived supervisor does not accumulate locks for deleted VMs.
+// VMs to proceed concurrently. Waiting is cancellable so a stalled lifecycle
+// operation cannot hold up shutdown or a newer request forever.
 type keyedMutex struct {
 	mu      sync.Mutex
 	entries map[string]*keyedMutexEntry
 }
 
 type keyedMutexEntry struct {
-	mu   sync.Mutex
+	sem  chan struct{}
 	refs int
 }
 
-// Lock blocks until the key is exclusively held and returns the matching
-// unlock function. Callers must call the returned function exactly once.
-func (k *keyedMutex) Lock(key string) func() {
+// Lock waits for exclusive ownership of key or for ctx to be cancelled. The
+// returned function must be called exactly once after a successful lock.
+func (k *keyedMutex) Lock(ctx context.Context, key string) (func(), error) {
 	k.mu.Lock()
 	if k.entries == nil {
 		k.entries = make(map[string]*keyedMutexEntry)
 	}
 	entry := k.entries[key]
 	if entry == nil {
-		entry = &keyedMutexEntry{}
+		entry = &keyedMutexEntry{sem: make(chan struct{}, 1)}
 		k.entries[key] = entry
 	}
 	entry.refs++
 	k.mu.Unlock()
 
-	entry.mu.Lock()
-	return func() {
-		entry.mu.Unlock()
+	select {
+	case entry.sem <- struct{}{}:
+		return func() {
+			<-entry.sem
+			k.mu.Lock()
+			entry.refs--
+			if entry.refs == 0 {
+				delete(k.entries, key)
+			}
+			k.mu.Unlock()
+		}, nil
+	case <-ctx.Done():
 		k.mu.Lock()
 		entry.refs--
 		if entry.refs == 0 {
 			delete(k.entries, key)
 		}
 		k.mu.Unlock()
+		return nil, ctx.Err()
 	}
 }

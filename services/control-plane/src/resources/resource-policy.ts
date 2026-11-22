@@ -83,7 +83,7 @@ export function buildResourceReport(input: BuildResourceReportInput): ResourceRe
   }));
 
   const allocatedMemoryBytes = input.vms
-    .filter((vm) => vm.power_state === "running")
+    .filter((vm) => vm.power_state === "running" || vm.power_state === "starting")
     .reduce((total, vm) => total + vm.memory_bytes, 0);
   const remainingBudgetBytes = Math.max(0, budgetBytes - allocatedMemoryBytes);
   const blockedAutoStarts: ResourceBlockedStart[] = [];
@@ -167,7 +167,7 @@ export function autoStartDecision(input: {
     };
   }
   const hostAvailable = input.freeMemoryBytes - input.hostReserveBytes;
-  if (input.freeMemoryBytes > 0 && input.requiredBytes > hostAvailable) {
+  if (input.requiredBytes > hostAvailable) {
     return {
       canStart: false,
       reason: `宿主可用内存低于 Host Reserve 要求：可用 ${formatBytes(

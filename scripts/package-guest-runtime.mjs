@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -8,8 +9,11 @@ import { fileURLToPath } from "node:url";
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const outputDirectory = path.join(repository, "release", "guest-runtime", "linux-amd64");
 const version = JSON.parse(await readFile(path.join(repository, "package.json"), "utf8")).version;
-const nodeVersion = "24.18.0";
-const piVersion = "1.5.1";
+const runtimeLock = JSON.parse(
+  readFileSync(path.join(repository, "scripts", "runtime-dependencies.json"), "utf8"),
+);
+const nodeVersion = runtimeLock.node.version;
+const piVersion = runtimeLock.pi.version;
 const nodeArchiveName = `node-v${nodeVersion}-linux-x64.tar.xz`;
 const piPackageName = `earendil-works-pi-coding-agent-${piVersion}.tgz`;
 
@@ -22,7 +26,15 @@ try {
   const guestAgentSource = path.join(staging, "guest-agent-linux-amd64");
   await run(
     "go",
-    ["build", "-trimpath", "-o", guestAgentSource, "./services/guest-agent/cmd/guest-agent"],
+    [
+      "build",
+      "-trimpath",
+      "-ldflags",
+      `-s -w -X main.version=${version}`,
+      "-o",
+      guestAgentSource,
+      "./services/guest-agent/cmd/guest-agent",
+    ],
     {
       cwd: repository,
       env: { ...process.env, GOOS: "linux", GOARCH: "amd64", CGO_ENABLED: "0" },
@@ -43,6 +55,7 @@ try {
 
   const cachedNode = path.join(outputDirectory, nodeArchiveName);
   if (await existsFile(cachedNode)) {
+    await assertSha256(cachedNode, runtimeLock.node.sha256);
     await addArtifact("node-linux-x64.tar.xz", nodeArchiveName, cachedNode);
   } else {
     const nodeDownload = path.join(staging, nodeArchiveName);
@@ -54,12 +67,18 @@ try {
       `https://nodejs.org/dist/v${nodeVersion}/SHASUMS256.txt`,
     );
     const expectedNodeHash = parseSha256Sums(sums, nodeArchiveName);
+    if (expectedNodeHash !== runtimeLock.node.sha256) {
+      throw new Error(
+        `node SHASUMS entry ${expectedNodeHash} does not match runtime-dependencies.json`,
+      );
+    }
     await assertSha256(nodeDownload, expectedNodeHash);
     await addArtifact("node-linux-x64.tar.xz", nodeArchiveName, nodeDownload);
   }
 
   const cachedPi = path.join(outputDirectory, "pi-coding-agent.tgz");
   if (await existsFile(cachedPi)) {
+    await assertPiIntegrity(cachedPi);
     await addArtifact("pi-coding-agent.tgz", piPackageName, cachedPi);
   } else {
     const npm = process.platform === "win32" ? "npm.cmd" : "npm";
@@ -73,6 +92,7 @@ try {
       },
     );
     const packedPi = path.join(staging, `earendil-works-pi-coding-agent-${piVersion}.tgz`);
+    await assertPiIntegrity(packedPi);
     await addArtifact("pi-coding-agent.tgz", piPackageName, packedPi);
   }
 
@@ -182,6 +202,14 @@ function parseSha256Sums(text, fileName) {
     if (name === fileName && hash && /^[a-f0-9]{64}$/i.test(hash)) return hash.toLowerCase();
   }
   throw new Error(`SHA256SUMS does not contain ${fileName}`);
+}
+
+async function assertPiIntegrity(file) {
+  const bytes = await readFile(file);
+  const actual = `sha512-${createHash("sha512").update(bytes).digest("base64")}`;
+  if (actual !== runtimeLock.pi.integrity) {
+    throw new Error(`Pi tarball integrity mismatch for ${file}: got ${actual}`);
+  }
 }
 
 async function assertSha256(file, expected) {

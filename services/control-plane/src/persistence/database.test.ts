@@ -58,6 +58,8 @@ describe("database operations", () => {
           latest_summary: null,
           error_code: null,
           created_at: "2026-11-10T00:00:00.000Z",
+          updated_at: "2026-11-10T00:00:00.000Z",
+          attempt_count: 0,
           started_at: null,
           completed_at: null,
         })
